@@ -1,8 +1,38 @@
-export default function ProductsPage() {
+import { supabase } from "@/lib/supabase";
+
+export default async function ProductsPage() {
+  const { data: products, error } = await supabase
+    .from("products")
+    .select("*")
+    .order("id", { ascending: true });
+
+  if (error) {
+    return (
+      <main className="p-10">
+        <p>DB 오류: {error.message}</p>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-zinc-100 p-10 text-zinc-900">
+    <main className="p-10">
       <h1 className="text-3xl font-bold">Products</h1>
-      <p className="mt-2 text-zinc-500">상품 정보를 관리하는 페이지입니다.</p>
+
+      <div className="mt-8">
+        {products?.map((product) => (
+          <div
+            key={product.id}
+            className="mb-4 rounded-lg border bg-white p-5"
+          >
+            <h2 className="text-xl font-bold">{product.name}</h2>
+            <p className="mt-1 text-zinc-500">{product.brand}</p>
+            <p className="mt-3">
+              판매가: {product.selling_price?.toLocaleString()}원
+            </p>
+            <p>USP: {product.usp}</p>
+          </div>
+        ))}
+      </div>
     </main>
   );
 }
