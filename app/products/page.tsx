@@ -30,9 +30,10 @@ export default async function ProductsPage() {
 
       <div className="mt-8">
         {products?.map((product) => (
-          <div
+          <Link
             key={product.id}
-            className="mb-4 rounded-lg border bg-white p-5"
+            href={`/products/${product.id}`}
+            className="mb-4 block rounded-lg border bg-white p-5 hover:bg-zinc-50"
           >
             <h2 className="text-xl font-bold">{product.name}</h2>
             <p className="mt-1 text-zinc-500">{product.brand}</p>
@@ -40,7 +41,7 @@ export default async function ProductsPage() {
               판매가: {product.selling_price?.toLocaleString()}원
             </p>
             <p>USP: {product.usp}</p>
-          </div>
+          </Link>
         ))}
       </div>
     </main>
