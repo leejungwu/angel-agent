@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
 export default async function ProductsPage() {
@@ -16,7 +17,16 @@ export default async function ProductsPage() {
 
   return (
     <main className="p-10">
-      <h1 className="text-3xl font-bold">Products</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">Products</h1>
+
+        <Link
+          href="/products/new"
+          className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white"
+        >
+          새 상품 등록
+        </Link>
+      </div>
 
       <div className="mt-8">
         {products?.map((product) => (

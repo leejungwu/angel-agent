@@ -28,7 +28,7 @@ export default function RootLayout({
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable}`}
     >
-      <body>
+      <body suppressHydrationWarning>
         <div className="flex min-h-screen bg-zinc-100 text-zinc-900">
           <aside className="w-64 border-r border-zinc-200 bg-white p-6">
             <Link href="/">
