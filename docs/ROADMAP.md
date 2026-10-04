@@ -350,3 +350,56 @@ ANGEL AGENT evolves from an internal commerce tool into a company-specific AI op
 - Execute repetitive workflows
 - Select and call tools autonomously
 - Recommend next actions based on real business performance
+
+---
+
+## 19. Prompt & Skill Management
+
+- [ ] Prompt Template Library
+- [ ] Reusable Agent Skills
+- [ ] Prompt / Skill Version Management
+- [ ] Product-specific Prompts
+- [ ] Brand-specific Rules
+- [ ] Workflow Templates
+
+---
+
+## 20. Notifications & Approval
+
+- [ ] Slack Notifications
+- [ ] Email Notifications
+- [ ] Important Change Alerts
+- [ ] Human Approval Queue
+- [ ] Approval before Publishing / Ad Changes
+
+---
+
+## 21. External Knowledge Sources
+
+- [ ] Google Drive Integration
+- [ ] Local / Shared Folder Integration
+- [ ] Company Document Sync
+- [ ] Automatic Knowledge Base Update
+
+---
+
+## 22. Growth & Content Operations
+
+- [ ] Revenue Goal Planning
+- [ ] Content Calendar
+- [ ] Upload Schedule Planning
+- [ ] Content Performance Feedback Loop
+- [ ] Next Content Recommendation
+- [ ] Creative Testing Plan
+- [ ] A/B Test Management
+
+---
+
+## 23. System & Access Management
+
+- [ ] User Authentication
+- [ ] Internal User Roles
+- [ ] Permissions
+- [ ] Activity / Audit Logs
+- [ ] API Credential Management
+- [ ] Agent Execution History
