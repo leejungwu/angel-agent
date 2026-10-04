@@ -1,137 +1,53 @@
 # ANGEL AGENT
 
+Internal E-commerce AI Operating System for product management, VOC intelligence, advertising, content generation, commerce analytics, automation, and AI agent workflows.
+
 ## Features
 
-### Product Management
+### Product & Commerce
 - Product Knowledge Base
 - Product CRUD
-- USP / Target Customer / Customer Problem Management
-- Product Cost / Price / Margin Management
-- Product Asset Management
-
-### VOC Intelligence
-- CSV / XLSX Review Import
-- Review Database
-- AI VOC Analysis
-- Pain Point Extraction
-- Desire & Purchase Motivation Analysis
-- Customer Language Extraction
-- Product Improvement Insights
-- FAQ Generation
-
-### Advertising Intelligence
-- Ad Reference Library
-- Competitor Ad Management
-- Hook / Problem / Desire / Proof / CTA Analysis
-- Ad Structure Analysis
-- Product-to-Ad Reference Mapping
-
-### AI Content Generation
-- Ad Hook Generation
-- Ad Copy Generation
-- Short-form Video Scripts
-- Marketing Video Scripts
-- Threads Content
-- Instagram Content
-- Blog Content
-- Copy Variations
-
-### AI Detail Page
-- Detail Page Structure Generation
-- Sales Copy Generation
-- Section-based Page Planning
-- Image Prompt Generation
-- Brand Tone Application
-- React Template Rendering
-- Detail Page Preview
-- AI-assisted Editing
-
-### Product Sourcing
-- Sourcing Candidate Database
-- Supplier Management
-- Cost / MOQ / Margin Analysis
-- Competitor Product Analysis
-- Market Opportunity Analysis
-- AI Product Evaluation
-
-### Commerce Intelligence
-- Sales Dashboard
-- Order Analytics
-- Advertising Performance
-- ROAS / CPA Analysis
-- Product Profitability
-- Inventory Management
-- Margin Analysis
-- KPI Monitoring
-
-### Automation
-- Scheduled Data Collection
-- Webhook Processing
-- Sales Data Sync
-- Advertising Data Sync
-- Inventory Sync
-- Review Sync
-- Anomaly Detection
-- Inventory Alerts
-- Automated Reports
-
-### AI Agent
-- Product Retrieval
-- VOC Analysis
-- Ad Search & Analysis
-- Content Generation
-- Script Generation
-- Detail Page Generation
-- Sales Analysis
-- Inventory Analysis
-- Tool Calling
-- Multi-step Workflow Execution
-
-### Social & Generative AI
-- Threads Content Collection
-- Viral Content Analysis
-- Automated Social Publishing
-- AI Image Generation
-- AI Video Generation
-- Image / Video Prompt Generation
-
-### Commerce Operations
-- Product Cost Calculator
-- Import Cost / Exchange Rate / Fee Calculation
-- Margin & Profit Analysis
-- Product MAP Management
-- Sales Performance Analysis
-- Advertising Performance Analysis
+- Cost / Price / Margin Management
+- Sales / Order / Inventory Analytics
 - ROAS / CPA / CVR Tracking
 
-### Sourcing Intelligence
-- Supplier Database
-- Supplier Quote Comparison
-- MOQ / Cost / Lead Time Management
-- Supplier Monitoring
-- Competitor Product Monitoring
-- Product Research Automation
+### VOC & Market Intelligence
+- Review / VOC Analysis
+- Pain Point / Desire / Purchase Motivation Extraction
+- Competitor Product / Ad Monitoring
 - Market Opportunity Analysis
+- Supplier / Sourcing Intelligence
 
-### Data & File Operations
-- CSV / XLSX Import
-- PDF / Spreadsheet Data Extraction
-- Automatic File Classification
-- Bulk File Rename / Conversion
-- Product Image Batch Processing
-- Image Resize / Compression / WebP Conversion
-- Structured Data Mapping
+### Advertising & Content
+- Ad Reference Library
+- Hook / Copy / CTA Analysis
+- Ad Copy Generation
+- Short-form Video Scripts
+- Threads / Instagram / Blog Content
+- Viral Ad Recreation
 
-### Monitoring & Reporting
-- Competitor Price Monitoring
-- Promotion / Product Change Detection
-- Inventory Monitoring
+### Detail Page
+- Detail Page Structure Generation
+- Sales Copy Generation
+- Image Prompt Generation
+- React Template Rendering
+- AI-assisted Editing
+
+### Automation & Reporting
 - Scheduled Data Collection
-- Daily / Weekly Reports
-- KPI Monitoring
+- Commerce / Ads / Review Sync
+- Competitor / Supplier Monitoring
+- Automated Reports
 - Anomaly Detection
-- Automated Work Logs
-- Task & Workflow History
+- File / Document Processing
+
+### AI Agent
+- Natural Language Commands
+- Tool Calling
+- Multi-step Workflow Execution
+- Product / VOC / Ads / Sales Analysis
+- Content / Script / Detail Page Generation
+- MCP / OpenClaw Integration
 
 ---
 
@@ -139,37 +55,23 @@
 
 ```mermaid
 flowchart TD
-
     DATA[Company Data]
-    CORE[ANGEL AGENT]
     AI[GPT / Claude / Gemini]
-
-    OPS[Commerce Operations]
-    INTEL[Intelligence]
-    GEN[Content & Creative]
-    AUTO[Automation & Monitoring]
-
-    INFRA[Tool Calling / MCP]
-    EXT[OpenClaw / Codex / Claude Code]
+    CORE[ANGEL AGENT]
 
     DATA --> CORE
     AI --> CORE
 
-    CORE --> OPS
-    CORE --> INTEL
-    CORE --> GEN
-    CORE --> AUTO
+    CORE --> OPS[Commerce Operations]
+    CORE --> INTEL[VOC / Market / Ads Intelligence]
+    CORE --> GEN[Content / Detail Page / Media]
+    CORE --> AUTO[Automation / Monitoring / Reports]
 
-    OPS --> O1[Products / Cost / Margin / Inventory]
-    INTEL --> I1[VOC / Ads / Sourcing / Market Research]
-    GEN --> G1[Ads / Shorts / Detail Pages / Media]
-    AUTO --> A1[Monitoring / Sync / Reports / File Processing]
-
-    CORE --> INFRA
-    INFRA --> EXT
+    CORE --> MCP[Tool Calling / MCP]
+    MCP --> EXT[OpenClaw / Codex / Claude Code]
 ```
-    
 
+---
 
 ## Tech Stack
 
@@ -180,8 +82,6 @@ flowchart TD
 - Tailwind CSS
 
 ### Backend & Database
-- Next.js Server Components
-- Server Actions / Route Handlers
 - Supabase
 - PostgreSQL
 - Supabase Auth
@@ -194,7 +94,7 @@ flowchart TD
 - Structured Output
 - Tool Calling
 
-### Commerce & Marketing Integrations
+### Integrations
 - Cafe24 API
 - Naver Commerce API
 - Coupang API
@@ -202,18 +102,9 @@ flowchart TD
 - Google Ads API
 - Threads API
 
-### Automation
+### Automation & Agent
 - Cron Jobs
 - Webhooks
-- Background Workflows
-
-### Generative Media
-- Gemini Image
-- Kling
-- Veo
-- Seedance
-
-### Agent Infrastructure
 - MCP
 - OpenClaw
 - Codex
@@ -224,3 +115,8 @@ flowchart TD
 - Git
 - GitHub
 
+---
+
+## Roadmap
+
+See [`docs/ROADMAP.md`](docs/ROADMAP.md).
