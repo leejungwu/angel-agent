@@ -97,6 +97,39 @@
 
 ---
 
+## Architecture
+
+```mermaid
+flowchart TD
+    A[Product DB] --> B[VOC Intelligence]
+    A --> C[Ad Library]
+    A --> D[Detail Page Generator]
+    A --> E[Content Generator]
+    A --> F[Sourcing]
+
+    B --> E
+    B --> D
+    C --> E
+    F --> A
+
+    G[Commerce Data] --> H[Sales Dashboard]
+    G --> I[Automation]
+
+    E --> I
+    D --> I
+    H --> I
+
+    I --> J[AI Agent]
+    A --> J
+    B --> J
+    C --> J
+    D --> J
+    E --> J
+    H --> J
+
+    J --> K[Tool Calling / MCP / OpenClaw / Codex / Claude Code]
+
+
 ## Tech Stack
 
 ### Application
@@ -149,3 +182,4 @@
 - Vercel
 - Git
 - GitHub
+
