@@ -67,25 +67,27 @@ export default function EditProductPage() {
 }
 
     async function deleteProduct() {
-            const confirmed = confirm("정말 이 상품을 삭제하시겠습니까?");
+        const confirmed = confirm("정말 이 상품을 삭제하시겠습니까?");
 
-        if (!confirmed) {
-            return;
-        }
+    if (!confirmed) {
+        return;
+    }
 
-        const { error } = await supabase
-            .from("products")
-            .delete()
-            .eq("id", Number(id));
+    const { data, error } = await supabase
+    .from("products")
+    .delete()
+    .eq("id", Number(id))
+    .select()
+    .single();
 
-        if (error) {
-            alert(error.message);
-            return;
-        }
+    if (error) {
+        alert(error.message);
+        return;
+    }
 
-        alert("상품이 삭제되었습니다.");
-        router.push("/products");
-        router.refresh();
+    alert(`삭제 완료: ${data.name}`);
+    router.push("/products");
+    router.refresh();
     }
 
 return (
