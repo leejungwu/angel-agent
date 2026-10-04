@@ -128,6 +128,8 @@ flowchart TD
     H --> J
 
     J --> K[Tool Calling / MCP / OpenClaw / Codex / Claude Code]
+```
+    
 
 
 ## Tech Stack
