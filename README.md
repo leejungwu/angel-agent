@@ -95,6 +95,44 @@
 - AI Video Generation
 - Image / Video Prompt Generation
 
+### Commerce Operations
+- Product Cost Calculator
+- Import Cost / Exchange Rate / Fee Calculation
+- Margin & Profit Analysis
+- Product MAP Management
+- Sales Performance Analysis
+- Advertising Performance Analysis
+- ROAS / CPA / CVR Tracking
+
+### Sourcing Intelligence
+- Supplier Database
+- Supplier Quote Comparison
+- MOQ / Cost / Lead Time Management
+- Supplier Monitoring
+- Competitor Product Monitoring
+- Product Research Automation
+- Market Opportunity Analysis
+
+### Data & File Operations
+- CSV / XLSX Import
+- PDF / Spreadsheet Data Extraction
+- Automatic File Classification
+- Bulk File Rename / Conversion
+- Product Image Batch Processing
+- Image Resize / Compression / WebP Conversion
+- Structured Data Mapping
+
+### Monitoring & Reporting
+- Competitor Price Monitoring
+- Promotion / Product Change Detection
+- Inventory Monitoring
+- Scheduled Data Collection
+- Daily / Weekly Reports
+- KPI Monitoring
+- Anomaly Detection
+- Automated Work Logs
+- Task & Workflow History
+
 ---
 
 ## Architecture
@@ -106,24 +144,43 @@ flowchart TD
         P[Product DB]
         V[VOC / Reviews]
         A[Ad Library]
-        S[Sourcing]
+        S[Supplier / Sourcing Data]
         C[Commerce Data]
+        F[Files / Documents]
+        M[Market / Competitor Data]
     end
 
-    subgraph INTELLIGENCE[AI Intelligence]
+    subgraph CORE[ANGEL AGENT Core]
         AGENT[ANGEL AGENT]
+        AI[GPT / Claude / Gemini]
     end
 
-    subgraph OUTPUT[Execution & Generation]
+    subgraph OPERATIONS[Commerce Operations]
+        COST[Cost / Margin Calculator]
+        MAP[Product MAP]
+        SALES[Sales / Ad Analytics]
+        INVENTORY[Inventory Management]
+    end
+
+    subgraph GENERATION[AI Generation]
         CONTENT[Content Generator]
+        SCRIPT[Ad / Shorts Studio]
         DETAIL[Detail Page Generator]
-        SALES[Sales Dashboard]
-        AUTO[Automation]
+        MEDIA[Image / Video Workflow]
+    end
+
+    subgraph AUTOMATION[Automation & Monitoring]
+        MONITOR[Supplier / Competitor Monitoring]
+        SYNC[Data Sync]
+        REPORT[Automated Reports]
+        ANOMALY[Anomaly Detection]
+        FILEOPS[File Processing]
     end
 
     subgraph INFRA[Agent Infrastructure]
         TOOLS[Tool Calling / MCP]
-        CLIENTS[OpenClaw / Codex / Claude Code]
+        OPENCLAW[OpenClaw]
+        DEV[Codex / Claude Code]
     end
 
     P --> AGENT
@@ -131,14 +188,30 @@ flowchart TD
     A --> AGENT
     S --> AGENT
     C --> AGENT
+    F --> AGENT
+    M --> AGENT
+
+    AI --> AGENT
+
+    AGENT --> COST
+    AGENT --> MAP
+    AGENT --> SALES
+    AGENT --> INVENTORY
 
     AGENT --> CONTENT
+    AGENT --> SCRIPT
     AGENT --> DETAIL
-    AGENT --> SALES
-    AGENT --> AUTO
+    AGENT --> MEDIA
+
+    AGENT --> MONITOR
+    AGENT --> SYNC
+    AGENT --> REPORT
+    AGENT --> ANOMALY
+    AGENT --> FILEOPS
 
     AGENT --> TOOLS
-    TOOLS --> CLIENTS
+    TOOLS --> OPENCLAW
+    TOOLS --> DEV
 ```
     
 
