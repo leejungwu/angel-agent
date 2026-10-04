@@ -1,3 +1,4 @@
+import DeleteProductButton from "./DeleteProductButton";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -27,12 +28,16 @@ export default async function ProductDetailPage({
           <p className="mt-2 text-zinc-500">{product.brand}</p>
         </div>
 
+        <div className="flex gap-2">
         <Link
           href={`/products/${product.id}/edit`}
           className="rounded-lg bg-black px-4 py-2 text-white"
         >
           수정
         </Link>
+
+        <DeleteProductButton id={product.id} />
+      </div>
       </div>
 
       <div className="mt-8 max-w-2xl rounded-xl border bg-white p-6">
