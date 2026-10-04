@@ -101,33 +101,44 @@
 
 ```mermaid
 flowchart TD
-    A[Product DB] --> B[VOC Intelligence]
-    A --> C[Ad Library]
-    A --> D[Detail Page Generator]
-    A --> E[Content Generator]
-    A --> F[Sourcing]
 
-    B --> E
-    B --> D
-    C --> E
-    F --> A
+    subgraph DATA[Data & Knowledge]
+        P[Product DB]
+        V[VOC / Reviews]
+        A[Ad Library]
+        S[Sourcing]
+        C[Commerce Data]
+    end
 
-    G[Commerce Data] --> H[Sales Dashboard]
-    G --> I[Automation]
+    subgraph INTELLIGENCE[AI Intelligence]
+        AGENT[ANGEL AGENT]
+    end
 
-    E --> I
-    D --> I
-    H --> I
+    subgraph OUTPUT[Execution & Generation]
+        CONTENT[Content Generator]
+        DETAIL[Detail Page Generator]
+        SALES[Sales Dashboard]
+        AUTO[Automation]
+    end
 
-    I --> J[AI Agent]
-    A --> J
-    B --> J
-    C --> J
-    D --> J
-    E --> J
-    H --> J
+    subgraph INFRA[Agent Infrastructure]
+        TOOLS[Tool Calling / MCP]
+        CLIENTS[OpenClaw / Codex / Claude Code]
+    end
 
-    J --> K[Tool Calling / MCP / OpenClaw / Codex / Claude Code]
+    P --> AGENT
+    V --> AGENT
+    A --> AGENT
+    S --> AGENT
+    C --> AGENT
+
+    AGENT --> CONTENT
+    AGENT --> DETAIL
+    AGENT --> SALES
+    AGENT --> AUTO
+
+    AGENT --> TOOLS
+    TOOLS --> CLIENTS
 ```
     
 
