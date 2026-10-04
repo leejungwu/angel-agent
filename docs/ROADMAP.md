@@ -152,6 +152,10 @@
 - [ ] Brand Tone Application
 - [ ] Image Prompt Generation
 - [ ] Product Image Generation
+- [ ] Product Image Generation
+- [ ] Figma Integration
+- [ ] AI-to-Figma Detail Page Workflow
+- [ ] Figma Design Handoff
 - [ ] React Template Rendering
 - [ ] Detail Page Preview
 - [ ] AI-assisted Editing
