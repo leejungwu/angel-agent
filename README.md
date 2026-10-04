@@ -1,36 +1,151 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ANGEL AGENT
 
-## Getting Started
+## Features
 
-First, run the development server:
+### Product Management
+- Product Knowledge Base
+- Product CRUD
+- USP / Target Customer / Customer Problem Management
+- Product Cost / Price / Margin Management
+- Product Asset Management
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+### VOC Intelligence
+- CSV / XLSX Review Import
+- Review Database
+- AI VOC Analysis
+- Pain Point Extraction
+- Desire & Purchase Motivation Analysis
+- Customer Language Extraction
+- Product Improvement Insights
+- FAQ Generation
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Advertising Intelligence
+- Ad Reference Library
+- Competitor Ad Management
+- Hook / Problem / Desire / Proof / CTA Analysis
+- Ad Structure Analysis
+- Product-to-Ad Reference Mapping
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### AI Content Generation
+- Ad Hook Generation
+- Ad Copy Generation
+- Short-form Video Scripts
+- Marketing Video Scripts
+- Threads Content
+- Instagram Content
+- Blog Content
+- Copy Variations
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### AI Detail Page
+- Detail Page Structure Generation
+- Sales Copy Generation
+- Section-based Page Planning
+- Image Prompt Generation
+- Brand Tone Application
+- React Template Rendering
+- Detail Page Preview
+- AI-assisted Editing
 
-## Learn More
+### Product Sourcing
+- Sourcing Candidate Database
+- Supplier Management
+- Cost / MOQ / Margin Analysis
+- Competitor Product Analysis
+- Market Opportunity Analysis
+- AI Product Evaluation
 
-To learn more about Next.js, take a look at the following resources:
+### Commerce Intelligence
+- Sales Dashboard
+- Order Analytics
+- Advertising Performance
+- ROAS / CPA Analysis
+- Product Profitability
+- Inventory Management
+- Margin Analysis
+- KPI Monitoring
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Automation
+- Scheduled Data Collection
+- Webhook Processing
+- Sales Data Sync
+- Advertising Data Sync
+- Inventory Sync
+- Review Sync
+- Anomaly Detection
+- Inventory Alerts
+- Automated Reports
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### AI Agent
+- Product Retrieval
+- VOC Analysis
+- Ad Search & Analysis
+- Content Generation
+- Script Generation
+- Detail Page Generation
+- Sales Analysis
+- Inventory Analysis
+- Tool Calling
+- Multi-step Workflow Execution
 
-## Deploy on Vercel
+### Social & Generative AI
+- Threads Content Collection
+- Viral Content Analysis
+- Automated Social Publishing
+- AI Image Generation
+- AI Video Generation
+- Image / Video Prompt Generation
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Tech Stack
+
+### Application
+- Next.js 16
+- React
+- TypeScript
+- Tailwind CSS
+
+### Backend & Database
+- Next.js Server Components
+- Server Actions / Route Handlers
+- Supabase
+- PostgreSQL
+- Supabase Auth
+- Supabase Storage
+
+### AI
+- OpenAI API
+- Anthropic Claude API
+- Google Gemini API
+- Structured Output
+- Tool Calling
+
+### Commerce & Marketing Integrations
+- Cafe24 API
+- Naver Commerce API
+- Coupang API
+- Meta Marketing API
+- Google Ads API
+- Threads API
+
+### Automation
+- Cron Jobs
+- Webhooks
+- Background Workflows
+
+### Generative Media
+- Gemini Image
+- Kling
+- Veo
+- Seedance
+
+### Agent Infrastructure
+- MCP
+- OpenClaw
+- Codex
+- Claude Code
+
+### Infrastructure
+- Vercel
+- Git
+- GitHub
