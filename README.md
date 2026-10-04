@@ -140,78 +140,33 @@
 ```mermaid
 flowchart TD
 
-    subgraph DATA[Data & Knowledge]
-        P[Product DB]
-        V[VOC / Reviews]
-        A[Ad Library]
-        S[Supplier / Sourcing Data]
-        C[Commerce Data]
-        F[Files / Documents]
-        M[Market / Competitor Data]
-    end
+    DATA[Company Data]
+    CORE[ANGEL AGENT]
+    AI[GPT / Claude / Gemini]
 
-    subgraph CORE[ANGEL AGENT Core]
-        AGENT[ANGEL AGENT]
-        AI[GPT / Claude / Gemini]
-    end
+    OPS[Commerce Operations]
+    INTEL[Intelligence]
+    GEN[Content & Creative]
+    AUTO[Automation & Monitoring]
 
-    subgraph OPERATIONS[Commerce Operations]
-        COST[Cost / Margin Calculator]
-        MAP[Product MAP]
-        SALES[Sales / Ad Analytics]
-        INVENTORY[Inventory Management]
-    end
+    INFRA[Tool Calling / MCP]
+    EXT[OpenClaw / Codex / Claude Code]
 
-    subgraph GENERATION[AI Generation]
-        CONTENT[Content Generator]
-        SCRIPT[Ad / Shorts Studio]
-        DETAIL[Detail Page Generator]
-        MEDIA[Image / Video Workflow]
-    end
+    DATA --> CORE
+    AI --> CORE
 
-    subgraph AUTOMATION[Automation & Monitoring]
-        MONITOR[Supplier / Competitor Monitoring]
-        SYNC[Data Sync]
-        REPORT[Automated Reports]
-        ANOMALY[Anomaly Detection]
-        FILEOPS[File Processing]
-    end
+    CORE --> OPS
+    CORE --> INTEL
+    CORE --> GEN
+    CORE --> AUTO
 
-    subgraph INFRA[Agent Infrastructure]
-        TOOLS[Tool Calling / MCP]
-        OPENCLAW[OpenClaw]
-        DEV[Codex / Claude Code]
-    end
+    OPS --> O1[Products / Cost / Margin / Inventory]
+    INTEL --> I1[VOC / Ads / Sourcing / Market Research]
+    GEN --> G1[Ads / Shorts / Detail Pages / Media]
+    AUTO --> A1[Monitoring / Sync / Reports / File Processing]
 
-    P --> AGENT
-    V --> AGENT
-    A --> AGENT
-    S --> AGENT
-    C --> AGENT
-    F --> AGENT
-    M --> AGENT
-
-    AI --> AGENT
-
-    AGENT --> COST
-    AGENT --> MAP
-    AGENT --> SALES
-    AGENT --> INVENTORY
-
-    AGENT --> CONTENT
-    AGENT --> SCRIPT
-    AGENT --> DETAIL
-    AGENT --> MEDIA
-
-    AGENT --> MONITOR
-    AGENT --> SYNC
-    AGENT --> REPORT
-    AGENT --> ANOMALY
-    AGENT --> FILEOPS
-
-    AGENT --> TOOLS
-    TOOLS --> OPENCLAW
-    TOOLS --> DEV
+    CORE --> INFRA
+    INFRA --> EXT
 ```
     
 
