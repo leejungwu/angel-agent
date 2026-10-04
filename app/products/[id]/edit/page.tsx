@@ -1,11 +1,12 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation"; 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 export default function EditProductPage() {
   const params = useParams();
+  const router = useRouter();
   const id = params.id as string;
 
   const [name, setName] = useState("");
@@ -40,6 +41,52 @@ export default function EditProductPage() {
 
     loadProduct();
   }, [id]);
+
+  async function updateProduct() {
+    const { data, error } = await supabase
+    .from("products")
+    .update({
+        name: name,
+        brand: brand,
+        selling_price: Number(sellingPrice),
+        cost_price: Number(costPrice),
+        usp: usp,
+    })
+    .eq("id", Number(id))
+    .select()
+    .single();
+
+    if (error) {
+    alert(error.message);
+    return;
+    }
+
+  alert(`수정 완료: ${data.name}`);
+  router.push(`/products/${id}`);
+  router.refresh();
+}
+
+    async function deleteProduct() {
+            const confirmed = confirm("정말 이 상품을 삭제하시겠습니까?");
+
+        if (!confirmed) {
+            return;
+        }
+
+        const { error } = await supabase
+            .from("products")
+            .delete()
+            .eq("id", Number(id));
+
+        if (error) {
+            alert(error.message);
+            return;
+        }
+
+        alert("상품이 삭제되었습니다.");
+        router.push("/products");
+        router.refresh();
+    }
 
 return (
   <main className="p-10">
@@ -109,12 +156,20 @@ return (
             />
           </div>
 
-          <button
-            className="rounded-lg bg-black px-5 py-3 font-medium text-white"
-          >
-            수정 저장
-          </button>
+        
+            <button
+                className="rounded-lg bg-black px-5 py-3 font-medium text-white"
+                onClick={updateProduct} 
+            >
+                수정
+            </button>
 
+            <button
+                onClick={deleteProduct}
+                className="rounded-lg border border-red-500 px-4 py-2 text-red-500"
+                >
+                삭제
+            </button>
         </div>
       </div>
     </div>
