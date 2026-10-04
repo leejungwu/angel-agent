@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -20,12 +21,25 @@ export default async function ProductDetailPage({
 
   return (
     <main className="p-10">
-      <h1 className="text-3xl font-bold">{product.name}</h1>
-      <p className="mt-2 text-zinc-500">{product.brand}</p>
+      <div className="flex items-center justify-between max-w-2xl">
+        <div>
+          <h1 className="text-3xl font-bold">{product.name}</h1>
+          <p className="mt-2 text-zinc-500">{product.brand}</p>
+        </div>
+
+        <Link
+          href={`/products/${product.id}/edit`}
+          className="rounded-lg bg-black px-4 py-2 text-white"
+        >
+          수정
+        </Link>
+      </div>
 
       <div className="mt-8 max-w-2xl rounded-xl border bg-white p-6">
         <p>판매가: {product.selling_price?.toLocaleString()}원</p>
-        <p className="mt-2">원가: {product.cost_price?.toLocaleString()}원</p>
+        <p className="mt-2">
+          원가: {product.cost_price?.toLocaleString()}원
+        </p>
         <p className="mt-2">USP: {product.usp}</p>
       </div>
     </main>
