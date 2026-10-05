@@ -1,0 +1,85 @@
+export const dynamic = "force-dynamic";
+
+import { notFound } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+
+type BlogTask = {
+  id: string | number;
+  product_id: string | number | null;
+  keyword: string | null;
+  topic: string | null;
+  purpose: string | null;
+  instructions: string | null;
+  status: string | null;
+  created_at: string | null;
+};
+
+type Product = {
+  name: string | null;
+  brand: string | null;
+};
+
+export default async function BlogTaskDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const { data: task, error: taskError } = await supabase
+    .from("blog_tasks")
+    .select("id, product_id, keyword, topic, purpose, instructions, status, created_at")
+    .eq("id", id)
+    .maybeSingle()
+    .returns<BlogTask>();
+
+  // Invalid numeric or UUID identifiers cannot refer to an existing task.
+  if (taskError?.code === "22P02" || (!taskError && !task)) {
+    notFound();
+  }
+
+  let product: Product | null = null;
+  let errorMessage = taskError?.message;
+
+  if (task && !taskError && task.product_id != null) {
+    const { data, error } = await supabase
+      .from("products")
+      .select("name, brand")
+      .eq("id", task.product_id)
+      .maybeSingle()
+      .returns<Product>();
+
+    product = data;
+    errorMessage = error?.message;
+  }
+
+  return (
+    <main className="p-10">
+      <h1 className="text-3xl font-bold">블로그 작업 상세</h1>
+
+      <div className="mt-8 max-w-2xl rounded-xl border bg-white p-6">
+        {errorMessage ? (
+          <p role="alert">DB 오류: {errorMessage}</p>
+        ) : task ? (
+          <>
+            <p>상품명: {product?.name || "-"}</p>
+            <p className="mt-2">브랜드: {product?.brand || "-"}</p>
+            <p className="mt-2">키워드: {task.keyword || "-"}</p>
+            <p className="mt-2 whitespace-pre-wrap">주제: {task.topic || "-"}</p>
+            <p className="mt-2 whitespace-pre-wrap">목적: {task.purpose || "-"}</p>
+            <p className="mt-2 whitespace-pre-wrap">
+              추가 지시사항: {task.instructions || "-"}
+            </p>
+            <p className="mt-2">상태: {task.status || "-"}</p>
+            <p className="mt-2">
+              생성일: {task.created_at
+                ? new Date(task.created_at).toLocaleString("ko-KR", {
+                    timeZone: "Asia/Seoul",
+                  })
+                : "-"}
+            </p>
+          </>
+        ) : null}
+      </div>
+    </main>
+  );
+}
