@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import PublishingStatusControl, { type PublishingStatus } from "./PublishingStatusControl";
 
 type ApprovedDraft = {
   id: string | number;
@@ -9,6 +10,7 @@ type ApprovedDraft = {
   product_id: string | number | null;
   title: string | null;
   status: string;
+  publishing_status: PublishingStatus;
   model: string | null;
   created_at: string | null;
 };
@@ -23,7 +25,7 @@ type TaskInfo = {
 export default async function PublishingQueuePage() {
   const { data: drafts, error } = await supabase
     .from("blog_drafts")
-    .select("id, blog_task_id, product_id, title, status, model, created_at")
+    .select("id, blog_task_id, product_id, title, status, publishing_status, model, created_at")
     .eq("status", "approved")
     .order("created_at", { ascending: false })
     .returns<ApprovedDraft[]>();
@@ -72,10 +74,10 @@ export default async function PublishingQueuePage() {
         ) : drafts.map((draft) => {
           const task = tasksById.get(String(draft.blog_task_id));
           return (
+            <article key={draft.id} className="mb-4 rounded-lg border bg-white p-5">
             <Link
-              key={draft.id}
               href={`/content/blog/${draft.blog_task_id}`}
-              className="mb-4 block rounded-lg border bg-white p-5 hover:bg-zinc-50"
+              className="block hover:bg-zinc-50"
             >
               <h2 className="text-xl font-bold">{draft.title || "-"}</h2>
               <p className="mt-1 text-zinc-500">
@@ -92,6 +94,12 @@ export default async function PublishingQueuePage() {
                   : "-"}
               </p>
             </Link>
+              <PublishingStatusControl
+                key={`${draft.id}:${draft.publishing_status ?? "none"}`}
+                draftId={draft.id}
+                initialStatus={draft.publishing_status}
+              />
+            </article>
           );
         })}
       </div>
