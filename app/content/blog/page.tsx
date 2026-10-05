@@ -50,12 +50,20 @@ export default async function BlogPage() {
     <main className="p-10">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">AI Blog</h1>
-        <Link
-          href="/content/blog/new"
-          className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white"
-        >
-          새 블로그 작업
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            href="/content/blog/publishing"
+            className="rounded-lg border bg-white px-4 py-2 text-sm font-medium"
+          >
+            Publishing Queue
+          </Link>
+          <Link
+            href="/content/blog/new"
+            className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white"
+          >
+            새 블로그 작업
+          </Link>
+        </div>
       </div>
 
       <div className="mt-8">
