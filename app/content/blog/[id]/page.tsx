@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import GenerateBlogDraft from "./GenerateBlogDraft";
+import GenerateBlogDraft, { type Draft } from "./GenerateBlogDraft";
 
 type BlogTask = {
   id: string | number;
@@ -53,6 +53,24 @@ export default async function BlogTaskDetailPage({
     errorMessage = error?.message;
   }
 
+  let initialDraft: Draft | null = null;
+  let draftErrorMessage: string | undefined;
+
+  if (task && !errorMessage) {
+    const { data, error } = await supabase
+      .from("blog_drafts")
+      .select("id, title, intro, sections, closing, status, model, created_at")
+      .eq("blog_task_id", task.id)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .returns<Draft>();
+
+    initialDraft = data;
+    draftErrorMessage = error?.message;
+  }
+
   return (
     <main className="p-10">
       <h1 className="text-3xl font-bold">블로그 작업 상세</h1>
@@ -81,8 +99,17 @@ export default async function BlogTaskDetailPage({
           </>
         ) : null}
       </div>
+      {draftErrorMessage && (
+        <p role="alert" className="mt-4 text-red-600">
+          초안 조회 오류: {draftErrorMessage}
+        </p>
+      )}
       {task && !errorMessage && (
-        <GenerateBlogDraft key={task.id} taskId={Number(task.id)} />
+        <GenerateBlogDraft
+          key={`${task.id}:${initialDraft?.id ?? "none"}`}
+          taskId={Number(task.id)}
+          initialDraft={initialDraft}
+        />
       )}
     </main>
   );

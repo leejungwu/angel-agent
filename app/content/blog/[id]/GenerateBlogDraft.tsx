@@ -3,11 +3,15 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Draft = {
+export type Draft = {
   title: string;
   intro: string;
   sections: { heading: string; body: string }[];
   closing: string;
+  id?: string | number;
+  status?: string | null;
+  model?: string | null;
+  created_at?: string | null;
 };
 
 function isDraft(value: unknown): value is Draft {
@@ -24,10 +28,16 @@ function isDraft(value: unknown): value is Draft {
     });
 }
 
-export default function GenerateBlogDraft({ taskId }: { taskId: number }) {
+export default function GenerateBlogDraft({
+  taskId,
+  initialDraft = null,
+}: {
+  taskId: number;
+  initialDraft?: Draft | null;
+}) {
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(initialDraft);
   const inFlight = useRef(false);
 
   async function generateDraft() {
@@ -58,7 +68,11 @@ export default function GenerateBlogDraft({ taskId }: { taskId: number }) {
         return;
       }
 
-      setDraft(data.draft);
+      setDraft({
+        ...data.draft,
+        id: typeof data.draftId === "number" ? data.draftId : undefined,
+        status: "draft",
+      });
       router.refresh();
     } catch {
       alert("AI 초안 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.");
@@ -76,13 +90,20 @@ export default function GenerateBlogDraft({ taskId }: { taskId: number }) {
         disabled={generating}
         className="rounded-lg bg-black px-4 py-2 text-white disabled:opacity-50"
       >
-        {generating ? "생성 중..." : "AI 초안 생성"}
+        {generating ? "생성 중..." : draft ? "AI 초안 재생성" : "AI 초안 생성"}
       </button>
 
       <div aria-live="polite" aria-busy={generating}>
         {draft && (
           <article className="mt-6 rounded-xl border bg-white p-6">
             <h2 className="text-xl font-bold">{draft.title}</h2>
+            <p className="mt-2 text-sm text-zinc-500">
+              상태: {draft.status || "-"} · 모델: {draft.model || "-"} · 생성일: {draft.created_at
+                ? new Date(draft.created_at).toLocaleString("ko-KR", {
+                    timeZone: "Asia/Seoul",
+                  })
+                : "-"}
+            </p>
             <section className="mt-6">
               <h3 className="font-semibold">도입</h3>
               <p className="mt-2 whitespace-pre-wrap break-words">{draft.intro}</p>
