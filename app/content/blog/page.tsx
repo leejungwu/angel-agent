@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import DeleteBlogTaskButton from "./DeleteBlogTaskButton";
 
 type BlogTask = {
   id: string | number;
@@ -73,10 +74,10 @@ export default async function BlogPage() {
           <p className="text-zinc-500">아직 생성된 블로그 작업이 없습니다.</p>
         ) : (
           tasks.map((task) => (
+            <article key={task.id} className="mb-4 rounded-lg border bg-white p-5">
             <Link
-              key={task.id}
               href={`/content/blog/${task.id}`}
-              className="mb-4 block rounded-lg border bg-white p-5 hover:bg-zinc-50"
+              className="block hover:bg-zinc-50"
             >
               <h2 className="text-xl font-bold">
                 상품명: {productNames.get(String(task.product_id)) ?? "상품 정보 없음"}
@@ -93,6 +94,10 @@ export default async function BlogPage() {
                   : "-"}
               </p>
             </Link>
+              <div className="mt-4">
+                <DeleteBlogTaskButton taskId={task.id} />
+              </div>
+            </article>
           ))
         )}
       </div>

@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import GenerateBlogDraft, { type Draft } from "./GenerateBlogDraft";
+import DeleteBlogTaskButton from "../DeleteBlogTaskButton";
 
 type BlogTask = {
   id: string | number;
@@ -73,7 +74,10 @@ export default async function BlogTaskDetailPage({
 
   return (
     <main className="p-10">
-      <h1 className="text-3xl font-bold">블로그 작업 상세</h1>
+      <div className="flex max-w-2xl items-center justify-between">
+        <h1 className="text-3xl font-bold">블로그 작업 상세</h1>
+        {task && !taskError && <DeleteBlogTaskButton taskId={task.id} redirectToList />}
+      </div>
 
       <div className="mt-8 max-w-2xl rounded-xl border bg-white p-6">
         {errorMessage ? (
