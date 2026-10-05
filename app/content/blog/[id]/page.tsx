@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import GenerateBlogDraft from "./GenerateBlogDraft";
 
 type BlogTask = {
   id: string | number;
@@ -80,6 +81,9 @@ export default async function BlogTaskDetailPage({
           </>
         ) : null}
       </div>
+      {task && !errorMessage && (
+        <GenerateBlogDraft key={task.id} taskId={Number(task.id)} />
+      )}
     </main>
   );
 }
