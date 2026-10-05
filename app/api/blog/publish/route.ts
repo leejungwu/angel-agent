@@ -134,8 +134,6 @@ export async function POST(request: Request) {
       .update({
         publishing_status: "publishing",
         publishing_error: null,
-        published_url: null,
-        published_at: null,
       })
       .eq("id", draft.id)
       .eq("status", "approved")
@@ -170,11 +168,24 @@ export async function POST(request: Request) {
     stage = "editor input";
     await fillNaverBlogDraft(publisherInput, { page, writeUrl: url.href });
     // Keep the context AND page open for a person to review/publish manually.
-    // DB remains publishing until an explicit result is recorded; input is not publication.
+    // Input completion is review readiness, not publication.
+    stage = "review status update";
+    const { data: reviewDraft, error: reviewError } = await supabase
+      .from("blog_drafts")
+      .update({ publishing_status: "ready_for_review", publishing_error: null })
+      .eq("id", draft.id)
+      .eq("status", "approved")
+      .eq("publishing_status", "publishing")
+      .select("id, publishing_status")
+      .maybeSingle();
+    if (reviewError) logFailure(stage, reviewError);
+    if (reviewError || !reviewDraft) {
+      throw new Error("입력 완료 후 검수 대기 상태를 저장하지 못했습니다.");
+    }
     return Response.json({
       ok: true,
-      draftId: updatedDraft.id,
-      publishingStatus: "publishing",
+      draftId: reviewDraft.id,
+      publishingStatus: "ready_for_review",
       result: "ready_for_review",
       published: false,
     });
@@ -184,7 +195,7 @@ export async function POST(request: Request) {
     if (claimed) {
       const publishingError = error instanceof NaverBlogInputError
         ? `네이버 초안 자동입력 실패 (${error.stage}). 서버 로그를 확인해 주세요.`
-        : `${stage}: ${stage === "draft validation" || stage === "publisher configuration"
+        : `${stage}: ${stage === "draft validation" || stage === "publisher configuration" || stage === "review status update"
           ? (error instanceof Error ? error.message : "검증 실패")
           : "네이버 입력 준비 중 오류가 발생했습니다. 서버 로그를 확인해 주세요."}`;
       try {

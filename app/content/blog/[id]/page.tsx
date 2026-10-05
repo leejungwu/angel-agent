@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import GenerateBlogDraft, { type Draft } from "./GenerateBlogDraft";
 import DeleteBlogTaskButton from "../DeleteBlogTaskButton";
+import EditBlogTask from "./EditBlogTask";
 
 type BlogTask = {
   id: string | number;
@@ -86,12 +87,16 @@ export default async function BlogTaskDetailPage({
           <>
             <p>상품명: {product?.name || "-"}</p>
             <p className="mt-2">브랜드: {product?.brand || "-"}</p>
-            <p className="mt-2">키워드: {task.keyword || "-"}</p>
-            <p className="mt-2 whitespace-pre-wrap">주제: {task.topic || "-"}</p>
-            <p className="mt-2 whitespace-pre-wrap">목적: {task.purpose || "-"}</p>
-            <p className="mt-2 whitespace-pre-wrap">
-              추가 지시사항: {task.instructions || "-"}
-            </p>
+            <EditBlogTask
+              key={task.id}
+              taskId={task.id}
+              initialFields={{
+                keyword: task.keyword,
+                topic: task.topic,
+                purpose: task.purpose,
+                instructions: task.instructions,
+              }}
+            />
             <p className="mt-2">상태: {task.status || "-"}</p>
             <p className="mt-2">
               생성일: {task.created_at

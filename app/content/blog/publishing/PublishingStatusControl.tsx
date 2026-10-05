@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-export type PublishingStatus = null | "queued" | "publishing" | "published" | "failed";
+export type PublishingStatus = null | "queued" | "publishing" | "ready_for_review" | "published" | "failed";
 
 export default function PublishingStatusControl({
   draftId,
@@ -20,21 +20,24 @@ export default function PublishingStatusControl({
   const inFlight = useRef(false);
 
   async function toggleQueue() {
-    if (inFlight.current || (status !== null && status !== "queued")) return;
+    if (inFlight.current || (status !== null && status !== "queued" && status !== "failed")) return;
     inFlight.current = true;
     setUpdating(true);
-    const nextStatus = status === null ? "queued" : null;
+    const nextStatus = status === "queued" ? null : "queued";
 
     try {
       let query = supabase
         .from("blog_drafts")
-        .update({ publishing_status: nextStatus })
+        .update({
+          publishing_status: nextStatus,
+          ...(status === "failed" ? { publishing_error: null } : {}),
+        })
         .eq("id", draftId)
         .eq("status", "approved");
 
       query = status === null
         ? query.is("publishing_status", null)
-        : query.eq("publishing_status", "queued");
+        : query.eq("publishing_status", status);
 
       const { data, error } = await query
         .select("id, publishing_status")
@@ -86,32 +89,36 @@ export default function PublishingStatusControl({
           ? data.error : "발행 시작에 실패했습니다.");
         return;
       }
-      if (data.publishingStatus !== "publishing") {
+      if (data.publishingStatus !== "ready_for_review" || data.result !== "ready_for_review" || data.published !== false) {
         alert("발행 시작에 실패했습니다.");
         return;
       }
 
-      setStatus("publishing");
-      router.refresh();
+      setStatus("ready_for_review");
     } catch {
       alert("발행 시작에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       inFlight.current = false;
       setStarting(false);
+      // Also reload failed/conflicting responses so the retry button appears promptly.
+      router.refresh();
     }
   }
 
   return (
     <div className="mt-3" aria-live="polite" aria-busy={updating || starting}>
-      <p className="text-sm text-zinc-500">발행 상태: {status ?? "미등록"}</p>
-      {(status === null || status === "queued") && (
+      <p className="text-sm text-zinc-500">
+        발행 상태: {status === "ready_for_review" ? "입력 완료 · 최종 검수 대기" : status ?? "미등록"}
+      </p>
+      {(status === null || status === "queued" || status === "failed") && (
         <button
           type="button"
           onClick={toggleQueue}
           disabled={updating || starting}
           className="mt-2 rounded-lg border bg-white px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
-          {updating ? "변경 중..." : status === null ? "발행 대기 등록" : "발행 대기 해제"}
+          {updating ? "변경 중..." : status === "failed" ? "다시 시도"
+            : status === null ? "발행 대기 등록" : "발행 대기 해제"}
         </button>
       )}
       {status === "queued" && (
