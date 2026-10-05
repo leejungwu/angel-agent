@@ -41,7 +41,7 @@ export default function RootLayout({
               <span>Sourcing</span>
               <span>VOC</span>
               <span>Ads</span>
-              <span>Content</span>
+              <Link href="/content/blog">Content</Link>
               <span>Sales</span>
               <span>Settings</span>
             </nav>
