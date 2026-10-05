@@ -42,6 +42,7 @@ export default function GenerateBlogDraft({
   const [editingDraft, setEditingDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [changingStatus, setChangingStatus] = useState(false);
   const inFlight = useRef(false);
 
   async function generateDraft() {
@@ -136,12 +137,42 @@ export default function GenerateBlogDraft({
     }
   }
 
+  async function changeStatus(status: "draft" | "approved" | "rejected") {
+    if (!draft || draft.id == null || editingDraft || inFlight.current) return;
+    inFlight.current = true;
+    setChangingStatus(true);
+    setSaved(false);
+
+    try {
+      const { data, error } = await supabase
+        .from("blog_drafts")
+        .update({ status })
+        .eq("id", draft.id)
+        .eq("blog_task_id", taskId)
+        .select("id, status")
+        .single();
+
+      if (error || !data) {
+        alert(error?.message || "초안 상태를 변경하지 못했습니다.");
+        return;
+      }
+
+      setDraft({ ...draft, status: data.status });
+      router.refresh();
+    } catch {
+      alert("초안 상태를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      inFlight.current = false;
+      setChangingStatus(false);
+    }
+  }
+
   return (
     <div className="mt-8 max-w-2xl">
       <button
         type="button"
         onClick={generateDraft}
-        disabled={generating || saving || !!editingDraft}
+        disabled={generating || saving || changingStatus || !!editingDraft}
         className="rounded-lg bg-black px-4 py-2 text-white disabled:opacity-50"
       >
         {generating ? "생성 중..." : draft ? "AI 초안 재생성" : "AI 초안 생성"}
@@ -150,11 +181,46 @@ export default function GenerateBlogDraft({
         <button
           type="button"
           onClick={startEditing}
-          disabled={generating || saving}
+          disabled={generating || saving || changingStatus}
           className="ml-2 rounded-lg border bg-white px-4 py-2 disabled:opacity-50"
         >
           편집
         </button>
+      )}
+      {draft?.id != null && !editingDraft && (
+        <div className="mt-3 flex items-center gap-2">
+          {draft.status === "draft" && (
+            <>
+              <button
+                type="button"
+                onClick={() => changeStatus("approved")}
+                disabled={generating || saving || changingStatus}
+                className="rounded-lg border bg-white px-4 py-2 disabled:opacity-50"
+              >
+                승인
+              </button>
+              <button
+                type="button"
+                onClick={() => changeStatus("rejected")}
+                disabled={generating || saving || changingStatus}
+                className="rounded-lg border bg-white px-4 py-2 disabled:opacity-50"
+              >
+                거절
+              </button>
+            </>
+          )}
+          {(draft.status === "approved" || draft.status === "rejected") && (
+            <button
+              type="button"
+              onClick={() => changeStatus("draft")}
+              disabled={generating || saving || changingStatus}
+              className="rounded-lg border bg-white px-4 py-2 disabled:opacity-50"
+            >
+              draft로 되돌리기
+            </button>
+          )}
+          {changingStatus && <p role="status" className="text-sm text-zinc-500">상태 변경 중...</p>}
+        </div>
       )}
       {saved && <p role="status" className="mt-3 text-sm text-zinc-600">초안을 저장했습니다.</p>}
 
@@ -229,7 +295,7 @@ export default function GenerateBlogDraft({
         </form>
       )}
 
-      <div aria-live="polite" aria-busy={generating || saving}>
+      <div aria-live="polite" aria-busy={generating || saving || changingStatus}>
         {draft && !editingDraft && (
           <article className="mt-6 rounded-xl border bg-white p-6">
             <h2 className="text-xl font-bold">{draft.title}</h2>
