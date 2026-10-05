@@ -5,20 +5,115 @@
 - [x] Product List
 - [x] Product Creation
 - [x] Product Detail Page
-- [ ] Product Edit
-- [ ] Product Delete
+- [x] Product Edit
+- [x] Product Delete
 - [ ] USP Management
 - [ ] Target Customer Management
 - [ ] Customer Problem Management
 - [ ] Product Notes
 - [ ] Product Image / Asset Management
+- [ ] Product Asset Categories / Descriptions
+- [ ] Product Knowledge Base
 - [ ] Cost / Price / Margin Calculator
 - [ ] Import Cost / Exchange Rate / Fee Calculation
 - [ ] Product MAP Management
 
 ---
 
-## 2. VOC Intelligence
+## 2. AI Blog Content Generator
+
+### Product & Content Input
+
+- [ ] Product Selection
+- [ ] Product Knowledge Retrieval
+- [ ] Keyword Input
+- [ ] Topic Input
+- [ ] Content Purpose Input
+- [ ] Writing Instructions
+- [ ] Brand Rules Integration
+
+### Blog Task Management
+
+- [ ] Blog Task Database
+- [ ] Blog Task Creation
+- [ ] Task Status Management
+- [ ] Product-to-Blog Task Mapping
+- [ ] Blog Task List
+- [ ] Blog Task Queue
+
+### AI Draft Generation
+
+- [ ] OpenAI API Integration
+- [ ] Structured Output
+- [ ] Blog Title Generation
+- [ ] Introduction Generation
+- [ ] Section Structure Generation
+- [ ] Section Body Generation
+- [ ] Closing Generation
+- [ ] Image Placement Suggestions
+- [ ] Product Fact Grounding
+- [ ] Hallucination Prevention Rules
+- [ ] Fake Review / Experience Prevention
+- [ ] Exaggerated Claim Prevention
+
+### Draft Management
+
+- [ ] Blog Draft Database
+- [ ] Draft Storage
+- [ ] Draft Detail Page
+- [ ] Draft Editing
+- [ ] Draft Regeneration
+- [ ] Section Regeneration
+- [ ] Draft Version History
+- [ ] Draft Status Management
+- [ ] Human Review
+- [ ] Approved / Rejected Status
+
+### Product Asset Integration
+
+- [ ] Supabase Storage Integration
+- [ ] Product Asset Database
+- [ ] Manual Asset Categories
+- [ ] Manual Asset Descriptions
+- [ ] Product-to-Asset Mapping
+- [ ] AI Asset Selection
+- [ ] Section-to-Image Mapping
+- [ ] Image Preview
+- [ ] Asset Selection Review
+
+### Naver Blog Publishing
+
+- [ ] Publishing Queue
+- [ ] Approved Draft Filtering
+- [ ] Naver Blog Editor Research
+- [ ] Playwright Integration
+- [ ] Automatic Editor Input
+- [ ] Image Upload
+- [ ] Image Placement
+- [ ] Category Selection
+- [ ] Tag Input
+- [ ] Draft Save
+- [ ] Semi-automatic Publishing
+- [ ] Automatic Publishing
+- [ ] Scheduled Publishing
+- [ ] Publishing Failure Detection
+- [ ] Published URL Storage
+- [ ] Publishing Result History
+
+### Future Intelligence
+
+- [ ] VOC Integration
+- [ ] Customer Language Integration
+- [ ] Pain Point Integration
+- [ ] Purchase Motivation Integration
+- [ ] Search Intent Integration
+- [ ] Content Performance Feedback Loop
+- [ ] Next Blog Topic Recommendation
+- [ ] Existing Blog Content Analysis
+
+---
+
+## 3. VOC Intelligence
 
 - [ ] CSV / XLSX Review Import
 - [ ] Review Database
@@ -32,15 +127,19 @@
 - [ ] Product Improvement Insights
 - [ ] FAQ Generation
 - [ ] Ad Hook Generation from VOC
+- [ ] Blog Content Generation from VOC
 
 ---
 
-## 3. Company Knowledge Base
+## 4. Company Knowledge Base
 
 - [ ] Product Documents
 - [ ] Supplier Quotes
 - [ ] Brand Guidelines
+- [ ] Brand Tone Rules
+- [ ] Content Writing Rules
 - [ ] Historical Ad Creatives
+- [ ] Historical Content
 - [ ] Sales / Advertising Reports
 - [ ] Internal SOP Documents
 - [ ] Handover Documents
@@ -52,7 +151,7 @@
 
 ---
 
-## 4. Product Sourcing
+## 5. Product Sourcing
 
 - [ ] Sourcing Candidate Database
 - [ ] Supplier Database
@@ -68,7 +167,7 @@
 
 ---
 
-## 5. Advertising Intelligence
+## 6. Advertising Intelligence
 
 - [ ] Ad Reference Library
 - [ ] Competitor Ad Database
@@ -83,7 +182,7 @@
 
 ---
 
-## 6. Competitor Monitoring
+## 7. Competitor Monitoring
 
 - [ ] Meta Ad Library Monitoring
 - [ ] New Competitor Ad Detection
@@ -100,7 +199,7 @@
 
 ---
 
-## 7. AI Content Generation
+## 8. AI Content Generation
 
 - [ ] Ad Hook Generation
 - [ ] Ad Copy Generation
@@ -117,10 +216,14 @@
 - [ ] Threads Content
 - [ ] Instagram Content
 - [ ] Blog Content
+- [ ] Product-based Content Generation
+- [ ] Brand Rule Application
+- [ ] Content Draft Storage
+- [ ] Content Approval Workflow
 
 ---
 
-## 8. Viral Ad Recreation
+## 9. Viral Ad Recreation
 
 - [ ] Viral Ad Reference Import
 - [ ] Ad Structure Recreation
@@ -135,7 +238,7 @@
 
 ---
 
-## 9. AI Detail Page
+## 10. AI Detail Page
 
 - [ ] Detail Page Strategy
 - [ ] Section Structure Generation
@@ -152,7 +255,6 @@
 - [ ] Brand Tone Application
 - [ ] Image Prompt Generation
 - [ ] Product Image Generation
-- [ ] Product Image Generation
 - [ ] Figma Integration
 - [ ] AI-to-Figma Detail Page Workflow
 - [ ] Figma Design Handoff
@@ -164,7 +266,7 @@
 
 ---
 
-## 10. Commerce Intelligence
+## 11. Commerce Intelligence
 
 - [ ] Sales Dashboard
 - [ ] Order Analytics
@@ -177,13 +279,14 @@
 - [ ] Weekly / Monthly Trends
 
 ### Integrations
+
 - [ ] Cafe24 API
 - [ ] Naver Commerce API
 - [ ] Coupang API
 
 ---
 
-## 11. Advertising Analytics
+## 12. Advertising Analytics
 
 - [ ] Meta Ads API Integration
 - [ ] Google Ads API Integration
@@ -209,7 +312,7 @@
 
 ---
 
-## 12. Social Intelligence
+## 13. Social Intelligence
 
 - [ ] Threads Content Collection
 - [ ] Viral Content Analysis
@@ -222,7 +325,7 @@
 
 ---
 
-## 13. Data & File Operations
+## 14. Data & File Operations
 
 - [ ] CSV / XLSX Import
 - [ ] PDF Data Extraction
@@ -242,7 +345,7 @@
 
 ---
 
-## 14. Automation
+## 15. Automation
 
 - [ ] Scheduled Data Collection
 - [ ] Cron Jobs
@@ -261,19 +364,24 @@
 - [ ] Weekly Reports
 - [ ] Automated Work Logs
 - [ ] Task / Workflow History
+- [ ] Content Publishing Queue
+- [ ] Publishing Retry Workflow
 
 ---
 
-## 15. Generative Media
+## 16. Generative Media
 
 ### Image
+
 - [ ] Gemini Image Integration
 - [ ] Image Prompt Generation
 - [ ] Product Image Generation
 - [ ] Ad Creative Generation
 - [ ] Detail Page Image Generation
+- [ ] Blog Image Generation
 
 ### Video
+
 - [ ] Kling Integration
 - [ ] Veo Integration
 - [ ] Seedance Integration
@@ -282,15 +390,17 @@
 - [ ] Ad Video Generation
 
 ### Post-processing
+
 - [ ] Magnific / Upscaling Workflow
 - [ ] Photoshop Workflow
 - [ ] CapCut Workflow
 
 ---
 
-## 16. AI Agent Skills
+## 17. AI Agent Skills
 
 - [ ] Product Analysis
+- [ ] Product Knowledge Retrieval
 - [ ] VOC Analysis
 - [ ] Competitor Research
 - [ ] Market Research
@@ -303,14 +413,16 @@
 - [ ] Hook Generation
 - [ ] Script Generation
 - [ ] Content Generation
+- [ ] Blog Generation
 - [ ] Detail Page Generation
 - [ ] Sales Analysis
 - [ ] Inventory Analysis
 - [ ] Automated Reporting
+- [ ] Content Publishing
 
 ---
 
-## 17. Autonomous Agent
+## 18. Autonomous Agent
 
 - [ ] Natural Language Commands
 - [ ] Tool Selection
@@ -327,12 +439,15 @@
 
 Example:
 
+```text
 "경추베개 최근 리뷰와 광고 성과를 분석해서
 고객 불만 기준으로 새 Hook 10개 만들고
 쇼츠 대본 3개 생성해줘."
-
+```
 
 Agent workflow:
+
+```text
 Product Retrieval
 → VOC Retrieval
 → Ad Performance Retrieval
@@ -341,19 +456,24 @@ Product Retrieval
 → Hook Generation
 → Script Generation
 → Save Results
+```
 
----
+Blog workflow:
 
-## 18. Long-term Goal
-ANGEL AGENT evolves from an internal commerce tool into a company-specific AI operating system that can:
-- Understand company data
-- Retrieve internal knowledge
-- Analyze customers and competitors
-- Generate marketing assets
-- Monitor commerce operations
-- Execute repetitive workflows
-- Select and call tools autonomously
-- Recommend next actions based on real business performance
+```text
+Product Retrieval
+→ Product Asset Retrieval
+→ VOC Retrieval
+→ Brand Rule Retrieval
+→ Blog Task Analysis
+→ Structured Draft Generation
+→ Draft Save
+→ Human Approval
+→ Publishing Queue
+→ Playwright / OpenClaw
+→ Naver Blog
+→ Save Published URL
+```
 
 ---
 
@@ -364,7 +484,10 @@ ANGEL AGENT evolves from an internal commerce tool into a company-specific AI op
 - [ ] Prompt / Skill Version Management
 - [ ] Product-specific Prompts
 - [ ] Brand-specific Rules
+- [ ] Blog Writing Rules
+- [ ] Content Strategy Rules
 - [ ] Workflow Templates
+- [ ] Structured Output Schemas
 
 ---
 
@@ -374,7 +497,10 @@ ANGEL AGENT evolves from an internal commerce tool into a company-specific AI op
 - [ ] Email Notifications
 - [ ] Important Change Alerts
 - [ ] Human Approval Queue
-- [ ] Approval before Publishing / Ad Changes
+- [ ] Draft Approval Queue
+- [ ] Approval before Publishing
+- [ ] Approval before Ad Changes
+- [ ] Publishing Failure Alerts
 
 ---
 
@@ -384,6 +510,8 @@ ANGEL AGENT evolves from an internal commerce tool into a company-specific AI op
 - [ ] Local / Shared Folder Integration
 - [ ] Company Document Sync
 - [ ] Automatic Knowledge Base Update
+- [ ] Product Asset Sync
+- [ ] Brand Document Sync
 
 ---
 
@@ -391,9 +519,11 @@ ANGEL AGENT evolves from an internal commerce tool into a company-specific AI op
 
 - [ ] Revenue Goal Planning
 - [ ] Content Calendar
+- [ ] Blog Content Calendar
 - [ ] Upload Schedule Planning
 - [ ] Content Performance Feedback Loop
 - [ ] Next Content Recommendation
+- [ ] Keyword-based Content Planning
 - [ ] Creative Testing Plan
 - [ ] A/B Test Management
 
@@ -407,3 +537,24 @@ ANGEL AGENT evolves from an internal commerce tool into a company-specific AI op
 - [ ] Activity / Audit Logs
 - [ ] API Credential Management
 - [ ] Agent Execution History
+- [ ] Automation Execution History
+- [ ] Publishing History
+
+---
+
+## 24. Long-term Goal
+
+ANGEL AGENT evolves from an internal commerce tool into a company-specific AI operating system that can:
+
+- Understand company data
+- Retrieve internal knowledge
+- Understand products and product assets
+- Analyze customers and competitors
+- Generate marketing assets
+- Generate structured content drafts
+- Manage human approval workflows
+- Publish approved content
+- Monitor commerce operations
+- Execute repetitive workflows
+- Select and call tools autonomously
+- Recommend next actions based on real business performance
