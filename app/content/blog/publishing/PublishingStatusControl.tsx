@@ -16,6 +16,7 @@ export default function PublishingStatusControl({
   const router = useRouter();
   const [status, setStatus] = useState(initialStatus);
   const [updating, setUpdating] = useState(false);
+  const [starting, setStarting] = useState(false);
   const inFlight = useRef(false);
 
   async function toggleQueue() {
@@ -60,17 +61,67 @@ export default function PublishingStatusControl({
     }
   }
 
+  async function startPublishing() {
+    if (inFlight.current || status !== "queued") return;
+    const numericDraftId = Number(draftId);
+    if (!Number.isFinite(numericDraftId)) {
+      alert("초안 ID가 올바르지 않습니다.");
+      return;
+    }
+
+    inFlight.current = true;
+    setStarting(true);
+    try {
+      const response = await fetch("/api/blog/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId: numericDraftId }),
+      });
+      const result: unknown = await response.json();
+      const data = typeof result === "object" && result !== null
+        ? result as Record<string, unknown> : null;
+
+      if (!response.ok || data?.ok !== true) {
+        alert(typeof data?.error === "string" && data.error.trim()
+          ? data.error : "발행 시작에 실패했습니다.");
+        return;
+      }
+      if (data.publishingStatus !== "publishing") {
+        alert("발행 시작에 실패했습니다.");
+        return;
+      }
+
+      setStatus("publishing");
+      router.refresh();
+    } catch {
+      alert("발행 시작에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      inFlight.current = false;
+      setStarting(false);
+    }
+  }
+
   return (
-    <div className="mt-3" aria-live="polite" aria-busy={updating}>
+    <div className="mt-3" aria-live="polite" aria-busy={updating || starting}>
       <p className="text-sm text-zinc-500">발행 상태: {status ?? "미등록"}</p>
       {(status === null || status === "queued") && (
         <button
           type="button"
           onClick={toggleQueue}
-          disabled={updating}
+          disabled={updating || starting}
           className="mt-2 rounded-lg border bg-white px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
           {updating ? "변경 중..." : status === null ? "발행 대기 등록" : "발행 대기 해제"}
+        </button>
+      )}
+      {status === "queued" && (
+        <button
+          type="button"
+          onClick={startPublishing}
+          disabled={updating || starting}
+          className="ml-2 mt-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {starting ? "발행 시작 중..." : "발행 시작"}
         </button>
       )}
     </div>
