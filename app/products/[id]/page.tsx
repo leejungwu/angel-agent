@@ -46,6 +46,15 @@ export default async function ProductDetailPage({
           원가: {product.cost_price?.toLocaleString()}원
         </p>
         <p className="mt-2">USP: {product.usp}</p>
+        <p className="mt-2 whitespace-pre-wrap">
+          타겟 고객: {product.target_customer ?? "-"}
+        </p>
+        <p className="mt-2 whitespace-pre-wrap">
+          고객 문제: {product.customer_problem ?? "-"}
+        </p>
+        <p className="mt-2 whitespace-pre-wrap">
+          제품 메모: {product.notes ?? "-"}
+        </p>
       </div>
     </main>
   );

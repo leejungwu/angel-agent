@@ -14,6 +14,9 @@ export default function EditProductPage() {
   const [sellingPrice, setSellingPrice] = useState("");
   const [costPrice, setCostPrice] = useState("");
   const [usp, setUsp] = useState("");
+  const [targetCustomer, setTargetCustomer] = useState("");
+  const [customerProblem, setCustomerProblem] = useState("");
+  const [notes, setNotes] = useState("");
 
   useEffect(() => {
   async function loadProduct() {
@@ -37,6 +40,9 @@ export default function EditProductPage() {
         data.cost_price !== null ? String(data.cost_price) : ""
     );
     setUsp(data.usp ?? "");
+    setTargetCustomer(data.target_customer ?? "");
+    setCustomerProblem(data.customer_problem ?? "");
+    setNotes(data.notes ?? "");
     }
 
     loadProduct();
@@ -51,6 +57,9 @@ export default function EditProductPage() {
         selling_price: Number(sellingPrice),
         cost_price: Number(costPrice),
         usp: usp,
+        target_customer: targetCustomer,
+        customer_problem: customerProblem,
+        notes: notes,
     })
     .eq("id", Number(id))
     .select()
@@ -159,6 +168,43 @@ return (
           </div>
 
         
+          <div>
+            <label htmlFor="target-customer" className="mb-2 block text-sm font-medium">
+              타겟 고객
+            </label>
+            <textarea
+              id="target-customer"
+              className="min-h-28 w-full rounded-lg border px-4 py-3"
+              value={targetCustomer}
+              onChange={(e) => setTargetCustomer(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="customer-problem" className="mb-2 block text-sm font-medium">
+              고객 문제
+            </label>
+            <textarea
+              id="customer-problem"
+              className="min-h-28 w-full rounded-lg border px-4 py-3"
+              value={customerProblem}
+              onChange={(e) => setCustomerProblem(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="notes" className="mb-2 block text-sm font-medium">
+              제품 메모
+            </label>
+            <textarea
+              id="notes"
+              className="min-h-28 w-full rounded-lg border px-4 py-3"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </div>
+
+
             <button
                 className="rounded-lg bg-black px-5 py-3 font-medium text-white"
                 onClick={updateProduct} 

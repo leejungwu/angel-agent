@@ -12,6 +12,9 @@ export default function NewProductPage() {
   const [sellingPrice, setSellingPrice] = useState("");
   const [costPrice, setCostPrice] = useState("");
   const [usp, setUsp] = useState("");
+  const [targetCustomer, setTargetCustomer] = useState("");
+  const [customerProblem, setCustomerProblem] = useState("");
+  const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit() {
@@ -23,6 +26,9 @@ export default function NewProductPage() {
       selling_price: sellingPrice ? Number(sellingPrice) : null,
       cost_price: costPrice ? Number(costPrice) : null,
       usp,
+      target_customer: targetCustomer,
+      customer_problem: customerProblem,
+      notes,
     });
 
     setLoading(false);
@@ -77,6 +83,30 @@ export default function NewProductPage() {
             placeholder="USP"
             value={usp}
             onChange={(e) => setUsp(e.target.value)}
+          />
+
+          <textarea
+            className="min-h-24 rounded-lg border px-4 py-3"
+            placeholder="타겟 고객"
+            aria-label="타겟 고객"
+            value={targetCustomer}
+            onChange={(e) => setTargetCustomer(e.target.value)}
+          />
+
+          <textarea
+            className="min-h-24 rounded-lg border px-4 py-3"
+            placeholder="고객 문제"
+            aria-label="고객 문제"
+            value={customerProblem}
+            onChange={(e) => setCustomerProblem(e.target.value)}
+          />
+
+          <textarea
+            className="min-h-24 rounded-lg border px-4 py-3"
+            placeholder="제품 메모"
+            aria-label="제품 메모"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
           />
 
           <button
