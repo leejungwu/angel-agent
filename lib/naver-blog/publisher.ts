@@ -139,40 +139,97 @@ async function verifyText(
   throw new Error("에디터에서 입력한 내용을 확인하지 못했습니다.");
 }
 
-async function uploadImage(page: Page, frame: Frame, imagePath: string, timeoutMs: number) {
-  const images = frame.locator(NAVER_EDITOR_SELECTORS.image);
-  const components = frame.locator(NAVER_EDITOR_SELECTORS.imageComponent);
-  const before = { images: await images.count(), components: await components.count() };
-  const button = await firstVisible(frame.locator(NAVER_EDITOR_SELECTORS.photoButton))
-    ?? await firstVisible(frame.locator(NAVER_EDITOR_SELECTORS.photoButtonFallback));
-  if (!button) throw new Error("사진 버튼을 찾지 못했습니다.");
-
-  // A mainFrame button emits filechooser on its owning Page.
-  const chooserPromise = page.waitForEvent("filechooser", { timeout: 5_000 }).catch((error: unknown) => {
-    if (error instanceof Error && error.name === "TimeoutError") return null;
-    throw error;
-  });
-  // Observe rejection even if clicking fails before awaiting the chooser.
-  void chooserPromise.catch(() => {});
-  await button.click({ timeout: timeoutMs });
-  const chooser = await chooserPromise;
-  if (chooser) {
-    await chooser.setFiles(imagePath, { timeout: timeoutMs });
-  } else {
-    const input = frame.locator(NAVER_EDITOR_SELECTORS.fileInput).first();
-    await input.waitFor({ state: "attached", timeout: timeoutMs });
-    await input.setInputFiles(imagePath, { timeout: timeoutMs });
-  }
-
-  const deadline = Date.now() + timeoutMs;
+async function cancelPreviousDraft(page: Page, frame: Frame, timeoutMs: number): Promise<void> {
+  // Allow the optional resume dialog to arrive after the editor frame loads.
+  const deadline = Date.now() + Math.min(timeoutMs, 5_000);
   do {
-    if (await components.count() > before.components || await images.count() > before.images) {
-      console.log("사진 업로드 성공:", imagePath);
+    for (const scope of [frame, page]) {
+      const message = await firstVisible(scope.getByText(/작성 중인 글이 있습니다\./));
+      if (!message) continue;
+      console.log("작성 중인 글 모달 감지");
+      // Find the nearest message ancestor containing Cancel, keeping the click
+      // inside this dialog rather than matching another page-level Cancel.
+      const modal = message.locator("xpath=ancestor::*[.//*[normalize-space(.)='취소']][1]");
+      const cancel = await firstVisible(modal.getByText("취소", { exact: true }));
+      if (!cancel) throw new Error("작성 중인 글 모달의 취소 버튼을 찾지 못했습니다.");
+      await cancel.click({ timeout: timeoutMs });
+      console.log("이전 작성글 이어쓰기 취소");
+      await message.waitFor({ state: "hidden", timeout: timeoutMs });
+      await modal.waitFor({ state: "hidden", timeout: timeoutMs });
+      console.log("작성 중인 글 모달 처리 완료");
       return;
     }
-    await new Promise((done) => setTimeout(done, 250));
+    await new Promise((done) => setTimeout(done, 100));
   } while (Date.now() < deadline);
-  throw new Error(`이미지 컴포넌트 또는 img count 증가를 확인하지 못했습니다: ${imagePath}`);
+}
+
+async function selectIndividualPhotos(page: Page, frame: Frame, timeoutMs: number): Promise<boolean> {
+  // The attachment dialog can be mounted inside the editor frame or on the Page.
+  for (const scope of [frame, page]) {
+    const title = await firstVisible(scope.getByText("사진 첨부 방식", { exact: true }));
+    if (!title) continue;
+    console.log("사진 첨부 방식 선택창 감지");
+    const option = scope.getByText("개별사진", { exact: true });
+    await option.first().waitFor({ state: "visible", timeout: timeoutMs });
+    const visibleOption = await firstVisible(option);
+    if (!visibleOption) throw new Error("개별사진 선택지를 찾지 못했습니다.");
+    await visibleOption.click({ timeout: timeoutMs });
+    console.log("개별사진 선택");
+    await title.waitFor({ state: "hidden", timeout: timeoutMs });
+    await visibleOption.waitFor({ state: "hidden", timeout: timeoutMs });
+    console.log("사진 첨부 방식 선택 완료");
+    return true;
+  }
+  return false;
+}
+
+async function uploadImages(
+  page: Page, frame: Frame, imagePaths: string[], timeoutMs: number,
+): Promise<number> {
+  if (imagePaths.length === 0) return 0;
+  console.log(`사진 일괄 업로드 시작: ${imagePaths.length}개`);
+  try {
+    const components = frame.locator(NAVER_EDITOR_SELECTORS.imageComponent);
+    const before = await components.count();
+    console.log(`업로드 전 image component count: ${before}`);
+    const button = await firstVisible(frame.locator(NAVER_EDITOR_SELECTORS.photoButton))
+      ?? await firstVisible(frame.locator(NAVER_EDITOR_SELECTORS.photoButtonFallback));
+    if (!button) throw new Error("사진 버튼을 찾지 못했습니다.");
+    const chooserPromise = page.waitForEvent("filechooser", { timeout: timeoutMs });
+    void chooserPromise.catch(() => {});
+    await button.click({ timeout: timeoutMs });
+    const chooser = await chooserPromise;
+    console.log("filechooser 획득");
+    await chooser.setFiles(imagePaths, { timeout: timeoutMs });
+    console.log(`setFiles 완료: ${imagePaths.length}개`);
+
+    const deadline = Date.now() + timeoutMs;
+    let after = before;
+    let attachmentModeSelected = false;
+    do {
+      // Poll alongside DOM growth so an absent dialog is normal and a delayed
+      // multi-photo dialog is handled before validating inserted components.
+      if (!attachmentModeSelected) {
+        attachmentModeSelected = await selectIndividualPhotos(page, frame, timeoutMs);
+      }
+      after = await components.count();
+      if (after >= before + imagePaths.length) {
+        console.log(`업로드 후 image component count: ${after}`);
+        const imagesUploaded = after - before;
+        if (imagesUploaded !== imagePaths.length) {
+          throw new Error("이미지 업로드 수 불일치");
+        }
+        console.log(`사진 일괄 업로드 성공: ${imagesUploaded}개`);
+        return imagesUploaded;
+      }
+      await new Promise((done) => setTimeout(done, 250));
+    } while (Date.now() < deadline);
+    console.log(`업로드 후 image component count: ${after}`);
+    throw new Error("이미지 컴포넌트 증가 확인 실패");
+  } catch {
+    // Keep paths, filenames and Playwright call logs out of server logs.
+    throw new Error(`Naver batch image upload failed (expected ${imagePaths.length} images)`);
+  }
 }
 
 /** Input into a blank editor using an already logged-in Page.
@@ -194,8 +251,12 @@ export async function fillNaverBlogDraft(
   try {
     if (!draft.title.trim() || !bodyText) throw new Error("제목과 본문은 비어 있을 수 없습니다.");
     // Validate all files before editing, avoiding partial input for a missing image.
-    for (const path of draft.imagePaths ?? []) {
-      if (!path.trim() || !(await stat(path)).isFile()) throw new Error(`이미지 파일이 아닙니다: ${path}`);
+    for (const [index, path] of (draft.imagePaths ?? []).entries()) {
+      try {
+        if (!path.trim() || !(await stat(path)).isFile()) throw new Error("Invalid image");
+      } catch {
+        throw new Error(`이미지 파일 검증 실패: ${index + 1}/${draft.imagePaths?.length ?? 0}`);
+      }
     }
   } catch (error) {
     throw new NaverBlogInputError("draft_validation_failed", error);
@@ -209,6 +270,7 @@ export async function fillNaverBlogDraft(
     }
     if (!options.skipNavigation) await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: timeoutMs });
     frame = await findNaverBlogEditorFrame(page, timeoutMs);
+    await cancelPreviousDraft(page, frame, timeoutMs);
     await frame.locator(NAVER_EDITOR_SELECTORS.title).first().waitFor({ state: "visible", timeout: timeoutMs });
   } catch (error) {
     throw new NaverBlogInputError("editor_open_failed", error);
@@ -244,12 +306,12 @@ export async function fillNaverBlogDraft(
 
   let imagesUploaded = 0;
   try {
-    for (const path of draft.imagePaths ?? []) {
-      await uploadImage(page, frame, path, imageTimeoutMs);
-      imagesUploaded++;
-    }
+    imagesUploaded = await uploadImages(page, frame, draft.imagePaths ?? [], imageTimeoutMs);
   } catch (error) {
     throw new NaverBlogInputError("photo_upload_failed", error);
+  }
+  if (imagesUploaded !== (draft.imagePaths?.length ?? 0)) {
+    throw new NaverBlogInputError("photo_upload_failed", new Error("이미지 업로드 수 불일치"));
   }
   return { ok: true, titleFilled: true, bodyFilled: true, imagesUploaded, published: false };
 }
