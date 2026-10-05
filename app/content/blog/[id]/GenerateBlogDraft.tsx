@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 export type Draft = {
   title: string;
@@ -38,12 +39,16 @@ export default function GenerateBlogDraft({
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(initialDraft);
+  const [editingDraft, setEditingDraft] = useState<Draft | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const inFlight = useRef(false);
 
   async function generateDraft() {
-    if (inFlight.current) return;
+    if (inFlight.current || editingDraft) return;
     inFlight.current = true;
     setGenerating(true);
+    setSaved(false);
 
     try {
       const response = await fetch("/api/blog/generate", {
@@ -82,19 +87,150 @@ export default function GenerateBlogDraft({
     }
   }
 
+  function startEditing() {
+    if (!draft || draft.id == null || inFlight.current) return;
+    setEditingDraft({ ...draft, sections: draft.sections.map((section) => ({ ...section })) });
+    setSaved(false);
+  }
+
+  async function saveDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingDraft || editingDraft.id == null || inFlight.current) return;
+    inFlight.current = true;
+    setSaving(true);
+
+    const changes = {
+      title: editingDraft.title,
+      intro: editingDraft.intro,
+      sections: editingDraft.sections.map((section) => ({
+        heading: section.heading,
+        body: section.body,
+        imageAssetId: null,
+      })),
+      closing: editingDraft.closing,
+    };
+
+    try {
+      const { data, error } = await supabase
+        .from("blog_drafts")
+        .update(changes)
+        .eq("id", editingDraft.id)
+        .eq("blog_task_id", taskId)
+        .select("id")
+        .single();
+
+      if (error || !data) {
+        alert(error?.message || "초안을 저장하지 못했습니다.");
+        return;
+      }
+
+      setDraft({ ...editingDraft, ...changes });
+      setEditingDraft(null);
+      setSaved(true);
+      router.refresh();
+    } catch {
+      alert("초안을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      inFlight.current = false;
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="mt-8 max-w-2xl">
       <button
         type="button"
         onClick={generateDraft}
-        disabled={generating}
+        disabled={generating || saving || !!editingDraft}
         className="rounded-lg bg-black px-4 py-2 text-white disabled:opacity-50"
       >
         {generating ? "생성 중..." : draft ? "AI 초안 재생성" : "AI 초안 생성"}
       </button>
+      {draft?.id != null && !editingDraft && (
+        <button
+          type="button"
+          onClick={startEditing}
+          disabled={generating || saving}
+          className="ml-2 rounded-lg border bg-white px-4 py-2 disabled:opacity-50"
+        >
+          편집
+        </button>
+      )}
+      {saved && <p role="status" className="mt-3 text-sm text-zinc-600">초안을 저장했습니다.</p>}
 
-      <div aria-live="polite" aria-busy={generating}>
-        {draft && (
+      {editingDraft && (
+        <form onSubmit={saveDraft} className="mt-6 rounded-xl border bg-white p-6">
+          <fieldset disabled={saving} className="flex flex-col gap-5">
+            <label className="text-sm font-medium">
+              제목
+              <input
+                className="mt-2 w-full rounded-lg border px-4 py-3"
+                value={editingDraft.title}
+                onChange={(event) => setEditingDraft({ ...editingDraft, title: event.target.value })}
+              />
+            </label>
+            <label className="text-sm font-medium">
+              도입
+              <textarea
+                className="mt-2 min-h-28 w-full rounded-lg border px-4 py-3"
+                value={editingDraft.intro}
+                onChange={(event) => setEditingDraft({ ...editingDraft, intro: event.target.value })}
+              />
+            </label>
+            {editingDraft.sections.map((section, index) => (
+              <div key={index} className="flex flex-col gap-3">
+                <label className="text-sm font-medium">
+                  섹션 {index + 1} 제목
+                  <input
+                    className="mt-2 w-full rounded-lg border px-4 py-3"
+                    value={section.heading}
+                    onChange={(event) => setEditingDraft({
+                      ...editingDraft,
+                      sections: editingDraft.sections.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, heading: event.target.value } : item),
+                    })}
+                  />
+                </label>
+                <label className="text-sm font-medium">
+                  섹션 {index + 1} 본문
+                  <textarea
+                    className="mt-2 min-h-40 w-full rounded-lg border px-4 py-3"
+                    value={section.body}
+                    onChange={(event) => setEditingDraft({
+                      ...editingDraft,
+                      sections: editingDraft.sections.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, body: event.target.value } : item),
+                    })}
+                  />
+                </label>
+              </div>
+            ))}
+            <label className="text-sm font-medium">
+              마무리
+              <textarea
+                className="mt-2 min-h-28 w-full rounded-lg border px-4 py-3"
+                value={editingDraft.closing}
+                onChange={(event) => setEditingDraft({ ...editingDraft, closing: event.target.value })}
+              />
+            </label>
+            <div className="flex gap-2">
+              <button type="submit" className="rounded-lg bg-black px-4 py-2 text-white disabled:opacity-50">
+                {saving ? "저장 중..." : "저장"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingDraft(null)}
+                className="rounded-lg border px-4 py-2"
+              >
+                취소
+              </button>
+            </div>
+          </fieldset>
+        </form>
+      )}
+
+      <div aria-live="polite" aria-busy={generating || saving}>
+        {draft && !editingDraft && (
           <article className="mt-6 rounded-xl border bg-white p-6">
             <h2 className="text-xl font-bold">{draft.title}</h2>
             <p className="mt-2 text-sm text-zinc-500">
