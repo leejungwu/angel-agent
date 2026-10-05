@@ -1,31 +1,30 @@
 // Node.js automation module. Do not import into Client Components.
+import { stat } from "node:fs/promises";
 import { chromium, type BrowserContext, type Page, type Locator, type Frame } from "playwright";
 
-export type NaverBlogDraft = {
+export type NaverBlogDraftInput = {
   title: string;
-  intro: string;
-  sections: { heading: string; body: string }[];
-  closing: string;
+  intro?: string | null;
+  sections: { heading?: string | null; body: string }[];
+  closing?: string | null;
+  imagePaths?: string[];
 };
+export type NaverBlogDraft = NaverBlogDraftInput;
 
-export type NaverEditorSelectors = {
-  frame: string | null;
-  ready: string;
-  title: string;
-  body: string;
-};
-
-// Starter selectors only: verify against the logged-in editor before live use.
-// Override frame with e.g. "iframe#mainFrame" when the editor is inside an iframe.
-export const NAVER_EDITOR_SELECTORS: NaverEditorSelectors = {
-  frame: null,
-  ready: ".se-editor",
-  title: '.se-title-text [contenteditable="true"]',
-  body: '.se-component.se-text [contenteditable="true"]',
+// Verified mainFrame selectors; change editor DOM selectors here only.
+export const NAVER_EDITOR_SELECTORS = {
+  title: ".se-title-text",
+  body: ".se-component.se-text .se-module-text",
+  bodyComponent: ".se-component.se-text",
+  photoButton: ".se-image-toolbar-button",
+  photoButtonFallback: ".se-toolbar-item.se-toolbar-item-image",
+  fileInput: 'input[type="file"]',
+  imageComponent: ".se-component.se-image",
+  image: "img",
 };
 
 type FailureStage = "browser_launch_failed" | "editor_open_failed" |
-  "title_input_failed" | "body_input_failed";
+  "draft_validation_failed" | "title_input_failed" | "body_input_failed" | "photo_upload_failed";
 
 export class NaverBlogInputError extends Error {
   constructor(public readonly stage: FailureStage, cause: unknown) {
@@ -34,10 +33,8 @@ export class NaverBlogInputError extends Error {
   }
 }
 
-/** Reuse a dedicated profile already logged in manually; never use Chrome's main profile.
- * The caller owns this context and must eventually close it. Keep it open to inspect input.
- * Use channel "chrome" for installed Chrome, or "chromium" for Playwright Chromium.
- * Do not launch two contexts with the same profile directory at once.
+/** Reuse a dedicated profile already logged in manually, never Chrome's main profile.
+ * The caller owns the context. Do not use the same profile in two contexts at once.
  */
 export async function launchNaverBlogSession(
   userDataDir: string,
@@ -46,84 +43,186 @@ export async function launchNaverBlogSession(
   try {
     if (!userDataDir.trim()) throw new Error("A dedicated profile directory is required.");
     return await chromium.launchPersistentContext(userDataDir, {
-      channel,
-      headless: false,
-      timeout: 30_000,
+      channel, headless: false, timeout: 30_000,
     });
   } catch (error) {
     throw new NaverBlogInputError("browser_launch_failed", error);
   }
 }
 
-export function composeNaverBlogBody(draft: NaverBlogDraft): string {
+export function composeNaverBlogBody(draft: NaverBlogDraftInput): string {
+  const text = (value?: string | null) => value?.trim() ?? "";
   return [
-    draft.intro,
-    ...draft.sections.map((section) => `${section.heading}\n${section.body}`),
-    draft.closing,
-  ].join("\n\n");
+    text(draft.intro),
+    ...draft.sections.map((section) =>
+      [text(section.heading), text(section.body)].filter(Boolean).join("\n")),
+    text(draft.closing),
+  ].filter(Boolean).join("\n\n");
 }
 
-function editorLocator(page: Page, selectors: NaverEditorSelectors, selector: string, frame?: Frame): Locator {
-  if (frame) return frame.locator(selector).first();
-  return selectors.frame
-    ? page.frameLocator(selectors.frame).locator(selector).first()
-    : page.locator(selector).first();
+export async function findNaverBlogEditorFrame(page: Page, timeoutMs = 30_000): Promise<Frame> {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const frames = page.frames().filter((frame) => frame !== page.mainFrame());
+    const editor = frames.find((frame) => frame.name() === "mainFrame")
+      ?? frames.find((frame) => frame.url().includes("PostWriteForm.naver"));
+    if (editor) return editor;
+    await new Promise((done) => setTimeout(done, 100));
+  } while (Date.now() < deadline);
+  throw new Error("블로그 글쓰기 mainFrame을 찾지 못했습니다.");
 }
 
-function findTitleInput(page: Page, selectors: NaverEditorSelectors, frame?: Frame): Locator {
-  return editorLocator(page, selectors, selectors.title, frame);
+async function firstVisible(locator: Locator): Promise<Locator | null> {
+  for (let index = 0, count = await locator.count(); index < count; index++) {
+    const candidate = locator.nth(index);
+    if (await candidate.isVisible()) return candidate;
+  }
+  return null;
 }
 
-function findBodyInput(page: Page, selectors: NaverEditorSelectors, frame?: Frame): Locator {
-  return editorLocator(page, selectors, selectors.body, frame);
+function normalizeEditorText(value: string): string {
+  return value.replace(/\r/g, "").replace(/\s+/g, " ").trim();
 }
 
-/** Pass a Page from an already logged-in context, including launchNaverBlogSession().
- * writeUrl must be the account's Naver Blog writing URL. No login or publish actions occur.
- * The page stays open on success/failure; the caller manages the session lifetime.
+async function verifyText(
+  locator: Locator,
+  expected: string,
+  timeoutMs: number,
+  paragraphs: string[] = [],
+) {
+  const normalizedExpected = normalizeEditorText(expected);
+  const normalizedParagraphs = paragraphs.map(normalizeEditorText).filter(Boolean);
+  let actual = "";
+  let missingParagraphs = normalizedParagraphs;
+  const deadline = Date.now() + timeoutMs;
+  do {
+    // textContent avoids layout-dependent innerText differences in SmartEditor.
+    actual = normalizeEditorText((await locator.allTextContents()).join("\n"));
+    if (normalizedExpected && actual.includes(normalizedExpected)) return;
+    missingParagraphs = normalizedParagraphs.filter((paragraph) => !actual.includes(paragraph));
+    // Require ALL nonempty paragraphs, never a partial or unconditional pass.
+    if (normalizedParagraphs.length > 0 && missingParagraphs.length === 0) return;
+    await new Promise((done) => setTimeout(done, 100));
+  } while (Date.now() < deadline);
+  console.error("입력 검증 실패:", {
+    expectedNormalized: normalizedExpected,
+    actualNormalizedTextContent: actual,
+    missingParagraphs,
+  });
+  throw new Error("에디터에서 입력한 내용을 확인하지 못했습니다.");
+}
+
+async function uploadImage(page: Page, frame: Frame, imagePath: string, timeoutMs: number) {
+  const images = frame.locator(NAVER_EDITOR_SELECTORS.image);
+  const components = frame.locator(NAVER_EDITOR_SELECTORS.imageComponent);
+  const before = { images: await images.count(), components: await components.count() };
+  const button = await firstVisible(frame.locator(NAVER_EDITOR_SELECTORS.photoButton))
+    ?? await firstVisible(frame.locator(NAVER_EDITOR_SELECTORS.photoButtonFallback));
+  if (!button) throw new Error("사진 버튼을 찾지 못했습니다.");
+
+  // A mainFrame button emits filechooser on its owning Page.
+  const chooserPromise = page.waitForEvent("filechooser", { timeout: 5_000 }).catch((error: unknown) => {
+    if (error instanceof Error && error.name === "TimeoutError") return null;
+    throw error;
+  });
+  // Observe rejection even if clicking fails before awaiting the chooser.
+  void chooserPromise.catch(() => {});
+  await button.click({ timeout: timeoutMs });
+  const chooser = await chooserPromise;
+  if (chooser) {
+    await chooser.setFiles(imagePath, { timeout: timeoutMs });
+  } else {
+    const input = frame.locator(NAVER_EDITOR_SELECTORS.fileInput).first();
+    await input.waitFor({ state: "attached", timeout: timeoutMs });
+    await input.setInputFiles(imagePath, { timeout: timeoutMs });
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  do {
+    if (await components.count() > before.components || await images.count() > before.images) {
+      console.log("사진 업로드 성공:", imagePath);
+      return;
+    }
+    await new Promise((done) => setTimeout(done, 250));
+  } while (Date.now() < deadline);
+  throw new Error(`이미지 컴포넌트 또는 img count 증가를 확인하지 못했습니다: ${imagePath}`);
+}
+
+/** Input into a blank editor using an already logged-in Page.
+ * The page/context ALWAYS stay open on success and failure for human inspection/publication.
+ * The caller owns their lifetime. No login, final publish click or DB status update occurs.
  */
 export async function fillNaverBlogDraft(
-  draft: NaverBlogDraft,
+  draft: NaverBlogDraftInput,
   options: {
     page: Page;
     writeUrl: string;
-    selectors?: Partial<NaverEditorSelectors>;
     timeoutMs?: number;
-    editorFrame?: Frame;
+    imageTimeoutMs?: number;
     skipNavigation?: boolean;
   },
-): Promise<{ ok: true; titleFilled: true; bodyFilled: true; published: false }> {
-  const { page, writeUrl, timeoutMs = 30_000 } = options;
-  const selectors = { ...NAVER_EDITOR_SELECTORS, ...options.selectors };
+): Promise<{ ok: true; titleFilled: true; bodyFilled: true; imagesUploaded: number; published: false }> {
+  const { page, writeUrl, timeoutMs = 30_000, imageTimeoutMs = 60_000 } = options;
+  const bodyText = composeNaverBlogBody(draft);
+  try {
+    if (!draft.title.trim() || !bodyText) throw new Error("제목과 본문은 비어 있을 수 없습니다.");
+    // Validate all files before editing, avoiding partial input for a missing image.
+    for (const path of draft.imagePaths ?? []) {
+      if (!path.trim() || !(await stat(path)).isFile()) throw new Error(`이미지 파일이 아닙니다: ${path}`);
+    }
+  } catch (error) {
+    throw new NaverBlogInputError("draft_validation_failed", error);
+  }
 
+  let frame: Frame;
   try {
     const url = new URL(writeUrl);
     if (url.protocol !== "https:" || url.hostname !== "blog.naver.com") {
       throw new Error("A Naver Blog HTTPS writing URL is required.");
     }
-    if (!options.skipNavigation) {
-      await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: timeoutMs });
-    }
-    await editorLocator(page, selectors, selectors.ready, options.editorFrame)
-      .waitFor({ state: "visible", timeout: timeoutMs });
+    if (!options.skipNavigation) await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+    frame = await findNaverBlogEditorFrame(page, timeoutMs);
+    await frame.locator(NAVER_EDITOR_SELECTORS.title).first().waitFor({ state: "visible", timeout: timeoutMs });
   } catch (error) {
     throw new NaverBlogInputError("editor_open_failed", error);
   }
 
   try {
-    const title = findTitleInput(page, selectors, options.editorFrame);
-    await title.fill(draft.title, { timeout: timeoutMs });
+    const title = frame.locator(NAVER_EDITOR_SELECTORS.title).first();
+    const placeholder = await firstVisible(title.getByText("제목", { exact: true }));
+    await (placeholder ?? title).click({ timeout: timeoutMs });
+    await page.keyboard.insertText(draft.title);
+    await verifyText(title, draft.title, timeoutMs);
+    console.log("제목 입력 성공");
   } catch (error) {
     throw new NaverBlogInputError("title_input_failed", error);
   }
 
   try {
-    const body = findBodyInput(page, selectors, options.editorFrame);
-    await body.fill(composeNaverBlogBody(draft), { timeout: timeoutMs });
+    const body = frame.locator(NAVER_EDITOR_SELECTORS.body).first();
+    await body.click({ timeout: timeoutMs });
+    await page.keyboard.insertText(bodyText);
+    const bodyAreas = frame.locator(NAVER_EDITOR_SELECTORS.body);
+    console.log("본문 실제 textContent:", (await bodyAreas.allTextContents()).join("\n"));
+    const paragraphs = [
+      draft.intro,
+      ...draft.sections.flatMap((section) => [section.heading, section.body]),
+      draft.closing,
+    ].flatMap((value) => (value ?? "").split(/\r?\n/)).filter((value) => value.trim());
+    await verifyText(bodyAreas, bodyText, timeoutMs, paragraphs);
+    console.log("본문 입력 성공");
   } catch (error) {
     throw new NaverBlogInputError("body_input_failed", error);
   }
 
-  // Deliberately stop here: do not click the final publish button or report DB publication.
-  return { ok: true, titleFilled: true, bodyFilled: true, published: false };
+  let imagesUploaded = 0;
+  try {
+    for (const path of draft.imagePaths ?? []) {
+      await uploadImage(page, frame, path, imageTimeoutMs);
+      imagesUploaded++;
+    }
+  } catch (error) {
+    throw new NaverBlogInputError("photo_upload_failed", error);
+  }
+  return { ok: true, titleFilled: true, bodyFilled: true, imagesUploaded, published: false };
 }
