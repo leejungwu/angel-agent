@@ -1,5 +1,5 @@
 // Node.js automation module. Do not import into Client Components.
-import { chromium, type BrowserContext, type Page, type Locator } from "playwright";
+import { chromium, type BrowserContext, type Page, type Locator, type Frame } from "playwright";
 
 export type NaverBlogDraft = {
   title: string;
@@ -63,18 +63,19 @@ export function composeNaverBlogBody(draft: NaverBlogDraft): string {
   ].join("\n\n");
 }
 
-function editorLocator(page: Page, selectors: NaverEditorSelectors, selector: string): Locator {
+function editorLocator(page: Page, selectors: NaverEditorSelectors, selector: string, frame?: Frame): Locator {
+  if (frame) return frame.locator(selector).first();
   return selectors.frame
     ? page.frameLocator(selectors.frame).locator(selector).first()
     : page.locator(selector).first();
 }
 
-function findTitleInput(page: Page, selectors: NaverEditorSelectors): Locator {
-  return editorLocator(page, selectors, selectors.title);
+function findTitleInput(page: Page, selectors: NaverEditorSelectors, frame?: Frame): Locator {
+  return editorLocator(page, selectors, selectors.title, frame);
 }
 
-function findBodyInput(page: Page, selectors: NaverEditorSelectors): Locator {
-  return editorLocator(page, selectors, selectors.body);
+function findBodyInput(page: Page, selectors: NaverEditorSelectors, frame?: Frame): Locator {
+  return editorLocator(page, selectors, selectors.body, frame);
 }
 
 /** Pass a Page from an already logged-in context, including launchNaverBlogSession().
@@ -88,6 +89,8 @@ export async function fillNaverBlogDraft(
     writeUrl: string;
     selectors?: Partial<NaverEditorSelectors>;
     timeoutMs?: number;
+    editorFrame?: Frame;
+    skipNavigation?: boolean;
   },
 ): Promise<{ ok: true; titleFilled: true; bodyFilled: true; published: false }> {
   const { page, writeUrl, timeoutMs = 30_000 } = options;
@@ -98,22 +101,24 @@ export async function fillNaverBlogDraft(
     if (url.protocol !== "https:" || url.hostname !== "blog.naver.com") {
       throw new Error("A Naver Blog HTTPS writing URL is required.");
     }
-    await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: timeoutMs });
-    await editorLocator(page, selectors, selectors.ready)
+    if (!options.skipNavigation) {
+      await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+    }
+    await editorLocator(page, selectors, selectors.ready, options.editorFrame)
       .waitFor({ state: "visible", timeout: timeoutMs });
   } catch (error) {
     throw new NaverBlogInputError("editor_open_failed", error);
   }
 
   try {
-    const title = findTitleInput(page, selectors);
+    const title = findTitleInput(page, selectors, options.editorFrame);
     await title.fill(draft.title, { timeout: timeoutMs });
   } catch (error) {
     throw new NaverBlogInputError("title_input_failed", error);
   }
 
   try {
-    const body = findBodyInput(page, selectors);
+    const body = findBodyInput(page, selectors, options.editorFrame);
     await body.fill(composeNaverBlogBody(draft), { timeout: timeoutMs });
   } catch (error) {
     throw new NaverBlogInputError("body_input_failed", error);

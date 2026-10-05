@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:naver-blog": "tsx scripts/test-naver-blog-editor.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
@@ -24,6 +25,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.8",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }
