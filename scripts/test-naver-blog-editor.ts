@@ -39,7 +39,10 @@ async function main() {
   const draft: NaverBlogDraftInput = {
     title: "ANGEL AGENT 제목 입력 테스트",
     intro: "자동입력 테스트 도입 문장입니다.",
-    sections: [{ heading: "첫 번째 섹션", body: "ANGEL AGENT 본문 입력 테스트" }],
+    sections: [
+      { heading: "첫 번째 섹션", body: "ANGEL AGENT 본문 입력 테스트" },
+      { heading: "두 번째 섹션", body: "섹션 사이 빈 문단을 확인하는 테스트입니다." },
+    ],
     closing: "자동입력 테스트 마무리 문장입니다.",
     imagePaths: [imagePath],
   };
@@ -55,6 +58,7 @@ async function main() {
     await printSelectorCounts(frame);
     const result = await fillNaverBlogDraft(draft, { page, writeUrl, skipNavigation: true });
     console.log("제목/본문/사진 입력 검증 완료:", result);
+    console.log("화면에서 도입·각 섹션·마무리 사이 빈 문단과 heading/body 사이 줄바꿈을 확인하세요.");
   } catch (error) {
     process.exitCode = 1;
     if (error instanceof NaverBlogInputError) console.error("입력 검증 실패:", error.stage, error.cause);

@@ -60,6 +60,33 @@ export function composeNaverBlogBody(draft: NaverBlogDraftInput): string {
   ].filter(Boolean).join("\n\n");
 }
 
+async function inputNaverBlogBody(page: Page, draft: NaverBlogDraftInput) {
+  // Each group is intro, one section, or closing. Empty groups add no Enter keys.
+  const groups = [
+    [draft.intro],
+    ...draft.sections.map((section) => [section.heading, section.body]),
+    [draft.closing],
+  ].map((group) => group.map((text) => text?.trim() ?? "").filter(Boolean))
+    .filter((group) => group.length > 0);
+
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+    if (groupIndex > 0) {
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Enter");
+    }
+    for (let blockIndex = 0; blockIndex < groups[groupIndex].length; blockIndex++) {
+      // Heading and body are separated by one actual paragraph break.
+      if (blockIndex > 0) await page.keyboard.press("Enter");
+      const lines = groups[groupIndex][blockIndex].split(/\r\n|\r|\n/);
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        // Internal line breaks also need keyboard events in SmartEditor.
+        if (lineIndex > 0) await page.keyboard.press("Enter");
+        if (lines[lineIndex]) await page.keyboard.insertText(lines[lineIndex]);
+      }
+    }
+  }
+}
+
 export async function findNaverBlogEditorFrame(page: Page, timeoutMs = 30_000): Promise<Frame> {
   const deadline = Date.now() + timeoutMs;
   do {
@@ -201,7 +228,7 @@ export async function fillNaverBlogDraft(
   try {
     const body = frame.locator(NAVER_EDITOR_SELECTORS.body).first();
     await body.click({ timeout: timeoutMs });
-    await page.keyboard.insertText(bodyText);
+    await inputNaverBlogBody(page, draft);
     const bodyAreas = frame.locator(NAVER_EDITOR_SELECTORS.body);
     console.log("본문 실제 textContent:", (await bodyAreas.allTextContents()).join("\n"));
     const paragraphs = [
