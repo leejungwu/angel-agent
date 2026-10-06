@@ -1,6 +1,14 @@
 import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
+import { generateKinWithProvider, isKinProvider, KinProviderOutputError, missingKinProviderKey, type KinProvider } from "@/lib/kin/provider";
 import { supabase } from "@/lib/supabase";
-import { ANSWER_SCHEMA, compactVoc, isKinAnswer, kinAnswerValidationErrors, KIN_INSTRUCTIONS, KIN_MODEL } from "@/lib/kin/generate";
+import {
+  compactVoc,
+  isKinAnswer,
+  kinAnswerValidationErrors,
+  KIN_COMMON_STYLE_INSTRUCTIONS,
+  KIN_INSTRUCTIONS,
+} from "@/lib/kin/generate";
 import { CONFIG_FIELDS, parsePresetConfig, structuredStyleInstructions, UUID_PATTERN, type PresetConfig } from "@/lib/kin/presets";
 import { checkKinAnswer } from "@/lib/kin/quality-check";
 
@@ -44,8 +52,8 @@ function parseInput(body: Record<string, unknown>): TaskInput {
 }
 
 function logFailure(stage: string, error: unknown) {
-  console.error("Kin generation failed", error instanceof OpenAI.APIError
-    ? { stage, status: error.status, code: error.code, requestId: error.requestID }
+  console.error("Kin generation failed", error instanceof OpenAI.APIError || error instanceof Anthropic.APIError
+    ? { stage, status: error.status, requestId: error.requestID }
     : { stage, type: error instanceof Error ? error.name : "DatabaseError",
       code: error && typeof error === "object" && "code" in error ? error.code : undefined });
 }
@@ -53,18 +61,24 @@ function logFailure(stage: string, error: unknown) {
 export async function POST(request: Request) {
   let body: Record<string, unknown>;
   let input: TaskInput | undefined;
+  let provider: KinProvider = "openai";
   try {
     const value: unknown = await request.json();
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("InvalidInput");
     body = value as Record<string, unknown>;
+    if (body.provider !== undefined) {
+      if (!isKinProvider(body.provider)) return Response.json({ error: "provider는 openai, anthropic, xai 중 하나여야 합니다." }, { status: 400 });
+      provider = body.provider;
+    }
     if (body.taskId !== undefined) {
       if (typeof body.taskId !== "string" || !UUID.test(body.taskId)) throw new Error("InvalidInput");
     } else input = parseInput(body);
   } catch {
     return Response.json({ error: "질문과 입력값을 확인해 주세요. 질문은 필수이며 상품 ID와 선택 옵션이 유효해야 합니다." }, { status: 400 });
   }
-  if (!process.env.OPENAI_API_KEY?.trim()) {
-    return Response.json({ error: "OPENAI_API_KEY 환경변수가 설정되지 않았습니다." }, { status: 500 });
+  const missingKey = missingKinProviderKey(provider);
+  if (missingKey) {
+    return Response.json({ error: `${missingKey} 환경변수가 설정되지 않았습니다.` }, { status: 500 });
   }
 
   let taskId: string | undefined;
@@ -120,9 +134,10 @@ export async function POST(request: Request) {
       if (error || !data) throw error ?? new Error("TaskInsertFailed");
       taskId = data.id;
     }
-    stage = "OpenAI generation";
-    const response = await new OpenAI({ apiKey: process.env.OPENAI_API_KEY }).responses.create({
-      model: KIN_MODEL, instructions: KIN_INSTRUCTIONS,
+    stage = `${provider} generation`;
+    const response = await generateKinWithProvider({
+      provider,
+      systemInstructions: `${KIN_INSTRUCTIONS}\n\n${KIN_COMMON_STYLE_INSTRUCTIONS}`,
       input: JSON.stringify({
         presetInstructions: input.preset_instructions_snapshot,
         structuredStyleInstructions: structuredStyleInstructions(input.preset_config_snapshot),
@@ -132,31 +147,20 @@ export async function POST(request: Request) {
           question_url: input.question_url, category: input.category },
         question: input.question,
       }),
-      text: { format: { type: "json_schema", name: "kin_answer", strict: true, schema: ANSWER_SCHEMA } },
-      store: false,
     });
     stage = "output validation";
     // Temporary diagnostics: shape and lengths only, never answer/question text.
-    const refused = response.output.some((item) => item.type === "message" &&
-      item.content.some((content) => content.type === "refusal"));
     console.info("Kin output response", {
-      status: response.status, outputTextPresent: Boolean(response.output_text),
-      refused, incompleteReason: response.incomplete_details?.reason ?? null,
+      provider, outputTextPresent: Boolean(response.outputText),
     });
-    if (refused) { stage = "output validation: refusal"; throw new Error("RefusedOutput"); }
-    if (response.status !== "completed") {
-      stage = response.status === "incomplete" ? "output validation: incomplete" : "output validation: not completed";
-      throw new Error("UnfinishedOutput");
-    }
-    if (!response.output_text) { stage = "output validation: missing output_text"; throw new Error("MissingOutputText"); }
     let draft: unknown;
-    try { draft = JSON.parse(response.output_text); }
+    try { draft = JSON.parse(response.outputText); }
     catch { stage = "output validation: invalid JSON"; throw new Error("InvalidOutputJSON"); }
     const parsed = draft !== null && typeof draft === "object" && !Array.isArray(draft)
       ? draft as Record<string, unknown> : null;
     const validationErrors = kinAnswerValidationErrors(draft);
     console.info("Kin output validation", {
-      outputTextPresent: Boolean(response.output_text), keys: parsed ? Object.keys(parsed) : [],
+      outputTextPresent: Boolean(response.outputText), keys: parsed ? Object.keys(parsed) : [],
       answerType: typeof parsed?.answer,
       answerLength: typeof parsed?.answer === "string" ? [...parsed.answer].length : null,
       questionIntentType: typeof parsed?.questionIntent,
@@ -191,6 +195,7 @@ export async function POST(request: Request) {
     if (updateError || !updated) throw updateError ?? new Error("TaskUpdateFailed");
     return Response.json({ ok: true, taskId, draftId: saved.id, draft, model: response.model, qualityCheck });
   } catch (error) {
+    if (error instanceof KinProviderOutputError) stage = `${provider} output validation: ${error.reason}`;
     logFailure(stage, error);
     if (taskId) {
       try {

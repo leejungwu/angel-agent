@@ -10,6 +10,7 @@
     "test:naver-blog": "tsx scripts/test-naver-blog-editor.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "@supabase/supabase-js": "^2.117.2",
     "csv-parse": "^7.0.3",
     "next": "16.3.8",

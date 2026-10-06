@@ -6,6 +6,7 @@ import type { KinAnswer } from "@/lib/kin/generate";
 import type { KinPreset, MentionLevel } from "@/lib/kin/presets";
 import KinPresetControl from "./KinPresetControl";
 import type { QualityCheck } from "@/lib/kin/quality-check";
+import type { KinProvider } from "@/lib/kin/provider";
 
 export type KinProduct = { id: number; name: string; brand: string | null };
 type Result = { taskId: string; draftId: string; draft: KinAnswer; model: string; inputKey: string; qualityCheck: QualityCheck };
@@ -15,6 +16,7 @@ export default function KinAnswerForm({ products, presets }: { products: KinProd
   const router = useRouter();
   const busy = useRef(false);
   const [generating, setGenerating] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<KinProvider>("openai");
   const [productId, setProductId] = useState("");
   const [question, setQuestion] = useState("");
   const [questionUrl, setQuestionUrl] = useState("");
@@ -44,7 +46,7 @@ export default function KinAnswerForm({ products, presets }: { products: KinProd
     try {
       const response = await fetch("/api/kin/generate", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(regenerate && result ? { taskId: result.taskId } : input),
+        body: JSON.stringify({ ...(regenerate && result ? { taskId: result.taskId } : input), provider: selectedProvider }),
       });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "답변 생성에 실패했습니다.");
@@ -80,6 +82,20 @@ export default function KinAnswerForm({ products, presets }: { products: KinProd
       <form onSubmit={(event) => { event.preventDefault(); void generate(Boolean(result && sameInput)); }}
         className="rounded-lg border bg-white p-6">
         <fieldset disabled={generating || presetBusy} className="space-y-5 disabled:opacity-60">
+          <fieldset>
+            <legend className="text-sm font-medium">AI 모델</legend>
+            <div className="mt-2 inline-flex flex-wrap gap-1 rounded-lg border border-zinc-300 bg-zinc-50 p-1">
+              {([{ value: "openai", label: "OpenAI" }, { value: "anthropic", label: "Claude" }, { value: "xai", label: "Grok" }] as const).map((option) => (
+                <label key={option.value} className="cursor-pointer">
+                  <input type="radio" name="kin-provider" value={option.value} checked={selectedProvider === option.value}
+                    onChange={() => setSelectedProvider(option.value)} className="peer sr-only" />
+                  <span className="block rounded-md px-4 py-2 text-sm text-zinc-600 peer-checked:bg-white peer-checked:font-medium peer-checked:text-zinc-900 peer-checked:shadow-sm peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-zinc-700">
+                    {option.label}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
           <label className="block text-sm font-medium">상품 선택
             <select className={fieldClass} value={productId} onChange={(event) => setProductId(event.target.value)}>
               <option value="">상품 없이 일반 답변</option>
