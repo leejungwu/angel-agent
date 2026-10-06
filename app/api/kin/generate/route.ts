@@ -1,6 +1,8 @@
 import OpenAI from "openai";
 import { supabase } from "@/lib/supabase";
 import { ANSWER_SCHEMA, compactVoc, isKinAnswer, kinAnswerValidationErrors, KIN_INSTRUCTIONS, KIN_MODEL } from "@/lib/kin/generate";
+import { CONFIG_FIELDS, parsePresetConfig, structuredStyleInstructions, UUID_PATTERN, type PresetConfig } from "@/lib/kin/presets";
+import { checkKinAnswer } from "@/lib/kin/quality-check";
 
 type TaskInput = {
   product_id: number | null;
@@ -10,6 +12,10 @@ type TaskInput = {
   purpose: "helpful" | "product_relevant";
   product_mention_level: "none" | "relevant" | "direct";
   instructions: string | null;
+  preset_id: string | null;
+  preset_name_snapshot: string | null;
+  preset_instructions_snapshot: string | null;
+  preset_config_snapshot: PresetConfig | null;
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -24,6 +30,8 @@ function parseInput(body: Record<string, unknown>): TaskInput {
   const productId = body.productId ?? null;
   const purpose = body.purpose ?? "helpful";
   const level = body.productMentionLevel ?? "relevant";
+  const presetId = body.presetId ?? null;
+  if (presetId !== null && (typeof presetId !== "string" || !UUID_PATTERN.test(presetId))) throw new Error("InvalidInput");
   if (!question || (productId !== null && (typeof productId !== "number" || !Number.isSafeInteger(productId) || productId <= 0)) ||
       (purpose !== "helpful" && purpose !== "product_relevant") ||
       (level !== "none" && level !== "relevant" && level !== "direct")) throw new Error("InvalidInput");
@@ -31,7 +39,8 @@ function parseInput(body: Record<string, unknown>): TaskInput {
   if (questionUrl && !["http:", "https:"].includes(new URL(questionUrl).protocol)) throw new Error("InvalidInput");
   return { product_id: productId as number | null, question, question_url: questionUrl,
     category: optionalText(body.category, 200), purpose, product_mention_level: level,
-    instructions: optionalText(body.instructions, 3000) };
+    instructions: optionalText(body.instructions, 3000), preset_id: presetId as string | null,
+    preset_name_snapshot: null, preset_instructions_snapshot: null, preset_config_snapshot: null };
 }
 
 function logFailure(stage: string, error: unknown) {
@@ -64,7 +73,7 @@ export async function POST(request: Request) {
   try {
     if (body.taskId) {
       const { data, error } = await supabase.from("kin_tasks")
-        .select("id, product_id, question, question_url, category, purpose, product_mention_level, instructions")
+        .select("id, product_id, question, question_url, category, purpose, product_mention_level, instructions, preset_id, preset_name_snapshot, preset_instructions_snapshot, preset_config_snapshot")
         .eq("id", body.taskId).maybeSingle();
       if (error) throw error;
       if (!data) return Response.json({ error: "지식인 작업을 찾을 수 없습니다." }, { status: 404 });
@@ -72,6 +81,20 @@ export async function POST(request: Request) {
       input = data as TaskInput;
     }
     if (!input) throw new Error("MissingTaskInput");
+    // Regeneration uses the original snapshot, even after preset edits/deletion.
+    if (!taskId && input.preset_id) {
+      stage = "preset lookup";
+      const { data: preset, error: presetError } = await supabase.from("kin_prompt_presets")
+        .select(`name, instructions, default_product_mention_level, ${CONFIG_FIELDS}`).eq("id", input.preset_id).maybeSingle();
+      if (presetError) throw presetError;
+      if (!preset) return Response.json({ error: "선택한 프리셋이 존재하지 않습니다." }, { status: 400 });
+      input.preset_name_snapshot = preset.name;
+      input.preset_instructions_snapshot = preset.instructions;
+      input.preset_config_snapshot = parsePresetConfig(preset);
+      if (body.productMentionLevel == null) {
+        input.product_mention_level = preset.default_product_mention_level ?? "relevant";
+      }
+    }
     stage = "product and VOC lookup";
     let product = null;
     let voc = null;
@@ -100,7 +123,15 @@ export async function POST(request: Request) {
     stage = "OpenAI generation";
     const response = await new OpenAI({ apiKey: process.env.OPENAI_API_KEY }).responses.create({
       model: KIN_MODEL, instructions: KIN_INSTRUCTIONS,
-      input: JSON.stringify({ task: input, product, voc }),
+      input: JSON.stringify({
+        presetInstructions: input.preset_instructions_snapshot,
+        structuredStyleInstructions: structuredStyleInstructions(input.preset_config_snapshot),
+        product, voc,
+        additionalInstructions: input.instructions,
+        task: { purpose: input.purpose, product_mention_level: input.product_mention_level,
+          question_url: input.question_url, category: input.category },
+        question: input.question,
+      }),
       text: { format: { type: "json_schema", name: "kin_answer", strict: true, schema: ANSWER_SCHEMA } },
       store: false,
     });
@@ -143,6 +174,10 @@ export async function POST(request: Request) {
       stage = "output validation: product mention policy";
       throw new Error("UnexpectedProductMention");
     }
+    stage = "quality check";
+    const qualityCheck = checkKinAnswer({ answer: draft.answer, question: input.question,
+      instructions: input.instructions, productName: product?.name ?? null,
+      mentionLevel: input.product_mention_level, config: input.preset_config_snapshot });
     stage = "draft insert";
     const { data: saved, error: saveError } = await supabase.from("kin_drafts").insert({
       kin_task_id: taskId, product_id: input.product_id, answer: draft.answer,
@@ -154,7 +189,7 @@ export async function POST(request: Request) {
     const { data: updated, error: updateError } = await supabase.from("kin_tasks")
       .update({ status: "generated", updated_at: new Date().toISOString() }).eq("id", taskId).select("id").maybeSingle();
     if (updateError || !updated) throw updateError ?? new Error("TaskUpdateFailed");
-    return Response.json({ ok: true, taskId, draftId: saved.id, draft, model: response.model });
+    return Response.json({ ok: true, taskId, draftId: saved.id, draft, model: response.model, qualityCheck });
   } catch (error) {
     logFailure(stage, error);
     if (taskId) {
