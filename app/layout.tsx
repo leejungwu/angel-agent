@@ -39,7 +39,7 @@ export default function RootLayout({
               <Link href="/">Dashboard</Link>
               <Link href="/products">Products</Link>
               <span>Sourcing</span>
-              <span>VOC</span>
+              <Link href="/voc">VOC</Link>
               <span>Ads</span>
               <Link href="/content/blog">Content</Link>
               <span>Sales</span>
