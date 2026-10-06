@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import Image from "next/image";
 import UploadProductAssets from "./UploadProductAssets";
+import UploadReviews, { type ReviewImportBatch } from "./UploadReviews";
 
 type ProductAsset = {
   id: string | number;
@@ -38,6 +39,14 @@ export default async function ProductDetailPage({
     .order("sort_order", { ascending: true })
     .order("id", { ascending: true })
     .returns<ProductAsset[]>();
+
+  const [reviewResult, batchResult] = await Promise.all([
+    supabase.from("reviews").select("id", { count: "exact", head: true }).eq("product_id", product.id),
+    supabase.from("review_import_batches")
+      .select("id, file_name, status, total_rows, imported_rows, skipped_rows, error_message, created_at")
+      .eq("product_id", product.id).order("created_at", { ascending: false }).order("id", { ascending: false })
+      .limit(1).maybeSingle<ReviewImportBatch>(),
+  ]);
 
   return (
     <main className="p-10">
@@ -105,6 +114,12 @@ export default async function ProductDetailPage({
             ))}
           </ul>
         )}
+      </section>
+      <section className="mt-8 max-w-2xl rounded-xl border bg-white p-6">
+        <h2 className="text-xl font-bold">VOC / Reviews</h2>
+        <UploadReviews productId={product.id} reviewCount={reviewResult.count}
+          latestBatch={batchResult.data}
+          queryError={reviewResult.error || batchResult.error ? "리뷰 정보를 조회하지 못했습니다. VOC migration 적용 여부를 확인해주세요." : null} />
       </section>
     </main>
   );
