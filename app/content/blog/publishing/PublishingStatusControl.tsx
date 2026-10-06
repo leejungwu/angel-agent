@@ -20,17 +20,17 @@ export default function PublishingStatusControl({
   const inFlight = useRef(false);
 
   async function toggleQueue() {
-    if (inFlight.current || (status !== null && status !== "queued" && status !== "failed" && status !== "publishing")) return;
+    if (inFlight.current || (status !== null && status !== "failed")) return;
     inFlight.current = true;
     setUpdating(true);
-    const nextStatus = status === "queued" ? null : "queued";
+    const nextStatus = "queued";
 
     try {
       let query = supabase
         .from("blog_drafts")
         .update({
           publishing_status: nextStatus,
-          ...(status === "failed" || status === "publishing" ? { publishing_error: null } : {}),
+          ...(status === "failed" ? { publishing_error: null } : {}),
         })
         .eq("id", draftId)
         .eq("status", "approved");
@@ -61,6 +61,37 @@ export default function PublishingStatusControl({
     } finally {
       inFlight.current = false;
       setUpdating(false);
+    }
+  }
+
+  async function removeFromQueue() {
+    if (inFlight.current || (status !== "queued" && status !== "failed" && status !== "ready_for_review")) return;
+    if (!confirm("이 글을 발행 대기 목록에서 제거할까요?\n초안은 삭제되지 않습니다.")) return;
+    const numericDraftId = Number(draftId);
+    if (!Number.isSafeInteger(numericDraftId) || numericDraftId <= 0) {
+      alert("초안 ID가 올바르지 않습니다.");
+      return;
+    }
+    inFlight.current = true;
+    setUpdating(true);
+    try {
+      const response = await fetch("/api/blog/publish/queue/remove", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId: numericDraftId }),
+      });
+      const result: unknown = await response.json();
+      const data = typeof result === "object" && result !== null ? result as Record<string, unknown> : null;
+      if (!response.ok || data?.ok !== true || data.publishingStatus !== null) {
+        alert(typeof data?.error === "string" ? data.error : "발행 대기를 해제하지 못했습니다.");
+        return;
+      }
+      setStatus(null);
+    } catch {
+      alert("발행 대기를 해제하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      inFlight.current = false;
+      setUpdating(false);
+      router.refresh();
     }
   }
 
@@ -110,16 +141,20 @@ export default function PublishingStatusControl({
       <p className="text-sm text-zinc-500">
         발행 상태: {status === "ready_for_review" ? "입력 완료 · 최종 검수 대기" : status ?? "미등록"}
       </p>
-      {(status === null || status === "queued" || status === "failed" || status === "publishing") && (
+      {(status === null || status === "failed") && (
         <button
           type="button"
           onClick={toggleQueue}
           disabled={updating || starting}
           className="mt-2 rounded-lg border bg-white px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
-          {updating ? "변경 중..." : status === "failed" ? "다시 시도"
-            : status === "publishing" ? "발행 대기로 복구"
-            : status === null ? "발행 대기 등록" : "발행 대기 해제"}
+          {updating ? "변경 중..." : status === "failed" ? "다시 시도" : "발행 대기 등록"}
+        </button>
+      )}
+      {(status === "queued" || status === "failed" || status === "ready_for_review") && (
+        <button type="button" onClick={removeFromQueue} disabled={updating || starting}
+          className="ml-2 mt-2 rounded-lg border bg-white px-4 py-2 text-sm font-medium text-zinc-600 disabled:opacity-50">
+          {updating ? "변경 중..." : "발행 대기 해제"}
         </button>
       )}
       {status === "queued" && (
