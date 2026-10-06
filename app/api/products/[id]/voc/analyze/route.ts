@@ -4,6 +4,11 @@ import { analyzeVoc, VocAnalysisError, VOC_MODEL, VOC_SCHEMA_VERSION, type VocRe
 
 export const runtime = "nodejs";
 
+// Same-process race protection, retained across dev reloads. The DB check below
+// also rejects persisted processing runs; no database constraint is changed.
+const vocGlobal = globalThis as typeof globalThis & { vocActiveProducts?: Set<number> };
+const activeProducts = vocGlobal.vocActiveProducts ??= new Set<number>();
+
 function logFailure(stage: string, runId: string | undefined, error: unknown) {
   const cause = error instanceof VocAnalysisError ? error.cause : error;
   console.error("VOC analysis failed", {
@@ -23,6 +28,10 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   if (!/^\d+$/.test(id) || !Number.isSafeInteger(productId) || productId <= 0) {
     return Response.json({ error: "유효한 상품 ID가 필요합니다." }, { status: 400 });
   }
+  if (activeProducts.has(productId)) {
+    return Response.json({ error: "이 상품의 VOC 분석이 이미 진행 중입니다." }, { status: 409 });
+  }
+  activeProducts.add(productId);
   let stage = "product_lookup";
   let runId: string | undefined;
   try {
@@ -30,6 +39,12 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       .select("id").eq("id", productId).maybeSingle();
     if (productError) throw productError;
     if (!product) return Response.json({ error: "상품을 찾을 수 없습니다." }, { status: 404 });
+
+    stage = "processing_lookup";
+    const { data: processingRun, error: processingError } = await supabase.from("voc_analysis_runs")
+      .select("id").eq("product_id", productId).eq("status", "processing").limit(1).maybeSingle();
+    if (processingError) throw processingError;
+    if (processingRun) return Response.json({ error: "이 상품의 VOC 분석이 이미 진행 중입니다." }, { status: 409 });
 
     stage = "reviews_lookup";
     const reviews: VocReview[] = [];
@@ -78,6 +93,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     logFailure(failureStage, runId, error);
     const messages: Record<string, string> = {
       product_lookup: "상품 조회에 실패했습니다.", reviews_lookup: "리뷰 조회에 실패했습니다.",
+      processing_lookup: "VOC 분석 진행 상태를 확인하지 못했습니다.",
       run_creation: "VOC 분석 실행을 저장하지 못했습니다.", chunk_analysis: "리뷰 chunk 분석에 실패했습니다.",
       final_synthesis: "최종 VOC 통합 분석에 실패했습니다.", result_storage: "VOC 분석 결과를 저장하지 못했습니다.",
     };
@@ -92,5 +108,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       } catch (updateError) { logFailure("failure_storage", runId, updateError); }
     }
     return Response.json({ error: message, ...(runId ? { runId } : {}) }, { status: 500 });
+  } finally {
+    activeProducts.delete(productId);
   }
 }

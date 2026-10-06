@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import Image from "next/image";
 import UploadProductAssets from "./UploadProductAssets";
 import UploadReviews, { type ReviewImportBatch } from "./UploadReviews";
+import VocAnalysisControl, { type VocAnalysisRun } from "./VocAnalysisControl";
 
 type ProductAsset = {
   id: string | number;
@@ -40,12 +41,16 @@ export default async function ProductDetailPage({
     .order("id", { ascending: true })
     .returns<ProductAsset[]>();
 
-  const [reviewResult, batchResult] = await Promise.all([
+  const [reviewResult, batchResult, analysisResult] = await Promise.all([
     supabase.from("reviews").select("id", { count: "exact", head: true }).eq("product_id", product.id),
     supabase.from("review_import_batches")
       .select("id, file_name, status, total_rows, imported_rows, skipped_rows, error_message, created_at")
       .eq("product_id", product.id).order("created_at", { ascending: false }).order("id", { ascending: false })
       .limit(1).maybeSingle<ReviewImportBatch>(),
+    supabase.from("voc_analysis_runs")
+      .select("id, status, review_count, model, schema_version, result, error_message, created_at")
+      .eq("product_id", product.id).order("created_at", { ascending: false }).order("id", { ascending: false })
+      .limit(1).maybeSingle<VocAnalysisRun>(),
   ]);
 
   return (
@@ -120,6 +125,8 @@ export default async function ProductDetailPage({
         <UploadReviews productId={product.id} reviewCount={reviewResult.count}
           latestBatch={batchResult.data}
           queryError={reviewResult.error || batchResult.error ? "리뷰 정보를 조회하지 못했습니다. VOC migration 적용 여부를 확인해주세요." : null} />
+        <VocAnalysisControl productId={product.id} reviewCount={reviewResult.count} latestRun={analysisResult.data}
+          queryError={analysisResult.error ? "VOC 분석 상태를 조회하지 못했습니다." : null} />
       </section>
     </main>
   );
