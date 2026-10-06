@@ -20,7 +20,7 @@ export default function PublishingStatusControl({
   const inFlight = useRef(false);
 
   async function toggleQueue() {
-    if (inFlight.current || (status !== null && status !== "queued" && status !== "failed")) return;
+    if (inFlight.current || (status !== null && status !== "queued" && status !== "failed" && status !== "publishing")) return;
     inFlight.current = true;
     setUpdating(true);
     const nextStatus = status === "queued" ? null : "queued";
@@ -30,7 +30,7 @@ export default function PublishingStatusControl({
         .from("blog_drafts")
         .update({
           publishing_status: nextStatus,
-          ...(status === "failed" ? { publishing_error: null } : {}),
+          ...(status === "failed" || status === "publishing" ? { publishing_error: null } : {}),
         })
         .eq("id", draftId)
         .eq("status", "approved");
@@ -110,7 +110,7 @@ export default function PublishingStatusControl({
       <p className="text-sm text-zinc-500">
         발행 상태: {status === "ready_for_review" ? "입력 완료 · 최종 검수 대기" : status ?? "미등록"}
       </p>
-      {(status === null || status === "queued" || status === "failed") && (
+      {(status === null || status === "queued" || status === "failed" || status === "publishing") && (
         <button
           type="button"
           onClick={toggleQueue}
@@ -118,6 +118,7 @@ export default function PublishingStatusControl({
           className="mt-2 rounded-lg border bg-white px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
           {updating ? "변경 중..." : status === "failed" ? "다시 시도"
+            : status === "publishing" ? "발행 대기로 복구"
             : status === null ? "발행 대기 등록" : "발행 대기 해제"}
         </button>
       )}
