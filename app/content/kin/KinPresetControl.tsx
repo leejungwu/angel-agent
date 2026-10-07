@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { KinPreset, MentionLevel } from "@/lib/kin/presets";
 
 type Props = {
@@ -11,6 +11,7 @@ type Props = {
   onBusy: (busy: boolean) => void;
 };
 export default function KinPresetControl({ initialPresets, selectedId, disabled, onSelect, onBusy }: Props) {
+  const editorFormId = useId();
   const [presets, setPresets] = useState(initialPresets);
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -80,17 +81,21 @@ export default function KinPresetControl({ initialPresets, selectedId, disabled,
       </select>
     </label>
     {selected?.description && <p className="mt-2 text-xs text-zinc-500">{selected.description}</p>}
-    <div className="mt-3 flex gap-2">
+    <div className="mt-3 flex flex-wrap gap-2">
       <button type="button" className={button} disabled={disabled || saving || editing !== null} onClick={() => openEditor()}>+ 새 프리셋</button>
       <button type="button" className={button} disabled={disabled || saving || !selected || editing !== null} onClick={() => openEditor(selected)}>편집</button>
       <button type="button" className={button} disabled={disabled || saving || !selected || editing !== null} onClick={() => void mutate(false, true)}>복제</button>
-      <button type="button" className={button} disabled={disabled || saving || !selected || editing !== null} onClick={() => void mutate(true)}>삭제</button>
+      {editing !== "new" && <button type="button" className={button} disabled={(disabled && editing === null) || saving || !selected} onClick={() => void mutate(true)}>삭제</button>}
     </div>
-    {editing !== null && <form className="mt-5 space-y-4 border-t pt-5" onSubmit={(event) => { event.preventDefault(); void mutate(); }}>
+    {editing !== null && <form id={editorFormId} className="mt-5 space-y-4 border-t pt-5" onSubmit={(event) => { event.preventDefault(); void mutate(); }}>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={button} disabled={saving} onClick={closeEditor}>취소</button>
+        <button type="submit" className={button} disabled={saving || !name.trim() || !instructions.trim()}>{saving ? "저장 중..." : "저장"}</button>
+      </div>
       <fieldset disabled={saving} className="space-y-4">
         <label className="block text-sm">이름<input required maxLength={100} className={field} value={name} onChange={(event) => setName(event.target.value)} /></label>
         <label className="block text-sm">설명<input maxLength={500} className={field} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
-        <label className="block text-sm">프롬프트 지침<textarea required rows={7} maxLength={6000} className={field} value={instructions} onChange={(event) => setInstructions(event.target.value)} /></label>
+        <label className="block text-sm">프롬프트 지침<textarea required rows={21} maxLength={6000} className={field} value={instructions} onChange={(event) => setInstructions(event.target.value)} /></label>
         <p className="text-xs text-zinc-500">반복 사용할 문체·구조·키워드 배치 지침입니다. 안전·사실성 규칙은 항상 우선합니다.</p>
         <div className="grid gap-4 md:grid-cols-3">
           <label className="block text-sm">문단 수<input type="number" min={2} max={5} step={1} className={field} value={paragraphCount} onChange={(event) => setParagraphCount(event.target.value)} /></label>
@@ -106,10 +111,6 @@ export default function KinPresetControl({ initialPresets, selectedId, disabled,
             <option value="relevant">관련 있을 때만 언급</option><option value="direct">직접 소개</option>
           </select>
         </label>
-        <div className="flex gap-2">
-          <button type="submit" className={button} disabled={saving || !name.trim() || !instructions.trim()}>{saving ? "저장 중..." : "저장"}</button>
-          <button type="button" className={button} onClick={closeEditor}>취소</button>
-        </div>
       </fieldset>
     </form>}
     {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
