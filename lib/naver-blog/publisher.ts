@@ -16,6 +16,7 @@ export const NAVER_EDITOR_SELECTORS = {
   title: ".se-title-text",
   body: ".se-component.se-text .se-module-text",
   bodyComponent: ".se-component.se-text",
+  content: ".se-content",
   photoButton: ".se-image-toolbar-button",
   photoButtonFallback: ".se-toolbar-item.se-toolbar-item-image",
   fileInput: 'input[type="file"]',
@@ -111,11 +112,48 @@ function normalizeEditorText(value: string): string {
   return value.replace(/\r/g, "").replace(/\s+/g, " ").trim();
 }
 
+async function collectBodyVerificationText(body: Locator): Promise<string> {
+  return body.evaluate((element, contentSelector) => {
+    const content = element.closest(contentSelector);
+    if (!content) throw new Error("본문 editor content 영역을 찾지 못했습니다.");
+    const excluded = '.se-title-text, .se-component.se-documentTitle, .se-placeholder, .__se_placeholder, .se-toolbar, button, input, textarea, [role="button"], [aria-hidden="true"]';
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+    let text = "";
+    let previousBlock: Element | null = null;
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      if (node instanceof Element) {
+        if (node.tagName === 'BR' && node.closest('.se-component') && !node.closest(excluded)) text += '\n';
+        continue;
+      }
+      const parent = node.parentElement;
+      // Restrict collection to authored components, including list components.
+      if (!parent || !parent.closest('.se-component') || parent.closest(excluded)) continue;
+      let visible = true;
+      for (let ancestor: Element | null = parent; ancestor; ancestor = ancestor.parentElement) {
+        const style = window.getComputedStyle(ancestor);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') {
+          visible = false;
+          break;
+        }
+        if (ancestor === content) break;
+      }
+      if (!visible) continue;
+      const block = parent.closest('p, li, .se-module, .se-component');
+      if (previousBlock && previousBlock !== block) text += '\n';
+      text += node.textContent ?? '';
+      previousBlock = block;
+    }
+    return text;
+  }, NAVER_EDITOR_SELECTORS.content);
+}
+
 async function verifyText(
   locator: Locator,
   expected: string,
   timeoutMs: number,
   paragraphs: string[] = [],
+  collectText?: () => Promise<string>,
 ) {
   const normalizedExpected = normalizeEditorText(expected);
   const normalizedParagraphs = paragraphs.map(normalizeEditorText).filter(Boolean);
@@ -124,11 +162,19 @@ async function verifyText(
   const deadline = Date.now() + timeoutMs;
   do {
     // textContent avoids layout-dependent innerText differences in SmartEditor.
-    actual = normalizeEditorText((await locator.allTextContents()).join("\n"));
-    if (normalizedExpected && actual.includes(normalizedExpected)) return;
+    actual = normalizeEditorText(collectText
+      ? await collectText()
+      : (await locator.allTextContents()).join("\n"));
     missingParagraphs = normalizedParagraphs.filter((paragraph) => !actual.includes(paragraph));
+    if (normalizedExpected && actual.includes(normalizedExpected)) {
+      if (collectText) console.log("missingParagraphs:", missingParagraphs);
+      return;
+    }
     // Require ALL nonempty paragraphs, never a partial or unconditional pass.
-    if (normalizedParagraphs.length > 0 && missingParagraphs.length === 0) return;
+    if (normalizedParagraphs.length > 0 && missingParagraphs.length === 0) {
+      if (collectText) console.log("missingParagraphs:", missingParagraphs);
+      return;
+    }
     await new Promise((done) => setTimeout(done, 100));
   } while (Date.now() < deadline);
   console.error("입력 검증 실패:", {
@@ -608,14 +654,16 @@ export async function fillNaverBlogDraft(
     const body = frame.locator(NAVER_EDITOR_SELECTORS.body).first();
     await body.click({ timeout: timeoutMs });
     await inputNaverBlogBody(page, draft);
-    const bodyAreas = frame.locator(NAVER_EDITOR_SELECTORS.body);
-    console.log("본문 실제 textContent:", (await bodyAreas.allTextContents()).join("\n"));
+    const content = body.locator(`xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' se-content ')][1]`);
+    console.log("발견한 SmartEditor component:", await content.locator('.se-component').evaluateAll((elements) =>
+      elements.map((element) => ({ tag: element.tagName, class: element.className }))));
+    console.log("verification에 사용한 body 전체 text:", await collectBodyVerificationText(body));
     const paragraphs = [
       draft.intro,
       ...draft.sections.flatMap((section) => [section.heading, section.body]),
       draft.closing,
     ].flatMap((value) => (value ?? "").split(/\r?\n/)).filter((value) => value.trim());
-    await verifyText(bodyAreas, bodyText, timeoutMs, paragraphs);
+    await verifyText(body, bodyText, timeoutMs, paragraphs, () => collectBodyVerificationText(body));
     console.log("본문 입력 성공");
   } catch (error) {
     throw new NaverBlogInputError("body_input_failed", error);

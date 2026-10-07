@@ -2,6 +2,19 @@ import DeleteProductButton from "./DeleteProductButton";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import Image from "next/image";
+import UploadProductAssets from "./UploadProductAssets";
+import UploadReviews, { type ReviewImportBatch } from "./UploadReviews";
+import VocAnalysisControl, { type VocAnalysisRun } from "./VocAnalysisControl";
+
+type ProductAsset = {
+  id: string | number;
+  file_name: string | null;
+  storage_path: string;
+  alt_text: string | null;
+  is_primary: boolean;
+  sort_order: number;
+};
 
 export default async function ProductDetailPage({
   params,
@@ -19,6 +32,26 @@ export default async function ProductDetailPage({
   if (error || !product) {
     notFound();
   }
+
+  const { data: assets, error: assetsError } = await supabase
+    .from("product_assets")
+    .select("id, file_name, storage_path, alt_text, is_primary, sort_order")
+    .eq("product_id", product.id)
+    .order("sort_order", { ascending: true })
+    .order("id", { ascending: true })
+    .returns<ProductAsset[]>();
+
+  const [reviewResult, batchResult, analysisResult] = await Promise.all([
+    supabase.from("reviews").select("id", { count: "exact", head: true }).eq("product_id", product.id),
+    supabase.from("review_import_batches")
+      .select("id, file_name, status, total_rows, imported_rows, skipped_rows, error_message, created_at")
+      .eq("product_id", product.id).order("created_at", { ascending: false }).order("id", { ascending: false })
+      .limit(1).maybeSingle<ReviewImportBatch>(),
+    supabase.from("voc_analysis_runs")
+      .select("id, status, review_count, model, schema_version, result, error_message, created_at")
+      .eq("product_id", product.id).order("created_at", { ascending: false }).order("id", { ascending: false })
+      .limit(1).maybeSingle<VocAnalysisRun>(),
+  ]);
 
   return (
     <main className="p-10">
@@ -56,6 +89,45 @@ export default async function ProductDetailPage({
           제품 메모: {product.notes ?? "-"}
         </p>
       </div>
+      <section className="mt-8 max-w-2xl rounded-xl border bg-white p-6">
+        <h2 className="text-xl font-bold">Product Assets</h2>
+        <UploadProductAssets productId={product.id} />
+        {assetsError ? (
+          <p role="alert" className="mt-4 text-red-600">
+            상품 이미지 조회 오류: {assetsError.message}
+          </p>
+        ) : !assets?.length ? (
+          <p className="mt-4 text-zinc-500">등록된 상품 이미지가 없습니다.</p>
+        ) : (
+          <ul className="mt-4 space-y-4">
+            {assets.map((asset) => (
+              <li key={asset.id} className="rounded-lg border p-4">
+                <Image
+                  src={supabase.storage.from("product-assets").getPublicUrl(asset.storage_path).data.publicUrl}
+                  alt={asset.alt_text || asset.file_name || "상품 이미지"}
+                  width={160}
+                  height={120}
+                  unoptimized
+                  className="mb-3 h-32 w-40 rounded-lg border object-contain"
+                />
+                <p className="break-words font-medium">파일명: {asset.file_name || "-"}</p>
+                <p className="mt-2 break-all">저장 경로: {asset.storage_path}</p>
+                <p className="mt-2 whitespace-pre-wrap break-words">대체 텍스트: {asset.alt_text || "-"}</p>
+                <p className="mt-2">대표 이미지: {asset.is_primary ? "예" : "아니오"}</p>
+                <p className="mt-2">정렬 순서: {asset.sort_order}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section className="mt-8 max-w-2xl rounded-xl border bg-white p-6">
+        <h2 className="text-xl font-bold">VOC / Reviews</h2>
+        <UploadReviews productId={product.id} reviewCount={reviewResult.count}
+          latestBatch={batchResult.data}
+          queryError={reviewResult.error || batchResult.error ? "리뷰 정보를 조회하지 못했습니다. VOC migration 적용 여부를 확인해주세요." : null} />
+        <VocAnalysisControl productId={product.id} reviewCount={reviewResult.count} latestRun={analysisResult.data}
+          queryError={analysisResult.error ? "VOC 분석 상태를 조회하지 못했습니다." : null} />
+      </section>
     </main>
   );
 }

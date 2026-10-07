@@ -31,6 +31,8 @@ export default async function PublishingQueuePage() {
     .returns<ApprovedDraft[]>();
 
   let errorMessage = error?.message;
+  const queuedDrafts = drafts?.filter((draft) => draft.publishing_status !== null) ?? [];
+  const unregisteredDrafts = drafts?.filter((draft) => draft.publishing_status === null) ?? [];
   const productNames = new Map<string, string>();
   const tasksById = new Map<string, TaskInfo>();
 
@@ -69,9 +71,9 @@ export default async function PublishingQueuePage() {
       <div className="mt-8">
         {errorMessage ? (
           <p role="alert">DB 오류: {errorMessage}</p>
-        ) : !drafts?.length ? (
+        ) : !queuedDrafts.length ? (
           <p className="text-zinc-500">발행 대기 중인 승인 초안이 없습니다.</p>
-        ) : drafts.map((draft) => {
+        ) : queuedDrafts.map((draft) => {
           const task = tasksById.get(String(draft.blog_task_id));
           return (
             <article key={draft.id} className="mb-4 rounded-lg border bg-white p-5">
@@ -103,6 +105,23 @@ export default async function PublishingQueuePage() {
           );
         })}
       </div>
+      {!errorMessage && unregisteredDrafts.length > 0 && (
+        <details className="mt-6 rounded-lg border bg-white p-5">
+          <summary className="cursor-pointer text-sm font-medium text-zinc-600">
+            발행 대기 미등록 승인 초안 ({unregisteredDrafts.length})
+          </summary>
+          <div className="mt-4 space-y-4">
+            {unregisteredDrafts.map((draft) => (
+              <div key={draft.id} className="rounded-lg border p-4">
+                <Link href={`/content/blog/${draft.blog_task_id}`} className="font-medium hover:underline">
+                  {draft.title || "-"}
+                </Link>
+                <PublishingStatusControl key={`${draft.id}:none`} draftId={draft.id} initialStatus={null} />
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </main>
   );
 }
