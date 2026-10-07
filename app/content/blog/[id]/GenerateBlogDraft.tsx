@@ -3,6 +3,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import type { AIProvider } from "@/lib/ai/provider";
 
 export type Draft = {
   title: string;
@@ -12,8 +13,21 @@ export type Draft = {
   id?: string | number;
   status?: string | null;
   model?: string | null;
+  provider?: AIProvider;
   created_at?: string | null;
 };
+
+const PROVIDER_LABELS: Record<AIProvider, string> = {
+  openai: "OpenAI", anthropic: "Claude", xai: "Grok",
+};
+
+// Existing drafts store the model only; resolve known model families on reload.
+function providerFromModel(model?: string | null): AIProvider | undefined {
+  if (model?.startsWith("claude-")) return "anthropic";
+  if (model?.startsWith("grok-")) return "xai";
+  if (model && /^(gpt-|o[134](?:-|$))/.test(model)) return "openai";
+  return undefined;
+}
 
 function isDraft(value: unknown): value is Draft {
   if (typeof value !== "object" || value === null) return false;
@@ -37,6 +51,7 @@ export default function GenerateBlogDraft({
   initialDraft?: Draft | null;
 }) {
   const router = useRouter();
+  const [provider, setProvider] = useState<AIProvider>(initialDraft?.provider ?? providerFromModel(initialDraft?.model) ?? "openai");
   const [generating, setGenerating] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(initialDraft);
   const [editingDraft, setEditingDraft] = useState<Draft | null>(null);
@@ -44,6 +59,7 @@ export default function GenerateBlogDraft({
   const [saved, setSaved] = useState(false);
   const [changingStatus, setChangingStatus] = useState(false);
   const inFlight = useRef(false);
+  const actualProvider = draft?.provider ?? providerFromModel(draft?.model);
 
   async function generateDraft() {
     if (inFlight.current || editingDraft) return;
@@ -55,7 +71,7 @@ export default function GenerateBlogDraft({
       const response = await fetch("/api/blog/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskId }),
+        body: JSON.stringify({ taskId, provider }),
       });
       const result: unknown = await response.json();
 
@@ -78,6 +94,9 @@ export default function GenerateBlogDraft({
         ...data.draft,
         id: typeof data.draftId === "number" ? data.draftId : undefined,
         status: "draft",
+        model: typeof data.model === "string" ? data.model : undefined,
+        provider: data.provider === "openai" || data.provider === "anthropic" || data.provider === "xai"
+          ? data.provider : undefined,
       });
       router.refresh();
     } catch {
@@ -169,6 +188,17 @@ export default function GenerateBlogDraft({
 
   return (
     <div className="mt-8 max-w-2xl">
+      <fieldset disabled={generating || saving || changingStatus || !!editingDraft} className="mb-4 flex gap-4">
+        <legend className="mb-2 text-sm font-medium">생성에 사용할 AI 제공자</legend>
+        {([{ value: "openai", label: "OpenAI" }, { value: "anthropic", label: "Claude" }, { value: "xai", label: "Grok" }] as const).map((option) => (
+          <label key={option.value} className="flex items-center gap-2 text-sm">
+            <input type="radio" name="blog-provider" value={option.value} checked={provider === option.value}
+              onChange={() => setProvider(option.value)} />
+            {option.label}
+          </label>
+        ))}
+      </fieldset>
+      <p className="mb-3 text-sm text-zinc-500">{PROVIDER_LABELS[provider]}로 {draft ? "재생성" : "생성"}합니다.</p>
       <button
         type="button"
         onClick={generateDraft}
@@ -300,7 +330,7 @@ export default function GenerateBlogDraft({
           <article className="mt-6 rounded-xl border bg-white p-6">
             <h2 className="text-xl font-bold">{draft.title}</h2>
             <p className="mt-2 text-sm text-zinc-500">
-              상태: {draft.status || "-"} · 모델: {draft.model || "-"} · 생성일: {draft.created_at
+              상태: {draft.status || "-"} · 제공자: {actualProvider ? PROVIDER_LABELS[actualProvider] : "확인 불가"} · 모델: {draft.model || "-"} · 생성일: {draft.created_at
                 ? new Date(draft.created_at).toLocaleString("ko-KR", {
                     timeZone: "Asia/Seoul",
                   })

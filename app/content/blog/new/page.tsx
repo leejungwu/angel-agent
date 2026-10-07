@@ -139,9 +139,9 @@ export default function NewBlogTaskPage() {
             onChange={(event) => setPurpose(event.target.value)}
           />
           <textarea
-            aria-label="추가 지시사항"
+            aria-label="이번 글 추가 지시"
             className="min-h-24 rounded-lg border px-4 py-3"
-            placeholder="추가 지시사항"
+            placeholder="이번 글 추가 지시"
             value={instructions}
             onChange={(event) => setInstructions(event.target.value)}
           />

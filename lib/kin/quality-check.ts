@@ -49,7 +49,6 @@ const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
  */
 export function checkKinAnswer({
   answer,
-  question,
   instructions,
   productName,
   mentionLevel,

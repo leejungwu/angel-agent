@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:naver-blog": "tsx scripts/test-naver-blog-editor.ts"
+    "test:naver-blog": "tsx scripts/test-naver-blog-editor.ts",
+    "test:ai-providers": "node scripts/test-ai-providers.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
