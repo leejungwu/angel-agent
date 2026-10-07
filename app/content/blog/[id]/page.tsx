@@ -115,7 +115,7 @@ export default async function BlogTaskDetailPage({
       )}
       {task && !errorMessage && (
         <GenerateBlogDraft
-          key={`${task.id}:${initialDraft?.id ?? "none"}`}
+          key={task.id}
           taskId={Number(task.id)}
           initialDraft={initialDraft}
         />

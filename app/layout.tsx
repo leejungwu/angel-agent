@@ -42,6 +42,7 @@ export default function RootLayout({
               <span>VOC</span>
               <span>Ads</span>
               <Link href="/content/blog">Content</Link>
+              <Link href="/content/kin">KIN</Link>
               <span>Sales</span>
               <span>Settings</span>
             </nav>

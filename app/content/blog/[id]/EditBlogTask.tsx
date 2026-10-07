@@ -120,7 +120,7 @@ export default function EditBlogTask({
               />
             </label>
             <label className="flex flex-col gap-2">
-              추가 지시사항
+              이번 글 추가 지시
               <textarea
                 className="min-h-24 rounded-lg border px-4 py-3"
                 value={form.instructions}
@@ -145,7 +145,7 @@ export default function EditBlogTask({
           <p className="whitespace-pre-wrap">키워드: {fields.keyword || "-"}</p>
           <p className="mt-2 whitespace-pre-wrap">주제: {fields.topic || "-"}</p>
           <p className="mt-2 whitespace-pre-wrap">목적: {fields.purpose || "-"}</p>
-          <p className="mt-2 whitespace-pre-wrap">추가 지시사항: {fields.instructions || "-"}</p>
+          <p className="mt-2 whitespace-pre-wrap">이번 글 추가 지시: {fields.instructions || "-"}</p>
           <button type="button" onClick={startEditing} className="mt-4 rounded-lg border px-4 py-2 text-sm font-medium">
             작업 수정
           </button>
