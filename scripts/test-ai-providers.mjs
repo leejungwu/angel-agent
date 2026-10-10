@@ -12,7 +12,7 @@ function load(file, mocks = {}) {
   const originalRequire = compiled.require.bind(compiled);
   compiled.require = (name) => name in mocks ? mocks[name] : originalRequire(name);
   compiled._compile(ts.transpileModule(readFileSync(filename, "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true, jsx: ts.JsxEmit.ReactJSX },
   }).outputText, filename);
   return compiled.exports;
 }
@@ -41,7 +41,9 @@ const sdkMocks = {
 };
 const provider = load("lib/ai/provider.ts", sdkMocks);
 const schema = load("lib/blog-generation/schema.ts");
-const prompts = load("lib/blog-generation/prompts.ts");
+const blogBody = load("lib/blog-generation/body.ts");
+const blogModels = load("lib/blog-generation/models.ts");
+const prompts = load("lib/blog-generation/prompts.ts", { "./body": blogBody });
 const kin = load("lib/kin/generate.ts");
 const presets = load("lib/kin/presets.ts");
 const quality = load("lib/kin/quality-check.ts");
@@ -78,6 +80,8 @@ const database = {
 const route = load("app/api/blog/generate/route.ts", {
   ...sdkMocks, "@/lib/ai/provider": provider, "@/lib/blog-generation/schema": schema,
   "@/lib/blog-generation/prompts": prompts, "@/lib/supabase": { supabase: database },
+  "@/lib/blog-generation/body": blogBody,
+  "@/lib/blog-generation/models": blogModels,
 });
 const kinRoute = load("app/api/kin/generate/route.ts", {
   ...sdkMocks, "@/lib/kin/provider": kinProvider, "@/lib/kin/generate": kin,
@@ -89,12 +93,110 @@ const request = (body) => new Request("http://localhost/api/blog/generate", {
 });
 const keyNames = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"];
 const previousKeys = keyNames.map((name) => process.env[name]);
+// Render controlled inputs with hook doubles; no DOM, browser, API or DB access.
+const hookValues = [];
+let hookIndex = 0;
+const jsx = (type, props) => ({ type, props });
+const GenerateBlogDraft = load("app/content/blog/[id]/GenerateBlogDraft.tsx", {
+  react: {
+    useState(initial) {
+      const index = hookIndex++;
+      if (!(index in hookValues)) hookValues[index] = typeof initial === "function" ? initial() : initial;
+      return [hookValues[index], (value) => { hookValues[index] = value; }];
+    },
+    useRef(value) { return { current: value }; },
+  },
+  "react/jsx-runtime": { jsx, jsxs: jsx },
+  "next/navigation": { useRouter: () => ({ refresh() {} }) },
+  "@/lib/supabase": { supabase: database },
+  "@/lib/blog-generation/body": blogBody,
+  "@/lib/blog-generation/models": blogModels,
+}).default;
+function renderBlog(initialDraft = null) {
+  hookIndex = 0;
+  return GenerateBlogDraft({ taskId: 1, initialDraft });
+}
+function nodes(tree) {
+  if (!tree || typeof tree !== "object") return [];
+  if (Array.isArray(tree)) return tree.flatMap(nodes);
+  return [tree, ...nodes(tree.props?.children)];
+}
 try {
   keyNames.forEach((name) => { process.env[name] = "mock-key"; });
+  let tree = renderBlog();
+  const modelSelect = () => nodes(tree).find((node) => node.type === "select");
+  assert.ok(modelSelect(), "Blog must expose a model select");
+  assert.equal(modelSelect().props.value, "gpt-6.1-sol");
+  modelSelect().props.onChange({ target: { value: "gpt-6-astra" } });
+  tree = renderBlog();
+  assert.equal(modelSelect().props.value, "gpt-6-astra");
+  for (const kind of ["anthropic", "xai", "openai"]) {
+    nodes(tree).find((node) => node.type === "input" && node.props.value === kind).props.onChange();
+    tree = renderBlog();
+    assert.equal(modelSelect().props.value, blogModels.BLOG_DEFAULT_MODELS[kind]);
+    assert.deepEqual(nodes(modelSelect()).filter((node) => node.type === "option").map((node) => node.props.value),
+      blogModels.BLOG_MODEL_OPTIONS[kind].map((option) => option.value));
+  }
+  hookValues.length = 0;
+  tree = renderBlog({ ...draft, model: "claude-opus-5-5" });
+  assert.equal(modelSelect().props.value, "claude-opus-5-5");
+  hookValues.length = 0;
+  tree = renderBlog({ ...draft, model: "gpt-5-mini-2025-08-07" });
+  assert.equal(modelSelect().props.value, "gpt-6.1-sol", "legacy model must fall back to the provider default");
+  hookValues.length = 0;
+  tree = renderBlog();
+  modelSelect().props.onChange({ target: { value: "gpt-6-astra" } });
+  tree = renderBlog();
+  const previousFetch = globalThis.fetch;
+  let generationRequest;
+  try {
+    globalThis.fetch = async (url, options) => {
+      assert.equal(url, "/api/blog/generate");
+      generationRequest = JSON.parse(options.body);
+      return Response.json({ ok: true, draftId: 3, draft, provider: "openai", model: "gpt-6-astra" });
+    };
+    await nodes(tree).find((node) => node.type === "button" && node.props.children === "AI 초안 생성").props.onClick();
+    assert.deepEqual(generationRequest, { taskId: 1, provider: "openai", model: "gpt-6-astra" });
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+  assert.deepEqual(blogModels.BLOG_DEFAULT_MODELS, {
+    openai: "gpt-6.1-sol", anthropic: "claude-sonnet-5-5", xai: "grok-4.7",
+  });
+  assert.deepEqual(blogModels.BLOG_MODEL_OPTIONS, {
+    openai: [
+      { value: "gpt-6-luna", label: "GPT-6 Luna" },
+      { value: "gpt-6.1-sol", label: "GPT-6.1 Sol" },
+      { value: "gpt-6-astra", label: "GPT-6 Astra" },
+    ],
+    anthropic: [
+      { value: "claude-haiku-5-5", label: "Claude Haiku 5.5" },
+      { value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },
+      { value: "claude-opus-5-5", label: "Claude Opus 5.5" },
+    ],
+    xai: [{ value: "grok-4.7", label: "Grok 4.7" }],
+  });
+  for (const kind of ["openai", "anthropic", "xai"]) {
+    assert.equal(blogModels.resolveBlogModel(kind), blogModels.BLOG_DEFAULT_MODELS[kind]);
+    for (const option of blogModels.BLOG_MODEL_OPTIONS[kind]) {
+      assert.equal(blogModels.resolveBlogModel(kind, option.value), option.value);
+    }
+    for (const invalid of [null, "", 42, {}, "unknown-model", "gpt-5-mini"]) {
+      assert.equal(blogModels.resolveBlogModel(kind, invalid), null);
+    }
+  }
+  assert.equal(blogModels.resolveBlogModel("openai", "claude-sonnet-5-5"), null);
+  assert.equal(blogModels.resolveBlogModel("anthropic", "gpt-6.1-sol"), null);
+  assert.equal(blogModels.resolveBlogModel("xai", "gpt-6.1-sol"), null);
   const prompt = prompts.buildBlogPrompt(product, task);
   assert.deepEqual(JSON.parse(prompt.input).task, {
-    keyword: task.keyword, topic: task.topic, purpose: task.purpose, instructions: task.instructions,
+    keyword: task.keyword, topic: task.topic, instructions: task.instructions,
   });
+  assert.doesNotMatch(prompt.systemInstructions + prompt.input, /purpose/);
+  for (const file of ["app/content/blog/new/page.tsx", "app/content/blog/[id]/page.tsx", "app/content/blog/[id]/EditBlogTask.tsx", "app/api/blog/generate/route.ts"]) {
+    assert.doesNotMatch(readFileSync(resolve(file), "utf8"), /\bpurpose\b/, `${file} must not read or write legacy purpose`);
+  }
+  assert.match(JSON.parse(prompt.input).bodyLengthGuide, /1500.*1200~1800/);
   assert.deepEqual(JSON.parse(prompt.input).referenceWritingGuides, {
     contentStrategy: prompts.BLOG_CONTENT_STRATEGY_GUIDE,
     copywritingSkills: prompts.BLOG_COPYWRITING_SKILLS_GUIDE,
@@ -109,10 +211,12 @@ try {
     const body = await response.json();
     assert.equal(body.provider, kind);
     assert.deepEqual(body.draft, draft);
+    assert.deepEqual(body.bodyLength, blogBody.checkBlogBodyLength(draft));
     const saved = writes.find((write) => write.table === "blog_drafts").changes;
     assert.deepEqual(saved, { blog_task_id: 1, product_id: 2, ...draft, status: "draft", model: "returned-model" });
     assert.deepEqual(writes.find((write) => write.table === "blog_tasks").changes, { status: "generated" });
     const call = calls.at(-1);
+    assert.equal(call.request.model, blogModels.BLOG_DEFAULT_MODELS[kind]);
     if (kind === "openai") {
       assert.equal(call.request.instructions, prompt.systemInstructions);
       assert.equal(call.request.input, prompt.input);
@@ -160,6 +264,23 @@ try {
     assert.equal((await route.POST(request({ taskId: 1, provider: kind }))).status, 500);
     assert.equal(writes.length, 0);
   }
+  for (const kind of ["openai", "anthropic", "xai"]) {
+    for (const { value: model } of blogModels.BLOG_MODEL_OPTIONS[kind]) {
+      writes.length = 0;
+      reply = success(kind, draft);
+      const response = await route.POST(request({ taskId: 1, provider: kind, model }));
+      assert.equal(response.status, 200);
+      assert.equal(calls.at(-1).request.model, model);
+      assert.equal(writes.find((write) => write.table === "blog_drafts").changes.model, "returned-model");
+    }
+    for (const model of [null, "", 42, {}, "unknown-model", kind === "openai" ? "claude-sonnet-5-5" : "gpt-6.1-sol"]) {
+      writes.length = 0;
+      const callCount = calls.length;
+      assert.equal((await route.POST(request({ taskId: 1, provider: kind, model }))).status, 400);
+      assert.equal(calls.length, callCount, "invalid model must not call a provider");
+      assert.equal(writes.length, 0, "invalid model must not write drafts");
+    }
+  }
   reply = success("openai", draft);
   assert.equal((await route.POST(request({ taskId: 1 }))).status, 200);
   assert.equal((await route.POST(request({ taskId: 1, provider: "invalid" }))).status, 400);
@@ -172,7 +293,7 @@ try {
     assert.equal((await route.POST(request({ taskId: 1 }))).status, 500);
     assert.equal(writes.length, 0);
   }
-  console.log("PASS: three provider dialects, Blog save contract, KIN compatibility, prompt separation, incomplete output, missing key and invalid draft rejection");
+  console.log("PASS: model options/defaults, UI provider reset/request, model allowlist, three provider dialects, Blog save contract, KIN compatibility, prompt separation and invalid output rejection");
 } finally {
   keyNames.forEach((name, index) => {
     if (previousKeys[index] === undefined) delete process.env[name];

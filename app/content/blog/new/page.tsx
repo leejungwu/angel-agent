@@ -18,7 +18,6 @@ export default function NewBlogTaskPage() {
   const [productId, setProductId] = useState("");
   const [keyword, setKeyword] = useState("");
   const [topic, setTopic] = useState("");
-  const [purpose, setPurpose] = useState("");
   const [instructions, setInstructions] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -70,7 +69,6 @@ export default function NewBlogTaskPage() {
         product_id: product.id,
         keyword: keyword.trim(),
         topic: topic.trim(),
-        purpose: purpose.trim(),
         instructions: instructions.trim(),
         status: "pending",
       });
@@ -130,13 +128,6 @@ export default function NewBlogTaskPage() {
             placeholder="주제"
             value={topic}
             onChange={(event) => setTopic(event.target.value)}
-          />
-          <input
-            aria-label="목적"
-            className="rounded-lg border px-4 py-3"
-            placeholder="목적"
-            value={purpose}
-            onChange={(event) => setPurpose(event.target.value)}
           />
           <textarea
             aria-label="이번 글 추가 지시"

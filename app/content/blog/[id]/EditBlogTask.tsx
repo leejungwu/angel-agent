@@ -7,7 +7,6 @@ import { supabase } from "@/lib/supabase";
 type TaskFields = {
   keyword: string | null;
   topic: string | null;
-  purpose: string | null;
   instructions: string | null;
 };
 
@@ -15,7 +14,6 @@ function formValues(fields: TaskFields) {
   return {
     keyword: fields.keyword ?? "",
     topic: fields.topic ?? "",
-    purpose: fields.purpose ?? "",
     instructions: fields.instructions ?? "",
   };
 }
@@ -58,7 +56,6 @@ export default function EditBlogTask({
     const changes = {
       keyword: form.keyword.trim(),
       topic: form.topic.trim(),
-      purpose: form.purpose.trim(),
       instructions: form.instructions.trim(),
     };
     inFlight.current = true;
@@ -69,7 +66,7 @@ export default function EditBlogTask({
         .from("blog_tasks")
         .update(changes)
         .eq("id", taskId)
-        .select("keyword, topic, purpose, instructions")
+        .select("keyword, topic, instructions")
         .single()
         .returns<TaskFields>();
       if (error || !data) {
@@ -112,14 +109,6 @@ export default function EditBlogTask({
               />
             </label>
             <label className="flex flex-col gap-2">
-              목적
-              <input
-                className="rounded-lg border px-4 py-3"
-                value={form.purpose}
-                onChange={(event) => setForm({ ...form, purpose: event.target.value })}
-              />
-            </label>
-            <label className="flex flex-col gap-2">
               이번 글 추가 지시
               <textarea
                 className="min-h-24 rounded-lg border px-4 py-3"
@@ -144,7 +133,6 @@ export default function EditBlogTask({
         <>
           <p className="whitespace-pre-wrap">키워드: {fields.keyword || "-"}</p>
           <p className="mt-2 whitespace-pre-wrap">주제: {fields.topic || "-"}</p>
-          <p className="mt-2 whitespace-pre-wrap">목적: {fields.purpose || "-"}</p>
           <p className="mt-2 whitespace-pre-wrap">이번 글 추가 지시: {fields.instructions || "-"}</p>
           <button type="button" onClick={startEditing} className="mt-4 rounded-lg border px-4 py-2 text-sm font-medium">
             작업 수정

@@ -10,9 +10,16 @@ checks. Callers own the model, JSON schema, schema name, prompts, validation and
 | Grok | `xai` | `XAI_API_KEY` |
 
 Only the selected provider's key is required. Keys never go into browser requests.
-Model defaults are in `app/api/blog/generate/route.ts` and `lib/kin/provider.ts`;
-the selectors choose a provider, not an arbitrary model. KIN's branch defaults
-are retained. Actual model availability depends on the provider account.
+Blog model options and defaults are in `lib/blog-generation/models.ts`.
+The Blog UI selects a provider and one of its allowed models. Changing provider
+resets the selection to its default: OpenAI `gpt-6.1-sol`, Claude
+`claude-sonnet-5-5`, Grok `grok-4.7`. The API validates the provider/model pair
+before any lookup or provider call; an omitted model uses the provider default.
+Unknown models and mismatched pairs return HTTP 400. Reloaded drafts select their
+stored model only if it is still allowed; otherwise they use the provider default.
+The actual response model is still saved in `blog_drafts.model`. No Auto/Jev
+routing is used. KIN defaults remain in `lib/kin/provider.ts` and are unchanged.
+Actual model availability depends on the provider account.
 
 ## Blog prompts
 
@@ -25,9 +32,25 @@ Edit `lib/blog-generation/prompts.ts`:
 The Markdown files are not read automatically. Reference guides are serialized
 separately from product facts and task-specific instructions. Fixed rules take
 priority, followed by explicit task instructions, then reference style guidance.
-Existing `keyword`, `topic`, `purpose`, `instructions` and Draft storage fields
-are unchanged. Provider omission still means OpenAI. All responses are validated
+Blog tasks pass `keyword`, `topic`, `instructions`, not the legacy `purpose`
+column. Draft storage fields are unchanged. Provider omission still means OpenAI. All responses are validated
 before saving; providers are not silently switched on failure.
+
+Blog body length targets 1,500 characters, with an inclusive 1,200–1,800 range.
+`lib/blog-generation/body.ts` counts intro, section headings/bodies and closing;
+it excludes the title, line breaks and field-edge whitespace, includes internal
+spaces, and counts Unicode code points. Out-of-range output is saved with a
+warning, not rejected. The API returns `bodyLength`; the editor recalculates it
+for saved and edited drafts. Explicit task length instructions take priority.
+
+`lib/naver-blog/image-layout.ts` distributes images across prose paragraph
+boundaries, not section headings. If paragraphs are insufficient, it splits
+longer prose at sentence/whitespace boundaries without splitting words. Images
+retain asset order; indivisible short prose uses balanced groups. This changes
+only publisher input, not stored Draft data. The publisher still inputs all text
+first and uploads one image at a time, checking body preservation and image DOM
+order. `npm run test:blog-body` tests the plan offline; real Naver editor behavior
+and visual spacing still require a separate E2E check without final publishing.
 
 ## KIN integration
 

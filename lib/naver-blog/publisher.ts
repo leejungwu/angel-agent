@@ -1,6 +1,7 @@
 // Node.js automation module. Do not import into Client Components.
 import { stat } from "node:fs/promises";
 import { chromium, type BrowserContext, type Page, type Locator, type Frame } from "playwright";
+import { planBlogImages } from "./image-layout";
 
 export type NaverBlogDraftInput = {
   title: string;
@@ -231,138 +232,51 @@ async function selectIndividualPhotos(page: Page, frame: Frame, timeoutMs: numbe
 
 const BODY_PARAGRAPHS = ".se-component.se-text .se-text-paragraph";
 
-function contentLines(values: (string | null | undefined)[]): string[] {
-  return values.flatMap((value) => (value?.trim() ?? "").split(/\r\n|\r|\n/))
-    .map(normalizeEditorText).filter(Boolean);
-}
-
-async function findInlineImagePosition(frame: Frame, draft: NaverBlogDraftInput, imageIndex: number) {
-  const paragraphs = frame.locator(BODY_PARAGRAPHS);
-  const texts = (await paragraphs.allTextContents()).map((text, index) => ({ text: normalizeEditorText(text), index }))
-    .filter((paragraph) => paragraph.text);
-  const section = draft.sections[imageIndex];
-  const label = `${imageIndex + 1}/${draft.imagePaths?.length ?? 0}`;
-  console.log(section
-    ? `대상 section: ${imageIndex + 1}/${draft.sections.length} - ${normalizeEditorText(section.heading ?? "").slice(0, 40)}`
-    : "대상 section: closing 직전 (남은 이미지)");
-  const lines = section ? contentLines([section.heading, section.body]) : contentLines([draft.closing]);
-  if (!lines.length || (section && !section.heading?.trim())) {
-    throw new Error(`inline image ${section ? "section heading" : "closing"} not found at ${label}`);
+async function findInlineImagePosition(frame: Frame, beforeParagraph: number, expected: string[]) {
+  const texts = await frame.locator(BODY_PARAGRAPHS).allTextContents();
+  const paragraphs = texts.map((text, index) => ({ text: normalizeEditorText(text), index })).filter(({ text }) => text);
+  if (JSON.stringify(paragraphs.map(({ text }) => text)) !== JSON.stringify(expected)) {
+    throw new Error("Image boundary paragraphs differ from the planned body");
   }
-  const headingLines = section ? contentLines([section.heading]) : lines;
-  if (!texts.some((_, index) => headingLines.every((line, offset) => texts[index + offset]?.text === line))) {
-    throw new Error(`inline image ${section ? "section heading" : "closing"} not found at ${label}`);
-  }
-  console.log(section ? "section heading 발견" : "closing 발견");
-  const matches = texts.flatMap((_, index) =>
-    lines.every((line, offset) => texts[index + offset]?.text === line) ? [index] : []);
-  // Full heading/body matching disambiguates repeated headings. Identical sections
-  // are resolved in draft order; unrelated duplicate matches fail safely.
-  const identicalSections = section ? draft.sections.filter((candidate) =>
-    JSON.stringify(contentLines([candidate.heading, candidate.body])) === JSON.stringify(lines)).length : 1;
-  const occurrence = section ? draft.sections.slice(0, imageIndex).filter((candidate) =>
-    JSON.stringify(contentLines([candidate.heading, candidate.body])) === JSON.stringify(lines)).length : 0;
-  if (matches.length !== identicalSections) {
-    throw new Error(`inline image section end not found at ${label} (matches: ${matches.length}, expected: ${identicalSections})`);
-  }
-  const index = texts[matches[occurrence] + (section ? lines.length - 1 : 0)].index;
-  console.log("section 끝 위치 발견");
-  return { paragraph: paragraphs.nth(index), index, before: !section };
+  const target = paragraphs[beforeParagraph];
+  if (!target) throw new Error("Image insertion paragraph not found");
+  return target.index;
 }
 
 async function verifyInlineImageOrder(
-  frame: Frame, draft: NaverBlogDraftInput, imageIndex: number,
+  frame: Frame, beforeParagraph: number,
   previousImages: { element: Awaited<ReturnType<Locator["elementHandles"]>>[number]; sources: string }[],
-  anchor: { heading: string; headingFound: boolean; endFound: boolean; bodyEndIndex?: number },
 ) {
-  return frame.evaluate(({ draft, imageIndex, previousImages, anchor, paragraphsSelector, imageSelector }) => {
-    const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
-    const paragraphs = [...document.querySelectorAll(paragraphsSelector)]
-      .map((element) => ({ element, text: normalize(element.textContent ?? "") })).filter(({ text }) => text);
-    const resolveHeading = (heading: string, index: number) => {
-      const expected = normalize(heading);
-      if (!expected) return null;
-      const occurrence = draft.sections.slice(0, index).filter((section) =>
-        normalize(section.heading ?? "") === expected).length;
-      const exact = paragraphs.filter(({ text }) => text === expected);
-      if (exact[occurrence]) return exact[occurrence].element;
-      // Uploads may merge paragraphs or replace text wrappers. Resolve the
-      // saved heading independently of the section body's paragraph layout.
-      const containing = paragraphs.filter(({ text }) => text.includes(expected));
-      if (containing[occurrence]) return containing[occurrence].element;
-      const components = [...document.querySelectorAll(".se-component.se-text")]
-        .filter((element) => normalize(element.textContent ?? "").includes(expected));
-      return components.length === 1 ? components[0] : null;
-    };
-    const sources = (element: Element) => JSON.stringify([...element.querySelectorAll("img")]
-      .map((image) => image.getAttribute("src") ?? ""));
+  return frame.evaluate(({ beforeParagraph, previousImages, paragraphsSelector, imageSelector }) => {
+    const paragraphs = [...document.querySelectorAll(paragraphsSelector)].filter((element) => element.textContent?.trim());
     const images = [...document.querySelectorAll(imageSelector)];
     // Prefer element identity. Source signatures also recognize existing images
     // if SmartEditor replaced their wrappers; consume duplicate signatures once.
     const remaining = [...previousImages];
+    const previousPositions: number[] = [];
     const added = images.filter((image) => {
       let index = remaining.findIndex((previous) => previous.element === image);
-      if (index < 0) index = remaining.findIndex((previous) => previous.sources === sources(image));
+      if (index < 0) index = remaining.findIndex((previous) => previous.sources === JSON.stringify([...image.querySelectorAll("img")]
+        .map((node) => node.getAttribute("src") ?? "")));
       if (index < 0) return true;
+      previousPositions.push(previousImages.indexOf(remaining[index]));
       remaining.splice(index, 1);
       return false;
     });
-    const target = resolveHeading(anchor.heading, imageIndex);
-    const hasNext = imageIndex + 1 < draft.sections.length;
-    const next = hasNext ? resolveHeading(draft.sections[imageIndex + 1].heading ?? "", imageIndex + 1) : null;
     const image = added.length === 1 ? added[0] : null;
     const follows = (first: Element, second: Element) =>
       !!(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
-    const section = draft.sections[imageIndex];
-    const bodyEnd = anchor.bodyEndIndex === undefined ? null
-      : document.querySelectorAll(paragraphsSelector)[anchor.bodyEndIndex];
-    const verifiedBeforeUpload = anchor.headingFound && anchor.endFound;
-    const ordered = section
-      ? verifiedBeforeUpload && (!hasNext || !!image && !!next && follows(image, next)) &&
-        !!bodyEnd && !!image && follows(bodyEnd, image)
-      : !!target && !!image && follows(image, target);
-    const nodes = [...document.querySelectorAll("*")];
+    const next = paragraphs[beforeParagraph];
+    const previous = paragraphs[beforeParagraph - 1];
+    const previousImagesInOrder = previousPositions.every((position, index) => position === index);
     return {
-      valid: images.length === previousImages.length + 1 && remaining.length === 0 && !!ordered,
-      sectionHeadingDOMIndex: target ? nodes.indexOf(target) : -1,
-      insertedImageDOMIndex: image ? nodes.indexOf(image) : -1,
-      nextSectionHeadingDOMIndex: next ? nodes.indexOf(next) : -1,
-      beforeImageCount: previousImages.length, afterImageCount: images.length,
-      addedImageCount: added.length,
+      valid: images.length === previousImages.length + 1 && remaining.length === 0 && previousImagesInOrder &&
+        !!image && images.at(-1) === image && !!next && follows(image, next) &&
+        (!previous || follows(previous, image)),
+      beforeImageCount: previousImages.length, afterImageCount: images.length, addedImageCount: added.length,
     };
-  }, { draft, imageIndex, previousImages, anchor, paragraphsSelector: BODY_PARAGRAPHS,
+  }, { beforeParagraph, previousImages, paragraphsSelector: BODY_PARAGRAPHS,
     imageSelector: NAVER_EDITOR_SELECTORS.imageComponent });
-}
-
-async function readInlineSection(frame: Frame, draft: NaverBlogDraftInput, imageIndex: number) {
-  return frame.evaluate(({ draft, imageIndex, selector }) => {
-    const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
-    const paragraphs = [...document.querySelectorAll(selector)];
-    const texts = paragraphs.map((element) => element.textContent ?? "");
-    const findHeading = (heading: string, occurrence: number) => {
-      const expected = normalize(heading);
-      if (!expected) return -1;
-      const lines = heading.trim().split(/\r\n|\r|\n/).map(normalize).filter(Boolean);
-      const nonempty = texts.map((text, index) => ({ text: normalize(text), index })).filter(({ text }) => text);
-      const exact = nonempty.filter((_, index) => lines.every((line, offset) => nonempty[index + offset]?.text === line));
-      if (exact[occurrence]) return exact[occurrence].index;
-      return nonempty.filter(({ text }) => text.includes(expected))[occurrence]?.index ?? -1;
-    };
-    const section = draft.sections[imageIndex];
-    if (!section) throw new Error("Section required for insertion boundary");
-    const occurrence = (index: number) => draft.sections.slice(0, index).filter((candidate) =>
-      normalize(candidate.heading ?? "") === normalize(draft.sections[index].heading ?? "")).length;
-    const start = findHeading(section.heading ?? "", occurrence(imageIndex));
-    const next = draft.sections[imageIndex + 1];
-    const boundary = next ? findHeading(next.heading ?? "", occurrence(imageIndex + 1))
-      : draft.closing?.trim() ? findHeading(draft.closing, 0) : paragraphs.length;
-    if (start < 0 || boundary <= start) throw new Error("Section DOM range not found");
-    const endIndex = texts.map((text, index) => ({ text, index }))
-      .filter(({ text, index }) => index >= start && index < boundary && text.trim()).at(-1)?.index;
-    if (endIndex === undefined) throw new Error("Section last paragraph not found");
-    // No whitespace normalization: preserve the original section text exactly.
-    return { text: texts.slice(start, boundary).filter((text) => text.trim()).join(""), endIndex, boundary };
-  }, { draft, imageIndex, selector: BODY_PARAGRAPHS });
 }
 
 async function prepareInlineImageParagraph(
@@ -418,23 +332,20 @@ async function prepareInlineImageParagraph(
 }
 
 async function insertSectionImages(
-  page: Page, frame: Frame, draft: NaverBlogDraftInput, timeoutMs: number, imageTimeoutMs: number,
+  page: Page, frame: Frame, draft: NaverBlogDraftInput, beforeParagraphs: number[], timeoutMs: number, imageTimeoutMs: number,
 ): Promise<number> {
   const paths = draft.imagePaths ?? [];
+  const expectedParagraphs = [draft.intro, ...draft.sections.flatMap((section) => [section.heading, section.body]), draft.closing]
+    .flatMap((value) => (value ?? "").trim().split(/\r\n|\r|\n/)).map(normalizeEditorText).filter(Boolean);
   const initialCount = await frame.locator(NAVER_EDITOR_SELECTORS.imageComponent).count();
   let imagesUploaded = 0;
   console.log(`inline images requested: ${paths.length}`);
   try {
     for (const [index, path] of paths.entries()) {
       console.log(`inline image 시작: ${index + 1}/${paths.length}`);
-      // Re-query headings/body paragraphs after every image changes the editor DOM.
-      const position = await findInlineImagePosition(frame, draft, index);
-      const sectionBefore = draft.sections[index] ? await readInlineSection(frame, draft, index) : null;
-      // A successful search has already verified both heading and section end.
-      const anchor = {
-        heading: draft.sections[index]?.heading ?? draft.closing ?? "",
-        headingFound: true, endFound: true,
-      };
+      // Re-query body paragraphs after every image changes the editor DOM.
+      const position = await findInlineImagePosition(frame, beforeParagraphs[index], expectedParagraphs);
+      const bodyBefore = (await frame.locator(BODY_PARAGRAPHS).allTextContents()).filter((text) => text.trim()).join("");
       const previousImages = await Promise.all(
         (await frame.locator(NAVER_EDITOR_SELECTORS.imageComponent).elementHandles()).map(async (element) => ({
           element, sources: await element.evaluate((node) => JSON.stringify([...(node as Element).querySelectorAll("img")]
@@ -443,22 +354,21 @@ async function insertSectionImages(
       );
       try {
         try {
-          await prepareInlineImageParagraph(page, frame, sectionBefore?.endIndex ?? position.index,
-            position.before, timeoutMs);
+          // Insert before the following text: repeated boundaries append images in upload order.
+          await prepareInlineImageParagraph(page, frame, position, true, timeoutMs);
         } catch {
           throw new Error(`inline image focus failed at ${index + 1}/${paths.length}`);
         }
         console.log("사진 삽입 위치 focus 완료");
         imagesUploaded += await uploadImages(page, frame, [path], imageTimeoutMs, { index, total: paths.length });
-        const sectionAfter = sectionBefore ? await readInlineSection(frame, draft, index) : null;
-        if (sectionBefore && sectionAfter?.text !== sectionBefore.text) {
+        const bodyAfter = (await frame.locator(BODY_PARAGRAPHS).allTextContents()).filter((text) => text.trim()).join("");
+        if (bodyAfter !== bodyBefore) {
           throw new Error(`inline image section body text changed at ${index + 1}/${paths.length}`);
         }
         const deadline = Date.now() + timeoutMs;
         let result;
         do {
-          result = await verifyInlineImageOrder(frame, draft, index, previousImages,
-            { ...anchor, bodyEndIndex: sectionAfter?.endIndex });
+          result = await verifyInlineImageOrder(frame, beforeParagraphs[index], previousImages);
           if (result.valid) break;
           await new Promise((done) => setTimeout(done, 100));
         } while (Date.now() < deadline);
@@ -610,8 +520,13 @@ export async function fillNaverBlogDraft(
   },
 ): Promise<{ ok: true; titleFilled: true; bodyFilled: true; imagesUploaded: number; published: false }> {
   const { page, writeUrl, timeoutMs = 30_000, imageTimeoutMs = 60_000 } = options;
-  const bodyText = composeNaverBlogBody(draft);
+  let bodyText = "";
+  let beforeParagraphs: number[] = [];
   try {
+    const layout = planBlogImages(draft, draft.imagePaths?.length ?? 0);
+    draft = layout.draft;
+    beforeParagraphs = layout.beforeParagraphs;
+    bodyText = composeNaverBlogBody(draft);
     if (!draft.title.trim() || !bodyText) throw new Error("제목과 본문은 비어 있을 수 없습니다.");
     // Validate all files before editing, avoiding partial input for a missing image.
     for (const [index, path] of (draft.imagePaths ?? []).entries()) {
@@ -671,7 +586,7 @@ export async function fillNaverBlogDraft(
 
   let imagesUploaded = 0;
   try {
-    imagesUploaded = await insertSectionImages(page, frame, draft, timeoutMs, imageTimeoutMs);
+    imagesUploaded = await insertSectionImages(page, frame, draft, beforeParagraphs, timeoutMs, imageTimeoutMs);
   } catch (error) {
     throw new NaverBlogInputError("photo_upload_failed", error);
   }

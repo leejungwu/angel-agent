@@ -4,6 +4,8 @@ import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import type { AIProvider } from "@/lib/ai/provider";
+import { BLOG_BODY_MIN_CHARS, BLOG_BODY_MAX_CHARS, checkBlogBodyLength } from "@/lib/blog-generation/body";
+import { BLOG_MODEL_OPTIONS, BLOG_DEFAULT_MODELS, resolveBlogModel } from "@/lib/blog-generation/models";
 
 export type Draft = {
   title: string;
@@ -52,6 +54,7 @@ export default function GenerateBlogDraft({
 }) {
   const router = useRouter();
   const [provider, setProvider] = useState<AIProvider>(initialDraft?.provider ?? providerFromModel(initialDraft?.model) ?? "openai");
+  const [model, setModel] = useState(() => resolveBlogModel(provider, initialDraft?.model) ?? BLOG_DEFAULT_MODELS[provider]);
   const [generating, setGenerating] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(initialDraft);
   const [editingDraft, setEditingDraft] = useState<Draft | null>(null);
@@ -60,6 +63,8 @@ export default function GenerateBlogDraft({
   const [changingStatus, setChangingStatus] = useState(false);
   const inFlight = useRef(false);
   const actualProvider = draft?.provider ?? providerFromModel(draft?.model);
+  const visibleDraft = editingDraft ?? draft;
+  const bodyLength = visibleDraft ? checkBlogBodyLength(visibleDraft) : null;
 
   async function generateDraft() {
     if (inFlight.current || editingDraft) return;
@@ -71,7 +76,7 @@ export default function GenerateBlogDraft({
       const response = await fetch("/api/blog/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskId, provider }),
+        body: JSON.stringify({ taskId, provider, model }),
       });
       const result: unknown = await response.json();
 
@@ -193,11 +198,24 @@ export default function GenerateBlogDraft({
         {([{ value: "openai", label: "OpenAI" }, { value: "anthropic", label: "Claude" }, { value: "xai", label: "Grok" }] as const).map((option) => (
           <label key={option.value} className="flex items-center gap-2 text-sm">
             <input type="radio" name="blog-provider" value={option.value} checked={provider === option.value}
-              onChange={() => setProvider(option.value)} />
+              onChange={() => {
+                setProvider(option.value);
+                setModel(BLOG_DEFAULT_MODELS[option.value]);
+              }} />
             {option.label}
           </label>
         ))}
       </fieldset>
+      <label className="mb-3 block text-sm font-medium">
+        모델
+        <select value={model} onChange={(event) => setModel(event.target.value)}
+          disabled={generating || saving || changingStatus || !!editingDraft}
+          className="mt-2 block rounded-lg border px-4 py-3">
+          {BLOG_MODEL_OPTIONS[provider].map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </label>
       <p className="mb-3 text-sm text-zinc-500">{PROVIDER_LABELS[provider]}로 {draft ? "재생성" : "생성"}합니다.</p>
       <button
         type="button"
@@ -253,6 +271,14 @@ export default function GenerateBlogDraft({
         </div>
       )}
       {saved && <p role="status" className="mt-3 text-sm text-zinc-600">초안을 저장했습니다.</p>}
+      {bodyLength && (
+        <p role="status" className={`mt-3 text-sm ${bodyLength.status === "ok" ? "text-zinc-500" : "text-amber-700"}`}>
+          본문 {bodyLength.characters.toLocaleString("ko-KR")}자 · 권장 {BLOG_BODY_MIN_CHARS.toLocaleString("ko-KR")}~{BLOG_BODY_MAX_CHARS.toLocaleString("ko-KR")}자
+          {bodyLength.status === "too_short" && " · 권장 분량보다 짧습니다."}
+          {bodyLength.status === "too_long" && " · 권장 분량보다 깁니다."}
+          <span className="block">제목 제외 · 공백 포함 · 줄바꿈 제외</span>
+        </p>
+      )}
 
       {editingDraft && (
         <form onSubmit={saveDraft} className="mt-6 rounded-xl border bg-white p-6">

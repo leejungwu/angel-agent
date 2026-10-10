@@ -11,7 +11,6 @@ type BlogTask = {
   product_id: string | number | null;
   keyword: string | null;
   topic: string | null;
-  purpose: string | null;
   instructions: string | null;
   status: string | null;
   created_at: string | null;
@@ -30,7 +29,7 @@ export default async function BlogTaskDetailPage({
   const { id } = await params;
   const { data: task, error: taskError } = await supabase
     .from("blog_tasks")
-    .select("id, product_id, keyword, topic, purpose, instructions, status, created_at")
+    .select("id, product_id, keyword, topic, instructions, status, created_at")
     .eq("id", id)
     .maybeSingle()
     .returns<BlogTask>();
@@ -93,7 +92,6 @@ export default async function BlogTaskDetailPage({
               initialFields={{
                 keyword: task.keyword,
                 topic: task.topic,
-                purpose: task.purpose,
                 instructions: task.instructions,
               }}
             />

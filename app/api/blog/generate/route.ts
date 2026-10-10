@@ -1,13 +1,11 @@
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
-import { generateStructuredWithProvider, isAIProvider, missingProviderKey, ProviderOutputError, type AIProvider } from "@/lib/ai/provider";
+import { generateStructuredWithProvider, isAIProvider, missingProviderKey, ProviderOutputError } from "@/lib/ai/provider";
 import { DRAFT_SCHEMA, isDraft } from "@/lib/blog-generation/schema";
 import { buildBlogPrompt } from "@/lib/blog-generation/prompts";
+import { checkBlogBodyLength } from "@/lib/blog-generation/body";
+import { resolveBlogModel } from "@/lib/blog-generation/models";
 import { supabase } from "@/lib/supabase";
-
-const BLOG_MODELS: Record<AIProvider, string> = {
-  openai: "gpt-5-mini", anthropic: "claude-sonnet-5-5", xai: "grok-4.7",
-};
 
 function serverError(message: string) {
   return Response.json({ error: message }, { status: 500 });
@@ -61,6 +59,11 @@ export async function POST(request: Request) {
     return Response.json({ error: "provider는 openai, anthropic, xai 중 하나여야 합니다." }, { status: 400 });
   }
   const provider = requestedProvider ?? "openai";
+  const requestedModel = typeof body === "object" && body !== null && "model" in body ? body.model : undefined;
+  const model = resolveBlogModel(provider, requestedModel);
+  if (model === null) {
+    return Response.json({ error: "선택한 provider에서 허용된 model을 지정해 주세요." }, { status: 400 });
+  }
   const missingKey = missingProviderKey(provider);
   if (missingKey) return serverError(`${missingKey} 환경변수가 설정되지 않았습니다.`);
 
@@ -68,7 +71,7 @@ export async function POST(request: Request) {
   try {
     const { data: task, error: taskError } = await supabase
       .from("blog_tasks")
-      .select("id, product_id, keyword, topic, purpose, instructions")
+      .select("id, product_id, keyword, topic, instructions")
       .eq("id", taskId)
       .maybeSingle();
 
@@ -100,7 +103,7 @@ export async function POST(request: Request) {
 
     stage = `${provider} generation`;
     const response = await generateStructuredWithProvider({
-      provider, model: BLOG_MODELS[provider], schema: DRAFT_SCHEMA, schemaName: "blog_draft",
+      provider, model, schema: DRAFT_SCHEMA, schemaName: "blog_draft",
       ...buildBlogPrompt(product, task),
       ...(provider !== "openai" ? { maxOutputTokens: 12000 } : {}),
       ...(provider === "xai" ? { reasoningEffort: "low" as const } : {}),
@@ -147,7 +150,7 @@ export async function POST(request: Request) {
       return serverError("초안은 저장되었지만 작업 상태를 변경하지 못했습니다.");
     }
 
-    return Response.json({ ok: true, taskId, draftId: savedDraft.id, draft, provider: response.provider, model: response.model });
+    return Response.json({ ok: true, taskId, draftId: savedDraft.id, draft, bodyLength: checkBlogBodyLength(draft), provider: response.provider, model: response.model });
   } catch (error) {
     if (error instanceof ProviderOutputError) stage = `${provider} output validation: ${error.reason}`;
     logFailure(stage, error);
