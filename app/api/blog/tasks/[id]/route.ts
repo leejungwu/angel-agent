@@ -29,6 +29,17 @@ export async function DELETE(
       );
     }
 
+    // Prevent metadata cascade from orphaning task-specific Storage objects.
+    const { data: taskAssets, error: assetError } = await supabase.from("blog_task_assets")
+      .select("id").eq("blog_task_id", id).limit(1);
+    if (assetError) {
+      console.error("Blog task assets lookup failed", { taskId: id, code: assetError.code });
+      return Response.json({ error: "블로그 사진을 확인하지 못했습니다." }, { status: 500 });
+    }
+    if (taskAssets?.length) {
+      return Response.json({ error: "작업을 삭제하려면 블로그 사진을 먼저 전체 삭제해 주세요." }, { status: 409 });
+    }
+
     const { data: deletedTask, error } = await supabase
       .from("blog_tasks")
       .delete()

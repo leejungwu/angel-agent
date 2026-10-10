@@ -6,7 +6,8 @@ import {
   NaverBlogInputError, type NaverBlogDraftInput,
 } from "@/lib/naver-blog/publisher";
 
-import { createProductAssetDirectory, downloadProductAssetFiles, removeProductAssetDirectory, ProductAssetDownloadError } from "@/lib/naver-blog/product-asset-files";
+import { createProductAssetDirectory, removeProductAssetDirectory } from "@/lib/naver-blog/product-asset-files";
+import { downloadBlogTaskAssetFiles, BlogTaskAssetDownloadError } from "@/lib/naver-blog/blog-task-asset-files";
 
 export const runtime = "nodejs";
 
@@ -44,7 +45,7 @@ function toPublisherInput(draft: {
           (typeof item.imageAssetId !== "number" || !Number.isSafeInteger(item.imageAssetId) || item.imageAssetId <= 0))) {
       throw new Error(`초안 section ${index + 1} 필드 형식이 올바르지 않습니다.`);
     }
-    // Upload all product images in asset order; section imageAssetId does not control selection.
+    // Upload task images in asset order; section imageAssetId does not control selection.
     return { heading: item.heading ?? null, body: item.body };
   });
   const input: NaverBlogDraftInput = {
@@ -107,7 +108,7 @@ export async function POST(request: Request) {
   try {
     const { data: draft, error } = await supabase
       .from("blog_drafts")
-      .select("id, blog_task_id, product_id, title, intro, sections, closing, status, publishing_status, published_url, published_at, publishing_error")
+      .select("id, blog_task_id, title, intro, sections, closing, status, publishing_status, published_url, published_at, publishing_error")
       .eq("id", draftId)
       .maybeSingle();
 
@@ -165,9 +166,9 @@ export async function POST(request: Request) {
     if (url.protocol !== "https:" || url.hostname !== "blog.naver.com") {
       throw new Error("NAVER_BLOG_WRITE_URL은 네이버 블로그 HTTPS 글쓰기 URL이어야 합니다.");
     }
-    stage = "product assets download";
+    stage = "blog task assets download";
     assetDirectory = await createProductAssetDirectory(draftId);
-    publisherInput.imagePaths = await downloadProductAssetFiles(draft.product_id, assetDirectory);
+    publisherInput.imagePaths = await downloadBlogTaskAssetFiles(draft.blog_task_id, assetDirectory);
     console.log("publisher image count:", publisherInput.imagePaths.length);
     stage = "browser launch";
     const context = await getReviewContext(resolve(profileDir));
@@ -206,7 +207,7 @@ export async function POST(request: Request) {
     if (claimed) {
       const publishingError = error instanceof NaverBlogInputError
         ? `네이버 초안 자동입력 실패 (${error.stage}). 서버 로그를 확인해 주세요.`
-        : `${stage}: ${stage === "draft validation" || stage === "publisher configuration" || stage === "review status update" || stage === "product assets download"
+        : `${stage}: ${stage === "draft validation" || stage === "publisher configuration" || stage === "review status update" || stage === "blog task assets download"
           ? (error instanceof Error ? error.message : "검증 실패")
           : "네이버 입력 준비 중 오류가 발생했습니다. 서버 로그를 확인해 주세요."}`;
       try {
@@ -222,7 +223,7 @@ export async function POST(request: Request) {
         logFailure("failure status update", failureError);
       }
     }
-    return Response.json({ error: error instanceof ProductAssetDownloadError ? error.message : "발행 처리 중 오류가 발생했습니다." }, { status: 500 });
+    return Response.json({ error: error instanceof BlogTaskAssetDownloadError ? error.message : "발행 처리 중 오류가 발생했습니다." }, { status: 500 });
   } finally {
     try {
       if (assetDirectory) await removeProductAssetDirectory(assetDirectory);
