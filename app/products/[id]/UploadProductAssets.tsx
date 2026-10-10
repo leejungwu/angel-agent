@@ -99,22 +99,25 @@ export default function UploadProductAssets({ productId }: { productId: string |
 
   return (
     <form onSubmit={uploadImages} className="mt-4 rounded-lg border p-4" aria-busy={uploading}>
-      <label className="block text-sm font-medium">
-        이미지 선택 (JPEG, PNG, WebP · 여러 장 선택 가능)
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept={IMAGE_TYPES.join(",")}
-          disabled={uploading}
-          className="mt-2 block w-full text-sm disabled:opacity-50"
-          onChange={(event) => {
-            setFiles(Array.from(event.target.files ?? []));
-            setErrorMessage("");
-            setSuccessMessage("");
-          }}
-        />
-      </label>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        accept={IMAGE_TYPES.join(",")}
+        aria-label="사진 선택"
+        disabled={uploading}
+        className="hidden"
+        onChange={(event) => {
+          setFiles(Array.from(event.target.files ?? []));
+          setErrorMessage("");
+          setSuccessMessage("");
+        }}
+      />
+      <button type="button" onClick={() => inputRef.current?.click()} disabled={uploading}
+        className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50">
+        사진 업로드
+      </button>
+      <p className="mt-2 text-sm text-zinc-500">JPEG, PNG, WebP · 여러 장 선택 가능</p>
       {files.length > 0 && (
         <ol className="mt-3 list-inside list-decimal text-sm text-zinc-500">
           {files.map((file, index) => <li key={index} className="break-words">{file.name}</li>)}
@@ -125,7 +128,7 @@ export default function UploadProductAssets({ productId }: { productId: string |
         disabled={uploading || !files.length}
         className="mt-3 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
       >
-        {uploading ? progress || "업로드 중..." : "이미지 업로드"}
+        {uploading ? progress || "업로드 중..." : "저장"}
       </button>
       {errorMessage && <p role="alert" className="mt-3 whitespace-pre-wrap break-words text-sm text-red-600">{errorMessage}</p>}
       {successMessage && <p role="status" className="mt-3 text-sm text-green-700">{successMessage}</p>}

@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test:naver-blog": "tsx scripts/test-naver-blog-editor.ts",
     "test:blog-body": "tsx scripts/test-blog-body.ts",
+    "test:blog-task-assets": "node scripts/test-blog-task-assets.mjs",
     "test:ai-providers": "node scripts/test-ai-providers.mjs"
   },
   "dependencies": {

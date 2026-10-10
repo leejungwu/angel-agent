@@ -5,6 +5,8 @@ import { supabase } from "@/lib/supabase";
 import GenerateBlogDraft, { type Draft } from "./GenerateBlogDraft";
 import DeleteBlogTaskButton from "../DeleteBlogTaskButton";
 import EditBlogTask from "./EditBlogTask";
+import BlogTaskAssets from "./BlogTaskAssets";
+import type { BlogTaskAsset } from "@/lib/blog-task-assets";
 
 type BlogTask = {
   id: string | number;
@@ -56,8 +58,19 @@ export default async function BlogTaskDetailPage({
 
   let initialDraft: Draft | null = null;
   let draftErrorMessage: string | undefined;
+  let assets: BlogTaskAsset[] = [];
+  let assetsErrorMessage: string | undefined;
 
   if (task && !errorMessage) {
+    const { data: taskAssets, error: assetError } = await supabase.from("blog_task_assets")
+      .select("id, storage_path, file_name, sort_order")
+      .eq("blog_task_id", task.id)
+      .order("sort_order", { ascending: true })
+      .order("id", { ascending: true })
+      .returns<BlogTaskAsset[]>();
+    assets = taskAssets ?? [];
+    assetsErrorMessage = assetError?.message;
+
     const { data, error } = await supabase
       .from("blog_drafts")
       .select("id, title, intro, sections, closing, status, model, created_at")
@@ -110,6 +123,9 @@ export default async function BlogTaskDetailPage({
         <p role="alert" className="mt-4 text-red-600">
           초안 조회 오류: {draftErrorMessage}
         </p>
+      )}
+      {task && !errorMessage && (
+        <BlogTaskAssets taskId={task.id} assets={assets} errorMessage={assetsErrorMessage} />
       )}
       {task && !errorMessage && (
         <GenerateBlogDraft
