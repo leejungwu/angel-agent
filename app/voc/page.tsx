@@ -145,7 +145,7 @@ export default async function VocDashboardPage() {
                   </section>;
                 })}
               </div>}
-              <Link href={`/products/${product.id}`} className="mt-5 inline-block rounded-lg border bg-white px-4 py-2 text-sm font-medium hover:bg-zinc-50">
+              <Link href={`/products/${product.id}`} className="button-link mt-5 inline-block rounded-lg border bg-white px-4 py-2 text-sm font-medium hover:bg-zinc-50">
                 상품 VOC 보기
               </Link>
             </article>;

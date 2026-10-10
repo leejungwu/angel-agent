@@ -108,7 +108,9 @@ export default function UploadProductAssets({ productId }: { productId: string |
         disabled={uploading}
         className="hidden"
         onChange={(event) => {
-          setFiles(Array.from(event.target.files ?? []));
+          const selected = Array.from(event.target.files ?? []);
+          setFiles((current) => [...current, ...selected]);
+          event.target.value = "";
           setErrorMessage("");
           setSuccessMessage("");
         }}
@@ -118,9 +120,17 @@ export default function UploadProductAssets({ productId }: { productId: string |
         사진 업로드
       </button>
       <p className="mt-2 text-sm text-zinc-500">JPEG, PNG, WebP · 여러 장 선택 가능</p>
+      {files.length > 0 && <p className="mt-2 text-sm text-zinc-500">선택한 사진 {files.length}장</p>}
       {files.length > 0 && (
         <ol className="mt-3 list-inside list-decimal text-sm text-zinc-500">
-          {files.map((file, index) => <li key={index} className="break-words">{file.name}</li>)}
+          {files.map((file, index) => (
+            <li key={index} className="break-words">
+              {file.name}
+              <button type="button" aria-label={`${file.name} 선택 해제`} disabled={uploading}
+                onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}
+                className="ml-2 rounded px-1 text-red-600 disabled:opacity-50">×</button>
+            </li>
+          ))}
         </ol>
       )}
       <button

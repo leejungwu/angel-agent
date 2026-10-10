@@ -64,7 +64,7 @@ export default async function ProductDetailPage({
         <div className="flex gap-2">
         <Link
           href={`/products/${product.id}/edit`}
-          className="rounded-lg bg-black px-4 py-2 text-white"
+          className="button-link rounded-lg bg-black px-4 py-2 text-white"
         >
           수정
         </Link>

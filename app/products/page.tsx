@@ -24,7 +24,7 @@ export default async function ProductsPage() {
 
         <Link
           href="/products/new"
-          className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white"
+          className="button-link rounded-lg bg-black px-4 py-2 text-sm font-medium text-white"
         >
           새 상품 등록
         </Link>

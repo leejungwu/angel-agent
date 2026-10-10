@@ -63,7 +63,7 @@ export default async function PublishingQueuePage() {
     <main className="p-10">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Publishing Queue</h1>
-        <Link href="/content/blog" className="rounded-lg border bg-white px-4 py-2 text-sm font-medium">
+        <Link href="/content/blog" className="button-link rounded-lg border bg-white px-4 py-2 text-sm font-medium">
           블로그 작업 목록
         </Link>
       </div>

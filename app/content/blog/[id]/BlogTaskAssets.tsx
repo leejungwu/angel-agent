@@ -128,13 +128,30 @@ export default function BlogTaskAssets({ taskId, assets, errorMessage }: {
       <form onSubmit={upload} className="mt-5" aria-busy={busy}>
         <input ref={inputRef} type="file" multiple accept={BLOG_TASK_IMAGE_TYPES.join(",")}
           aria-label="사진 선택" disabled={busy || !!errorMessage} className="hidden"
-          onChange={(event) => { setFiles(Array.from(event.target.files ?? [])); setError(""); }} />
+          onChange={(event) => {
+            const selected = Array.from(event.target.files ?? []);
+            setFiles((current) => [...current, ...selected]);
+            event.target.value = "";
+            setError("");
+          }} />
         <button type="button" onClick={() => inputRef.current?.click()} disabled={busy || !!errorMessage}
           className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50">
           사진 업로드
         </button>
         <p className="mt-2 text-sm text-zinc-500">JPEG, PNG, WebP · 여러 장 선택 가능</p>
         {files.length > 0 && <p className="mt-2 text-sm text-zinc-500">선택한 사진 {files.length}장</p>}
+        {files.length > 0 && (
+          <ol className="mt-3 list-inside list-decimal text-sm text-zinc-500">
+            {files.map((file, index) => (
+              <li key={index} className="break-words">
+                {file.name}
+                <button type="button" aria-label={`${file.name} 선택 해제`} disabled={busy}
+                  onClick={() => setFiles((current) => current.filter((_, i) => i !== index))}
+                  className="ml-2 rounded px-1 text-red-600 disabled:opacity-50">×</button>
+              </li>
+            ))}
+          </ol>
+        )}
         <button type="submit" disabled={busy || !!errorMessage || !files.length}
           className="mt-3 rounded-lg bg-black px-4 py-2 text-sm text-white disabled:opacity-50">
           {busy ? progress || "처리 중..." : "저장"}
