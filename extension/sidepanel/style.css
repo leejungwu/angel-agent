@@ -1,0 +1,7 @@
+body { margin: 0; padding: 24px; font: 14px/1.6 system-ui, sans-serif; color: #18181b; background: #fafafa; }
+h1 { font-size: 20px; margin: 0; } h2 { font-size: 17px; overflow-wrap: anywhere; }
+label { display: block; margin: 16px 0; font-weight: 600; }
+input, select, button { box-sizing: border-box; width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #d4d4d8; font: inherit; }
+input, select { display: block; margin-top: 6px; background: white; }
+button { margin: 6px 0; background: #18181b; color: white; cursor: pointer; } button:disabled { opacity: .45; cursor: default; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; } .note { color: #71717a; } #result { overflow-wrap: anywhere; }

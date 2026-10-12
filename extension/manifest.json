@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Angel Agent Blog Assistant",
+  "version": "0.1.0",
+  "minimum_chrome_version": "114",
+  "description": "현재 네이버 글쓰기 화면에 제목과 사진 마커가 포함된 본문을 입력합니다. 발행은 사용자가 직접 합니다.",
+  "permissions": ["sidePanel", "storage", "activeTab", "webNavigation", "debugger"],
+  "host_permissions": ["https://blog.naver.com/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "optional_host_permissions": ["https://*/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Angel Agent 열기" },
+  "side_panel": { "default_path": "sidepanel/index.html" },
+  "content_scripts": [{ "matches": ["https://blog.naver.com/*"], "js": ["content.js"], "all_frames": true, "run_at": "document_idle" }]
+}
