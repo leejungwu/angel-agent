@@ -15,7 +15,7 @@ export async function DELETE(
       .from("blog_drafts")
       .select("id")
       .eq("blog_task_id", id)
-      .in("publishing_status", ["publishing", "published"])
+      .in("publishing_status", ["published"])
       .limit(1);
 
     if (lookupError) {
@@ -24,7 +24,7 @@ export async function DELETE(
     }
     if (protectedDrafts?.length) {
       return Response.json(
-        { error: "발행 중이거나 이미 발행된 초안이 있어 삭제할 수 없습니다." },
+        { error: "이미 발행된 초안이 있어 삭제할 수 없습니다." },
         { status: 409 },
       );
     }

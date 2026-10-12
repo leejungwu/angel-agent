@@ -5,7 +5,7 @@
 기준: 2026-10-08, feat/kin-prompt-tuning (최신 main 병합 완료). [x]는 명시한 범위의 코드 구현을 뜻하며 운영 품질 보장을 뜻하지 않는다. (partial)은 미완료로 유지한다. 실테스트 표시는 이전 실제 테스트 기록이며 이번 문서 작업에서 API를 재호출하지 않았다.
 
 - Blog v1: 실제 윗잠베개 Product 정보 입력, prompt 강하게 튜닝, CONTENT_STRATEGY / COPYWRITING 자료 정리, 실제 사진 asset 확보.
-- Blog v1: 글 1개 + 사진 2장 inline insertion 최종 검증, 실제 블로그 1개 semi-auto 발행. 최종 발행 / 예약 발행 버튼은 사람이 직접 처리.
+- Blog v1: 발행 준비 화면에서 제목/본문 복사와 번호순 사진 다운로드 후, 네이버에서 사람이 직접 검수·발행.
 - KIN: prompt tuning 마무리, 실제 답변 품질 검수, 완료 후 main merge.
 - Blog v1 운영 가능 전까지 자동 발행 / 다계정 / OpenClaw는 우선순위가 아니다.
 
@@ -31,7 +31,7 @@
 
 ## 2. AI Blog Content Generator
 
-구현 근거: app/products/, app/content/blog/, app/api/blog/generate/route.ts, lib/blog-generation/, lib/naver-blog/, app/api/blog/publish/, product_assets migrations.
+구현 근거: app/products/, app/content/blog/, app/api/blog/generate/route.ts, lib/blog-generation/, lib/blog-publishing/, product_assets migrations.
 
 ### Product & Content Input
 
@@ -106,30 +106,23 @@
 - [ ] Manual Asset Descriptions
 - [x] Product-to-Asset Mapping
 - [ ] AI Asset Selection
-- [ ] Section-to-Image Mapping — (partial) 정렬된 사진을 section 순서로 매칭하는 publisher 코드 구현; 사용자 선택 / AI 매핑 없음.
+- [x] Image Placement Guidance — 순수 image layout을 재사용한 번호순 사진 위치 표시.
 - [x] Image Preview (제품 상세 UI; Draft별 이미지 선택 UI는 아님)
 - [ ] Asset Selection Review
 
-### Naver Blog Publishing
+### Naver Blog Publishing Preparation
 
-- [x] Publishing Queue
-- [x] Approved Draft Filtering
-- [x] Naver Blog Editor Research
-- [x] Playwright Integration
-- [x] Automatic Editor Input
-- [x] Image Upload
-- [ ] Image Placement — (partial) section body 뒤 inline insertion 및 본문·DOM 순서 검증 코드 구현; 실제 글 1개 + 사진 2장 E2E 최종 검증 미완료.
-- [ ] Category Selection
-- [ ] Tag Input
-- [ ] Draft Save — (partial) 앱 Draft DB 저장 구현; Naver 임시저장 자동화 미구현.
-- [x] Semi-automatic Publishing (입력 후 ready_for_review 정지; 최종 발행 클릭·로그인 자동화 없음)
-- [ ] Automatic Publishing
-- [ ] Scheduled Publishing — Naver UI에서 사람이 직접 예약; 앱의 자동 예약 실행 미구현.
-- [x] Publishing Failure Detection
-- [ ] Published URL Storage — (partial) result API에 저장 분기 존재; ready_for_review 이후 발행 확인·URL 저장 연결 미완료.
-- [ ] Publishing Result History — (partial) Draft별 현재 상태·오류 저장만 존재; 별도 실행 이력 없음.
+- [x] Approved Draft Preparation List
+- [x] Title / Plain-text Body Copy
+- [x] Ordered Photo Insertion Markers
+- [x] Individual Photo Preview / Download
+- [x] Numbered Image ZIP Download
+- [x] Blog Task Photo Upload / Compression / Storage
 
-approved → queued → publishing → ready_for_review 상태 흐름 구현. 이미지 수 검증, Naver 실제 업로드 완료 대기, 작성 중인 글 모달 취소, 실패 오류 저장, 다운로드 임시파일 finally 정리 구현. 자산 순서는 sort_order ASC → id ASC. result API는 publishing 상태만 받아 현재 종료 상태와 발행 결과 기록 연결이 남아 있다.
+Playwright 자동입력, persistent profile, 자동발행 API와 Naver E2E는 제거했다.
+발행 준비는 기존 Draft와 task 사진을 읽으며 DB status를 변경하지 않는다.
+기존 queued/publishing/ready_for_review 등은 역사적 값으로 보존한다.
+네이버 붙여넣기, 사진 배치, 검수, 최종 발행은 사용자가 직접 한다.
 
 ### Future Intelligence
 
@@ -472,12 +465,12 @@ lib/kin/quality-check.ts의 문구·횟수 기반 heuristic 경고와 결과 UI 
 - [ ] Weekly Reports
 - [ ] Automated Work Logs
 - [ ] Task / Workflow History
-- [x] Content Publishing Queue (Blog DB 상태 기반 수동 실행 큐; scheduler / worker 아님)
-- [ ] Publishing Retry Workflow — (partial) 실패 후 수동 재등록·실행 가능; 자동 재시도 workflow 없음.
+- [x] Blog Publishing Preparation List (승인 초안의 수동 발행 자료 준비)
+- [ ] Publishing Retry Workflow — 자동입력 제거로 Blog 대상에서 제외.
 
 ---
 
-자동화는 Blog 큐 범위에 한정된다. Cron / OpenClaw / 자동 스케줄 실행 / 완전 자동 발행 미구현.
+Blog는 발행 준비 도구이며 사이트 자동조작을 수행하지 않는다. Cron / OpenClaw / 자동 스케줄 실행 / 완전 자동 발행 미구현.
 
 ## 17. Generative Media
 
@@ -579,10 +572,8 @@ Product Retrieval
 → Structured Draft Generation
 → Draft Save
 → Human Approval
-→ Publishing Queue
-→ Playwright / OpenClaw
-→ Naver Blog
-→ Save Published URL
+→ Copy Text / Download Ordered Photos
+→ User Publishes in Naver Blog
 ```
 
 ---

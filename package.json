@@ -7,7 +7,6 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:naver-blog": "tsx scripts/test-naver-blog-editor.ts",
     "test:blog-body": "tsx scripts/test-blog-body.ts",
     "test:blog-task-assets": "node scripts/test-blog-task-assets.mjs",
     "test:ai-providers": "node scripts/test-ai-providers.mjs"
@@ -18,7 +17,6 @@
     "csv-parse": "^7.0.3",
     "next": "16.3.8",
     "openai": "^7.28.0",
-    "playwright": "^1.63.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "read-excel-file": "^9.3.10"

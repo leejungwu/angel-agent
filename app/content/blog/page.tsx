@@ -56,7 +56,7 @@ export default async function BlogPage() {
             href="/content/blog/publishing"
             className="button-link rounded-lg border bg-white px-4 py-2 text-sm font-medium"
           >
-            Publishing Queue
+            네이버 발행 준비
           </Link>
           <Link
             href="/content/blog/new"

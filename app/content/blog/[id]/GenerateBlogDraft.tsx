@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import type { AIProvider } from "@/lib/ai/provider";
@@ -352,6 +353,7 @@ export default function GenerateBlogDraft({
       )}
 
       <div aria-live="polite" aria-busy={generating || saving || changingStatus}>
+        {draft?.id && !editingDraft && <Link href={`/content/blog/${taskId}/prepare?draftId=${draft.id}`} className="mt-4 inline-block rounded-lg border px-4 py-2 text-sm">네이버 발행 준비</Link>}
         {draft && !editingDraft && (
           <article className="mt-6 rounded-xl border bg-white p-6">
             <h2 className="text-xl font-bold">{draft.title}</h2>

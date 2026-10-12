@@ -43,28 +43,36 @@ spaces, and counts Unicode code points. Out-of-range output is saved with a
 warning, not rejected. The API returns `bodyLength`; the editor recalculates it
 for saved and edited drafts. Explicit task length instructions take priority.
 
-`lib/naver-blog/image-layout.ts` distributes images across prose paragraph
-boundaries, not section headings. If paragraphs are insufficient, it splits
-longer prose at sentence/whitespace boundaries without splitting words. Images
-retain asset order; indivisible short prose uses balanced groups. This changes
-only publisher input, not stored Draft data. The publisher still inputs all text
-first and uploads one image at a time, checking body preservation and image DOM
-order. `npm run test:blog-body` tests the plan offline; real Naver editor behavior
-and visual spacing still require a separate E2E check without final publishing.
+## Manual blog publishing preparation
+
+The app prepares content; users paste text and insert photos in Naver themselves.
+Playwright, persistent profiles, automatic editor input and publish APIs have been removed.
+Open /content/blog/publishing for approved drafts or /content/blog/{taskId}/prepare
+for a task. A draftId query selects the exact stored draft within that task.
+Title copy uses plain text. Body copy includes numbered photo insertion markers by
+default; users can omit them. Preview markers and downloadable filenames share
+sort_order ASC, id ASC ordering. Individual downloads retain image extensions;
+bulk download produces blog-{taskId}-images.zip without an added dependency.
+
+lib/blog-publishing/image-layout.ts retains planBlogImages as a pure planner.
+It can split prose at sentence/whitespace boundaries and distribute ordered markers;
+it never changes the stored Draft. Existing publishing_status values are historical
+metadata only: preparation does not simulate browser completion or publication.
+No migration is needed. test:blog-body covers copy/layout/filenames/ZIP offline.
 
 ## Blog task photos
 
 Apply `supabase/migrations/202610100001_create_blog_task_assets.sql` once before
-using the photo UI or the updated publisher. Each task owns ordered
+using the task photo UI. Each task owns ordered
 `blog_task_assets` rows and files under `blog-task-assets/tasks/{taskId}/`.
 The bucket is private but follows the existing internal-development anon RLS
 style; it is not a per-user authorization boundary. Existing `product_assets`
-remain untouched and are no longer a publisher input. No old images are copied:
+remain untouched; publishing preparation uses task photos only. No old images are copied:
 upload each post's own photos. Removing a task requires deleting its photos
 first, so the database cascade does not leave Storage files behind. On delete
 failure, the UI reports partial progress and attempts to restore the current
 object. If restoration fails, keep the reported path for manual repair.
-Rollback: revert the photo UI/publisher code and retain the new table and bucket
+Rollback: revert the photo UI/preparation code and retain the new table and bucket
 until their files and metadata are separately audited; do not drop them blindly.
 
 ## KIN integration

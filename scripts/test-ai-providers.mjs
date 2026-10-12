@@ -108,6 +108,7 @@ const GenerateBlogDraft = load("app/content/blog/[id]/GenerateBlogDraft.tsx", {
   },
   "react/jsx-runtime": { jsx, jsxs: jsx },
   "next/navigation": { useRouter: () => ({ refresh() {} }) },
+  "next/link": { default: "a" },
   "@/lib/supabase": { supabase: database },
   "@/lib/blog-generation/body": blogBody,
   "@/lib/blog-generation/models": blogModels,
