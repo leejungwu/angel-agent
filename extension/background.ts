@@ -2,11 +2,14 @@
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   const settingsReady = chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 
-  async function api(path: string) {
+  async function api(path: string, method = "GET", body?: object) {
     await settingsReady;
     const { appUrl, extensionToken } = await chrome.storage.local.get(["appUrl", "extensionToken"]);
     if (!appUrl || !extensionToken) throw new Error("Angel Agent 주소와 연결 토큰을 설정해 주세요.");
-    const response = await fetch(new URL(path, appUrl), { headers: { Authorization: `Bearer ${extensionToken}` }, cache: "no-store" });
+    const response = await fetch(new URL(path, appUrl), { method,
+      headers: { Authorization: `Bearer ${extensionToken}`, ...(body ? { "Content-Type": "application/json" } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}), cache: "no-store",
+      ...(method !== "GET" ? { signal: AbortSignal.timeout(method === "DELETE" ? 10000 : 45000) } : {}) });
     const value = await response.json();
     if (!response.ok) throw new Error(value.error ?? `API 오류 (${response.status})`);
     return value;
@@ -53,6 +56,24 @@
     let stage = "attach";
     let failure: unknown;
     let detachFailure: unknown;
+    const temporaryImages = new Set<string>();
+    const cleanupWarnings = new Set<string>();
+    async function removeTempImage(tempId: string) {
+      try {
+        await api(`/api/extension/temp-image/${tempId}`, "DELETE");
+        temporaryImages.delete(tempId);
+        cleanupWarnings.delete(tempId);
+      } catch { cleanupWarnings.add(tempId); }
+    }
+    async function createPhotoTemp(image: ExtensionTask["images"][number]) {
+      try {
+        const result = await api("/api/extension/temp-image", "POST", { signedUrl: image.signedUrl });
+        if (typeof result.tempId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(result.tempId)) throw new Error("tempId 없음");
+        temporaryImages.add(result.tempId);
+        if (typeof result.absolutePath !== "string" || !/^(?:[A-Za-z]:[\\/]|\/)/.test(result.absolutePath)) throw new Error("임시 파일 경로 없음");
+        return { tempId: result.tempId, filename: result.absolutePath };
+      } catch { throw new Error("서버 임시 사진 생성 실패: URL 만료·서버 상태를 확인하세요."); }
+    }
     const onDetach = (source: { tabId?: number }) => { if (source.tabId === tabId) attached = false; };
     chrome.debugger.onDetach.addListener(onDetach);
     const send = async (method: string, params: object) => {
@@ -87,9 +108,9 @@
       if (!checked.verification?.titleMatches || (field === "body" && !checked.verification.bodyMatches)) throw new Error("DOM 검증 결과가 없습니다.");
     };
     try {
-      stage = "PHOTO_FETCH";
-      const image = task.images[0];
-      if (image && (image.index !== 0 || !Number.isSafeInteger(image.insertOffset) || image.insertOffset < 0 || image.insertOffset > task.bodyText.length)) throw new Error("첫 사진 insertOffset을 확인해 주세요.");
+      stage = "PHOTO_POSITION";
+      const images = task.images.slice(0, 3).sort((a, b) => b.insertOffset - a.insertOffset || b.index - a.index);
+      if (images.some((image) => !Number.isSafeInteger(image.insertOffset) || image.insertOffset < 0 || image.insertOffset > task.bodyText.length)) throw new Error("사진 insertOffset을 확인해 주세요.");
       await assertCurrentTab(tabId);
       const check = await frameRequest({ type: "EDITOR_DIAGNOSE" });
       if (check.diagnostic?.ready !== true || !check.diagnostic.titleFound || !check.diagnostic.bodyFound) throw new Error("Naver 글쓰기 frame/제목/본문을 다시 확인해 주세요.");
@@ -98,9 +119,12 @@
       attached = true;
       await insertField("title", task.title);
       await insertField("body", task.bodyText);
-      if (image) {
+      for (const image of images) {
+        stage = "PHOTO_TEMP_CREATE";
+        const downloaded = await createPhotoTemp(image);
+        const photoTask = { ...task, images: [image] };
         const clickPhotoTarget = async (type: string) => {
-          const reply = await frameRequest({ type, task });
+          const reply = await frameRequest({ type, task: photoTask });
           if (!reply.position) throw new Error("사진 입력 좌표 없음");
           const { x, y } = reply.position;
           await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
@@ -112,33 +136,72 @@
         };
         stage = "PHOTO_POSITION";
         await clickPhotoTarget("EDITOR_PHOTO_TARGET");
-        stage = "PHOTO_CARET";
         await frameRequest({ type: "EDITOR_PHOTO_CARET" });
         stage = "PHOTO_EMPTY_PARAGRAPH";
         await key("Enter", 13);
         await key("Enter", 13);
         await clickPhotoTarget("EDITOR_PHOTO_EMPTY");
-        stage = "PHOTO_PASTE_TARGET";
-        await clickPhotoTarget("EDITOR_PHOTO_PASTE_TARGET");
-        await frameRequest({ type: "EDITOR_PHOTO_PASTE_CARET" });
+        await frameRequest({ type: "EDITOR_PHOTO_UPLOAD_CARET" });
+        stage = "PHOTO_FILE_CHOOSER";
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let rejectChooser: (error: Error) => void = () => {};
+        let onChooser: Parameters<typeof chrome.debugger.onEvent.addListener>[0] = () => {};
+        const chooser = new Promise<{ source: { tabId?: number; sessionId?: string }; backendNodeId: number }>((resolve, reject) => {
+          rejectChooser = reject;
+          onChooser = (source, method, params) => {
+            if (source.tabId !== tabId || method !== "Page.fileChooserOpened") return;
+            const nodeId = params?.backendNodeId;
+            if (typeof nodeId !== "number" || !Number.isSafeInteger(nodeId) || nodeId <= 0) reject(new Error("file input backendNodeId 없음"));
+            else resolve({ source, backendNodeId: nodeId });
+          };
+          chrome.debugger.onEvent.addListener(onChooser);
+          timer = setTimeout(() => reject(new Error("사진 파일 선택 이벤트 시간 초과")), 15000);
+        });
+        // 클릭/프로토콜 실패로 이벤트 대기가 종료되기 전에도 rejection을 처리합니다.
+        void chooser.catch(() => {});
+        try {
+          await send("Page.enable", {});
+          await send("Page.setInterceptFileChooserDialog", { enabled: true });
+          await clickPhotoTarget("EDITOR_PHOTO_BUTTON");
+          const opened = await chooser;
+          stage = "PHOTO_UPLOAD";
+          await assertCurrentTab(tabId);
+          await chrome.debugger.sendCommand(opened.source, "DOM.setFileInputFiles", { files: [downloaded.filename], backendNodeId: opened.backendNodeId });
+        } catch (error) {
+          rejectChooser(new Error("사진 파일 선택 중단"));
+          if (error instanceof Error && error.message.includes("backendNodeId")) throw error;
+          throw new Error(stage === "PHOTO_UPLOAD" ? "사진 파일 지정 실패" : "사진 파일 선택 interception 실패");
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+          chrome.debugger.onEvent.removeListener(onChooser);
+          if (attached) await chrome.debugger.sendCommand(debuggee, "Page.setInterceptFileChooserDialog", { enabled: false });
+        }
         stage = "PHOTO_UPLOAD";
-        await key("v", 86, 2);
+        const finished = await frameRequest({ type: "EDITOR_PHOTO_VERIFY" });
+        if (!finished.imageReady) throw new Error("사진 업로드 검증 결과 없음");
+      }
+      if (images.length) {
         stage = "PHOTO_VERIFY";
-        const finished = await frameRequest({ type: "EDITOR_PHOTO_VERIFY", task });
-        if (!finished.imageReady) throw new Error("첫 사진 최종 검증 결과 없음");
+        await frameRequest({ type: "EDITOR_PHOTO_BODY_VERIFY", task });
       }
     } catch (error) { failure = error; }
     finally {
+      for (const delay of [0, 500, 1500, 3000]) {
+        if (!temporaryImages.size) break;
+        if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+        await Promise.all([...temporaryImages].map(removeTempImage));
+      }
       try { if (attached) await chrome.debugger.detach(debuggee); }
       catch (error) { detachFailure = error; }
       finally { chrome.debugger.onDetach.removeListener(onDetach); inputRunning = false; }
     }
+    const cleanupWarning = cleanupWarnings.size ? ` PHOTO_TEMP_CLEANUP: 임시 사진 ${cleanupWarnings.size}개 정리 실패. 입력한 사진은 유지됩니다.` : "";
     if (failure || detachFailure) {
       const reason = failure instanceof Error ? failure.message : failure ? "입력 실패" : "";
       const detachReason = detachFailure ? " debugger detach 실패: Chrome에서 연결 상태를 확인해 주세요." : "";
-      throw new Error(`${stage}: ${reason}${detachReason} 일부 입력되었을 수 있으니 직접 확인하세요.`);
+      throw new Error(`${stage}: ${reason}${detachReason}${cleanupWarning} 일부 입력되었을 수 있으니 직접 확인하세요.`);
     }
-    return { message: "입력 완료 - 네이버에서 직접 확인 후 발행하세요" };
+    return { message: `입력 완료 - 네이버에서 직접 확인 후 발행하세요${cleanupWarning}` };
   }
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
@@ -157,7 +220,6 @@
         }
         case "INSERT": {
           if (!message.task) throw new Error("선택된 초안이 없습니다.");
-          if (message.task.images.length && message.clipboardReady !== true) throw new Error("PHOTO_CLIPBOARD_WRITE: Side Panel에서 첫 사진 clipboard 준비가 필요합니다.");
           const editor = await scanEditorFrames();
           if (editor.found.length !== 1) throw new Error(`SmartEditor 입력 프레임을 확정하지 못했습니다 (${editor.found.length}개). DOM 진단을 확인해 주세요.`);
           const target = editor.found[0];

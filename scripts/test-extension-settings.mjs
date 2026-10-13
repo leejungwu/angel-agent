@@ -14,7 +14,7 @@ const storage = {
   session: { get: async () => ({}), set: async () => {} },
 };
 const settle = () => new Promise((resolve) => setImmediate(resolve));
-async function openPanel(fail = false) {
+async function openPanel(fail = false, selectionTask) {
   const elements = new Map();
   const requests = [];
   const element = (id) => {
@@ -24,7 +24,9 @@ async function openPanel(fail = false) {
   };
   vm.runInNewContext(panelCode, { URL, Option: class {}, document: { getElementById: element }, chrome: {
     storage, permissions: { request: async () => true },
-    runtime: { sendMessage: async (message) => { requests.push(message); return fail ? { error: "fixture failure" } : { tasks: [] }; } },
+    runtime: { sendMessage: async (message) => { requests.push(message); if (message.type === "TASK" && selectionTask) return { task: selectionTask };
+      if (message.type === "DIAGNOSE") return { diagnostic: { ready: true, existing: false } };
+      return fail ? { error: "fixture failure" } : { tasks: [] }; } },
   } });
   await settle();
   return { element, requests };
@@ -82,6 +84,14 @@ vm.runInNewContext(backgroundCode, { URL, chrome: {
   authenticated = url.origin === saved.appUrl && options.headers.Authorization === `Bearer ${saved.extensionToken}`;
   return { ok: true, json: async () => ({ tasks: [] }) };
 } });
+const multiPanel = await openPanel(false, { title: "제목", bodyText: "본문", images: [0, 1, 2].map((index) => ({ signedUrl: `https://fixture.test/${index}.png` })) });
+multiPanel.element("tasks").value = "1";
+multiPanel.element("tasks").listeners.change(); await settle();
+multiPanel.element("insert").listeners.click(); await settle();
+const inserted = multiPanel.requests.find((message) => message.type === "INSERT");
+assert.ok(inserted);
+assert.equal("clipboardReady" in inserted, false);
+assert.equal(inserted.task.images.length, 3);
 const reply = await new Promise((resolve) => listener({ type: "TASKS" }, { id: "fixture" }, resolve));
 assert.equal(reply.error, undefined);
 assert.equal(authenticated, true);

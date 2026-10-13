@@ -18,7 +18,7 @@ const diagnostics = [];
 const context = { NodeFilter: { SHOW_TEXT: 4 }, getComputedStyle: () => ({ visibility: "visible" }),
   console: { info: (...values) => diagnostics.push(values) },
   chrome: { runtime: { onMessage: { addListener() {} } } }, window: { getSelection: () => selection, innerWidth: 800, innerHeight: 600 },
-  document: { querySelector: () => null, elementFromPoint: () => parent,
+  document: { querySelector: (selector) => selector === ".se-component.se-image" && imageCount ? {} : null, elementFromPoint: () => parent,
     querySelectorAll: (selector) => selector === ".se-component.se-text .se-text-paragraph" ? [parent] : selector === ".se-content" ? [componentUI] : selector === ".se-component.se-image" ? Array(imageCount).fill({}) : [],
     createRange: () => ({ setStart(node, offset) { this.startContainer = node; this.startOffset = offset; }, collapse() {}, getClientRects: () => [{ x: 50, y: 30, left: 50, top: 30, width: 0, height: 20 }] }),
     createTreeWalker(root) { let i = 0; const candidates = root === componentUI ? [...nodes, componentUIText] : nodes;
@@ -76,11 +76,15 @@ emptyTarget.contains = (node) => node === emptyTarget;
 context.currentInspect.paragraphs[2] = emptyTarget;
 selection = { isCollapsed: true, rangeCount: 1, focusNode: emptyTarget, focusOffset: 0,
   getRangeAt: () => ({ comparePoint: (node) => nodes.indexOf(node) < 2 ? -1 : 1 }) };
-await context.photoRequest({ type: "EDITOR_PHOTO_PASTE_CARET" });
+await context.photoRequest({ type: "EDITOR_PHOTO_UPLOAD_CARET" });
 selection.getRangeAt = () => ({ comparePoint: (node) => nodes.indexOf(node) < 1 ? -1 : 1 });
-await assert.rejects(() => context.photoRequest({ type: "EDITOR_PHOTO_PASTE_CARET" }), /caret/);
+await assert.rejects(() => context.photoRequest({ type: "EDITOR_PHOTO_UPLOAD_CARET" }), /caret/);
 imageCount = 1;
-assert.equal((await context.photoRequest({ type: "EDITOR_PHOTO_VERIFY", task: task(offset) })).imageReady, true);
+assert.equal((await context.photoRequest({ type: "EDITOR_PHOTO_VERIFY" })).imageReady, true);
+await context.photoRequest({ type: "EDITOR_PHOTO_BODY_VERIFY", task: task(offset) });
+await context.photoRequest({ type: "EDITOR_PHOTO_TARGET", task: task(offset) });
+imageCount = 2;
+assert.equal((await context.photoRequest({ type: "EDITOR_PHOTO_VERIFY" })).imageReady, true);
 imageCount = 0;
 context.currentInspect.paragraphs = nodes.map((node) => p(node.textContent));
 await context.photoRequest({ type: "EDITOR_PHOTO_TARGET", task: task(offset) });
@@ -88,7 +92,7 @@ context.currentInspect.paragraphs = [p(""), p("도입"), p("첫 문단😀"), p(
 await assert.rejects(() => context.photoRequest({ type: "EDITOR_PHOTO_EMPTY" }), /insertOffset/);
 nodes[2].textContent = "누락";
 imageCount = 1;
-await assert.rejects(() => context.photoRequest({ type: "EDITOR_PHOTO_VERIFY", task: task(offset) }), /본문/);
+await assert.rejects(() => context.photoRequest({ type: "EDITOR_PHOTO_BODY_VERIFY", task: task(offset) }), /본문/);
 nodes[2].textContent = "다음 문단" + "추가문자".repeat(30);
 imageCount = 0;
 context.currentInspect.paragraphs = nodes.map((node) => p(node.textContent));
@@ -96,5 +100,5 @@ await context.photoRequest({ type: "EDITOR_PHOTO_TARGET", task: task(offset) });
 assert.equal(diagnostics.at(-1)[1].extraSuffixLength, 120);
 assert.equal(diagnostics.at(-1)[1].extraSuffixPreview.length, 40);
 imageCount = 1;
-await assert.rejects(() => context.photoRequest({ type: "EDITOR_PHOTO_VERIFY", task: task(offset) }), /본문/);
+await assert.rejects(() => context.photoRequest({ type: "EDITOR_PHOTO_BODY_VERIFY", task: task(offset) }), /본문/);
 console.log("Offset checks passed: clean body, DOM whitespace mapping, UTF-16/emoji boundary, caret position, invalid offset/body rejection.");

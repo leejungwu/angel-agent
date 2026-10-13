@@ -83,7 +83,7 @@
     if (!tasks.value) { result.textContent = "작업을 선택해 주세요."; return; }
     const reply = await request({ type: "TASK", id: tasks.value }); selected = reply.task;
     element("title").textContent = selected?.title ?? "초안 없음";
-    element("images").textContent = `이미지 ${selected?.images.length ?? 0}개 · 첫 사진만 자동 삽입`;
+    element("images").textContent = `이미지 ${selected?.images.length ?? 0}개 · 최대 3장 자동 삽입`;
     result.textContent = "네이버 글쓰기 탭에서 DOM 진단 후 입력하세요.";
   }); });
   async function diagnose() {
@@ -97,28 +97,12 @@
   }); });
   insert.addEventListener("click", () => {
     if (busy) return;
-    let imagePermission: Promise<boolean> = Promise.resolve(true);
-    try {
-      const first = selected?.images[0];
-      if (first) {
-        const url = new URL(first.signedUrl);
-        if (url.protocol !== "https:" || url.username || url.password) throw new Error("사진 URL 형식을 확인해 주세요.");
-        imagePermission = chrome.permissions.request({ origins: [`${url.origin}/*`] });
-      }
-    } catch { result.textContent = "사진 URL 형식을 확인해 주세요."; return; }
     void run(async () => {
-    if (!await imagePermission) throw new Error("첫 사진 다운로드 권한이 필요합니다.");
-    let clipboardReady = false;
-    if (selected?.images[0]) {
-      const clipboard = await window.prepareImageClipboard(selected.images[0].signedUrl);
-      if (!clipboard.clipboardWritten) throw new Error(`${clipboard.clipboardStage}: ${clipboard.error}`);
-      clipboardReady = true;
-    }
     const diagnostic = await diagnose();
     if (diagnostic?.ready !== true) throw new Error(diagnostic?.reason ?? "입력 영역을 확정하지 못했습니다. 프레임별 DOM 진단을 확인해 주세요.");
     const overwrite = !!diagnostic?.existing;
     if (overwrite && !window.confirm("현재 글에 제목 또는 본문이 있습니다. 선택한 초안으로 덮어쓰시겠습니까?")) { result.textContent = "입력을 취소했습니다."; return; }
-    const reply = await request({ type: "INSERT", task: selected, overwrite, clipboardReady }); result.textContent = reply.message ?? "입력 결과를 확인해 주세요.";
+    const reply = await request({ type: "INSERT", task: selected, overwrite }); result.textContent = reply.message ?? "입력 결과를 확인해 주세요.";
   }); });
   void chrome.storage.local.get(["appUrl", "extensionToken", "baseUrl"]).then((saved) => {
     savedSettings = { appUrl: saved.appUrl ?? saved.baseUrl ?? "http://localhost:3000", extensionToken: saved.extensionToken ?? "" };

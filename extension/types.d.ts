@@ -13,7 +13,6 @@ type EditorTargetPosition = { x: number; y: number; rect: { x: number; y: number
 type ExtensionMessage = {
   type: string; id?: string; baseUrl?: string; token?: string; task?: ExtensionTask; overwrite?: boolean;
   field?: "title" | "body";
-  clipboardReady?: boolean;
 };
 type ExtensionReply = {
   error?: string; tasks?: { id: string | number; title: string; status: string }[]; task?: ExtensionTask;
@@ -21,15 +20,17 @@ type ExtensionReply = {
   diagnostics?: { frameId: number; diagnostic?: EditorDiagnostic; reason?: string }[];
   position?: EditorTargetPosition; existing?: boolean;
   imageReady?: boolean;
-  clipboardWritten?: boolean;
-  clipboardStage?: "PHOTO_FETCH" | "PHOTO_CONVERT" | "PHOTO_CLIPBOARD_API" | "PHOTO_CLIPBOARD_FOCUS" | "PHOTO_CLIPBOARD_WRITE";
   verification?: { titleMatches: boolean; bodyMatches: boolean; actualLength: number; expectedLength: number };
 };
 declare const chrome: {
   debugger: {
     attach(target: { tabId: number }, version: string): Promise<void>;
     detach(target: { tabId: number }): Promise<void>;
-    sendCommand(target: { tabId: number }, method: string, params?: object): Promise<object | undefined>;
+    sendCommand(target: { tabId?: number; sessionId?: string }, method: string, params?: object): Promise<object | undefined>;
+    onEvent: {
+      addListener(listener: (source: { tabId?: number; sessionId?: string }, method: string, params?: { backendNodeId?: number; frameId?: string; mode?: string }) => void): void;
+      removeListener(listener: (source: { tabId?: number; sessionId?: string }, method: string, params?: { backendNodeId?: number; frameId?: string; mode?: string }) => void): void;
+    };
     onDetach: {
       addListener(listener: (source: { tabId?: number }, reason: string) => void): void;
       removeListener(listener: (source: { tabId?: number }, reason: string) => void): void;
@@ -41,6 +42,5 @@ declare const chrome: {
   tabs: { query(options: { active: boolean; currentWindow: boolean }): Promise<{ id?: number; url?: string }[]>; sendMessage(id: number, message: ExtensionMessage, options: { frameId: number }): Promise<ExtensionReply> };
   webNavigation: { getAllFrames(options: { tabId: number }): Promise<{ frameId: number; url: string }[] | null> };
   permissions: { request(options: { origins: string[] }): Promise<boolean> };
-};
 
-interface Window { prepareImageClipboard(signedUrl: string | undefined): Promise<ExtensionReply>; }
+};

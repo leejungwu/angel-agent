@@ -2,74 +2,94 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import ts from "typescript";
+const code = ts.transpileModule(await readFile("extension/background.ts", "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+const task = { id: 1, title: "제목", bodyText: "abcdefghij", images: [2, 6, 8, 9].map((insertOffset, index) => ({ id: index, index, insertOffset, insertPrefix: "abcdefghij".slice(0, insertOffset), signedUrl: `https://fixture.test/${index}.png` })) };
+async function scenario(input = task, failure = "") {
+  let listener, intercepted = false, sequence = 0, uploadVerified = 0;
+  const deleteAttempts = new Map(), cleanupDelays = [], cleanupUploadCounts = [];
+  const handlers = new Set(), commands = [], messages = [], downloads = [], removed = [], erased = [];
 
-const source = await readFile("extension/background.ts", "utf8");
-const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText;
-const task = {
-  id: 1, draftId: 1, title: "제목", bodyText: "첫 문단\n\n다음 문단",
-  images: [0, 1].map((index) => ({ id: index + 1, index, insertOffset: 4, insertPrefix: "첫 문단", signedUrl: `https://images.example.test/${index}`, expiresIn: 600 })),
-};
-async function scenario(input, failure = "") {
-  let listener;
-  const commands = [], messages = [], downloads = [];
-  let detached = 0;
-  const diagnostic = { ready: true, frameReady: true, titleFound: true, bodyFound: true, existing: false };
   const chrome = {
-    storage: { local: { setAccessLevel: async () => {} } },
-    sidePanel: { setPanelBehavior: async () => {} },
-    tabs: {
-      query: async () => [{ id: 1, url: "https://blog.naver.com/postwrite" }],
-      sendMessage: async (_tab, message) => {
-        messages.push(message);
-        if (message.type === failure) return { error: "fixture failure" };
-        if (message.type === "EDITOR_DIAGNOSE") return { diagnostic };
-        if (message.type === "EDITOR_VERIFY") return { verification: { titleMatches: true, bodyMatches: true } };
-        return { position: { x: 10, y: 20 }, imageReady: true };
-      },
-    },
+    storage: { local: { setAccessLevel: async () => {}, get: async () => ({ appUrl: "http://localhost:3000", extensionToken: "fixture-secret" }) } }, sidePanel: { setPanelBehavior: async () => {} },
+    tabs: { query: async () => [{ id: 1, url: "https://blog.naver.com/postwrite" }], sendMessage: async (_tab, message) => {
+      messages.push(message);
+      if (message.type === failure) return { error: "fixture failure" };
+      if (message.type === "EDITOR_DIAGNOSE") return { diagnostic: { frameReady: true, ready: true, titleFound: true, bodyFound: true } };
+      if (message.type === "EDITOR_PHOTO_VERIFY") uploadVerified++;
+      if (message.type === "EDITOR_VERIFY") return { verification: { titleMatches: true, bodyMatches: true } };
+      return { position: { x: message.type === "EDITOR_PHOTO_BUTTON" ? 99 : 10, y: 20 }, imageReady: true };
+    } },
     webNavigation: { getAllFrames: async () => [{ frameId: 2, url: "https://blog.naver.com/PostWriteForm.naver" }] },
-    debugger: {
-      attach: async () => {}, detach: async () => { detached++; },
-      sendCommand: async (_target, method, params) => { commands.push({ method, params }); },
-      onDetach: { addListener: () => {}, removeListener: () => {} },
-    },
-    runtime: { id: "fixture", onMessage: { addListener: (fn) => { listener = fn; } } },
+    debugger: { attach: async () => {}, detach: async () => {}, onDetach: { addListener() {}, removeListener() {} },
+      onEvent: { addListener: (handler) => handlers.add(handler), removeListener: (handler) => handlers.delete(handler) },
+      sendCommand: async (_target, method, params) => {
+        commands.push({ method, params });
+        if (method === "Page.setInterceptFileChooserDialog") intercepted = params.enabled;
+        if (method === "Input.dispatchMouseEvent" && params.type === "mouseReleased" && params.x === 99 && failure !== "timeout") {
+          assert.equal(intercepted, true);
+          for (const handler of handlers) handler({ tabId: 1 }, "Page.fileChooserOpened", { backendNodeId: failure === "chooser" ? undefined : 123, frameId: "main", mode: "selectMultiple" });
+        }
+        if (method === "DOM.setFileInputFiles" && failure === "upload") throw new Error("fixture error");
+      },
+    }, runtime: { id: "fixture", onMessage: { addListener: (handler) => { listener = handler; } } },
   };
-  vm.runInNewContext(code, { chrome, URL, Response, AbortSignal, Uint8Array, btoa, fetch: async (url) => {
-    throw new Error("Background must not fetch image bytes: " + new URL(url).origin);
-  } });
-  const reply = await new Promise((resolve) => listener({ type: "INSERT", task: input, clipboardReady: failure !== "clipboard" }, { id: "fixture" }, resolve));
-  return { reply, commands, messages, downloads, detached };
+  vm.runInNewContext(code, { chrome, URL, AbortSignal, fetch: async (url, options) => {
+    assert.equal(options.headers.Authorization, "Bearer fixture-secret");
+    assert.equal(url.origin, "http://localhost:3000");
+    if (options.method === "POST") {
+      const body = JSON.parse(options.body); downloads.push(body);
+      if (failure === "create") return { ok: false, status: 500, json: async () => ({ error: "fixture create failure" }) };
+      const tempId = `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`;
+      return { ok: true, json: async () => ({ tempId, absolutePath: `C:\\Temp\\angel-agent\\naver-upload\\${tempId}.png` }) };
+    }
+    assert.equal(options.method, "DELETE");
+    cleanupUploadCounts.push(uploadVerified);
+    if (["", "cleanup", "cleanupRetry", "cleanupOne"].includes(failure)) assert.equal(uploadVerified, 3, "cleanup must follow all uploads");
+    const tempId = url.pathname.split("/").at(-1);
+    deleteAttempts.set(tempId, (deleteAttempts.get(tempId) ?? 0) + 1);
+    erased.push(tempId);
+    if (failure === "cleanup" || (failure === "cleanupOne" && tempId.endsWith("001")) || (failure === "cleanupRetry" && tempId.endsWith("001") && deleteAttempts.get(tempId) < 4)) return { ok: false, status: 500, json: async () => ({ error: "fixture cleanup failure" }) };
+    removed.push(url.pathname.split("/").at(-1));
+    return { ok: true, json: async () => ({ ok: true }) };
+  }, setTimeout: (fn, ms) => { if ([500, 1500, 3000].includes(ms)) { cleanupDelays.push(ms); return setTimeout(fn, 0); } return setTimeout(fn, failure === "timeout" && ms === 15000 ? 5 : ms); }, clearTimeout, Date });
+  const reply = await new Promise((resolve) => listener({ type: "INSERT", task: input }, { id: "fixture" }, resolve));
+  assert.equal(handlers.size, 0); assert.equal(intercepted, false);
+  if (["", "cleanup", "cleanupRetry", "cleanupOne"].includes(failure)) assert.ok(cleanupUploadCounts.every((count) => count === 3));
+  return { reply, commands, messages, downloads, removed, erased, cleanupDelays };
 }
+const success = await scenario();
+assert.equal(success.reply.error, undefined);
+assert.deepEqual(success.downloads.map((d) => d.signedUrl), [task.images[2].signedUrl, task.images[1].signedUrl, task.images[0].signedUrl]);
+assert.equal(code.includes("chrome.downloads"), false);
+assert.equal(success.commands.filter((c) => c.method === "DOM.setFileInputFiles").length, 3);
+assert.ok(success.commands.filter((c) => c.method === "DOM.setFileInputFiles").every((c) => c.params.backendNodeId === 123 && c.params.files.length === 1 && c.params.files[0].startsWith("C:\\")));
+assert.equal(success.messages.filter((m) => m.type === "EDITOR_PHOTO_BODY_VERIFY").length, 1);
+assert.deepEqual(success.messages.filter((m) => m.type === "EDITOR_PHOTO_TARGET").map((m) => m.task.images[0].index), [2, 1, 0]);
+assert.equal(success.removed.length, 3); assert.equal(success.erased.length, 3);
+assert.equal(success.commands.some((c) => c.params?.key === "v"), false);
+assert.deepEqual(success.commands.filter((c) => c.method === "Input.insertText").map((c) => c.params.text), [task.title, task.bodyText]);
+for (const failure of ["create", "chooser", "timeout", "upload", "EDITOR_PHOTO_VERIFY", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY"]) {
+  const failed = await scenario(task, failure);
+  assert.ok(failed.reply.error);
+  assert.match(failed.reply.error, /PHOTO_(TEMP_CREATE|FILE_CHOOSER|UPLOAD|POSITION|EMPTY_PARAGRAPH)/);
+  assert.equal(failed.downloads.length, 1); assert.equal(failed.erased.length, failure === "create" ? 0 : 1);
+  if (failure !== "create") assert.equal(failed.removed.length, 1);
+}
+const cleanupFailed = await scenario(task, "cleanup");
+assert.equal(cleanupFailed.reply.error, undefined);
+assert.match(cleanupFailed.reply.message, /PHOTO_TEMP_CLEANUP/);
+assert.equal(cleanupFailed.commands.filter((c) => c.method === "DOM.setFileInputFiles").length, 3);
+assert.equal(cleanupFailed.erased.length, 12);
+assert.deepEqual(cleanupFailed.cleanupDelays, [500, 1500, 3000]);
+const cleanupRecovered = await scenario(task, "cleanupRetry");
+assert.equal(cleanupRecovered.reply.error, undefined);
+assert.equal(cleanupRecovered.reply.message.includes("PHOTO_TEMP_CLEANUP"), false);
+assert.equal(cleanupRecovered.erased.length, 6);
+assert.deepEqual(cleanupRecovered.cleanupDelays, [500, 1500, 3000]);
+const cleanupOne = await scenario(task, "cleanupOne");
+assert.match(cleanupOne.reply.message, /임시 사진 1개 정리 실패/);
+assert.equal(cleanupOne.reply.error, undefined);
+assert.equal(cleanupOne.erased.length, 6);
 const plain = await scenario({ ...task, images: [] });
-assert.equal(plain.reply.error, undefined);
-assert.deepEqual(plain.commands.filter((c) => c.method === "Input.insertText").map((c) => c.params.text), [task.title, task.bodyText]);
-assert.equal(plain.messages.some((m) => m.type.startsWith("EDITOR_PHOTO_")), false);
-assert.equal(plain.detached, 1);
-
-const photo = await scenario(task);
-assert.equal(photo.reply.error, undefined);
-assert.deepEqual(photo.downloads, []);
-assert.equal(photo.commands.some((c) => c.method === "Page.setInterceptFileChooserDialog"), false);
-assert.deepEqual(photo.messages.filter((m) => m.type.startsWith("EDITOR_PHOTO_")).map((m) => m.type),
-  ["EDITOR_PHOTO_TARGET", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY", "EDITOR_PHOTO_PASTE_TARGET", "EDITOR_PHOTO_PASTE_CARET", "EDITOR_PHOTO_VERIFY"]);
-assert.deepEqual(photo.commands.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params.type === "rawKeyDown").map((c) => c.params.key), ["Enter", "Enter", "v"]);
-assert.equal(photo.commands.find((c) => c.params?.key === "v").params.modifiers, 2);
-assert.deepEqual(photo.commands.filter((c) => c.method === "Input.insertText").map((c) => c.params.text), [task.title, task.bodyText]);
-assert.equal(photo.commands.some((c) => c.method === "Input.dispatchKeyEvent" && c.params.key === "Backspace"), false);
-assert.equal(photo.detached, 1);
-
-const failed = await scenario(task, "EDITOR_PHOTO_VERIFY");
-assert.match(failed.reply.error, /PHOTO_VERIFY/);
-assert.equal(failed.commands.some((c) => c.params?.key === "Backspace"), false);
-assert.equal(failed.detached, 1);
-const wrongCaret = await scenario(task, "EDITOR_PHOTO_CARET");
-assert.match(wrongCaret.reply.error, /PHOTO_CARET/);
-assert.equal(wrongCaret.commands.some((c) => c.params?.key === "Enter"), false);
-const firstEnterFailed = await scenario(task, "EDITOR_PHOTO_EMPTY");
-assert.equal(firstEnterFailed.commands.filter((c) => c.method === "Input.dispatchKeyEvent" && c.params.type === "rawKeyDown" && c.params.key === "Enter").length, 2);
-assert.equal(firstEnterFailed.messages.some((m) => m.type === "EDITOR_PHOTO_PASTE_TARGET"), false);
-const clipFailed = await scenario(task, "clipboard");
-assert.match(clipFailed.reply.error, /PHOTO_CLIPBOARD/);
-assert.equal(clipFailed.commands.some((c) => c.params?.key === "v"), false);
-console.log("Extension photo checks passed: clean V1 input, first image only, Enter/Enter, caret gating, failure cleanup.");
+assert.equal(plain.reply.error, undefined); assert.equal(plain.downloads.length, 0);
+console.log("Multi-photo checks passed: 3-image cap, reverse offsets, intercepted chooser, absolute paths, server temp cleanup/warning, failure gating, final body verify, unchanged V1.");

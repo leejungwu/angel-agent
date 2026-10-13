@@ -23,10 +23,10 @@
     return { title, body, paragraphs, diagnostic };
   }
 
-  function assertSafeEditor() {
+  function assertSafeEditor(allowImages = false) {
     const current = inspect();
     if (current.diagnostic.ready !== true) throw new Error(current.diagnostic.reason);
-    if (document.querySelector(".se-component.se-image")) throw new Error("이미 사진이 있는 글에는 입력하지 않습니다. 새 글을 열어 주세요.");
+    if (!allowImages && document.querySelector(".se-component.se-image")) throw new Error("이미 사진이 있는 글에는 입력하지 않습니다. 새 글을 열어 주세요.");
     if ([...document.querySelectorAll<HTMLElement>('[role="dialog"]')].some(visible)) throw new Error("열린 모달을 직접 처리한 뒤 다시 시도해 주세요.");
     return current;
   }
@@ -192,9 +192,16 @@
   }
 
   async function photoRequest(message: ExtensionMessage): Promise<ExtensionReply> {
+    if (message.type === "EDITOR_PHOTO_BODY_VERIFY") {
+      if (!message.task) throw new Error("본문 검증할 초안 없음");
+      const expected = normalizeForPosition(message.task.bodyText);
+      const actual = normalizeForPosition(photoTextNodes().map((node) => node.textContent ?? "").join(""));
+      if (actual !== expected) throw new Error("사진 삽입 후 본문 문자/순서 불일치");
+      return {};
+    }
     if (message.type === "EDITOR_PHOTO_TARGET") {
       if (!message.task) throw new Error("초안 없음");
-      const current = assertSafeEditor();
+      const current = assertSafeEditor(true);
       const point = photoLocation(message.task);
       const paragraph = point.node.parentElement?.closest<HTMLElement>(".se-text-paragraph") ?? point.node.parentElement;
       if (!paragraph) throw new Error("삽입 text node의 부모 요소 없음");
@@ -227,15 +234,19 @@
       }
       throw new Error("insertOffset 위치의 빈 문단 없음");
     }
-    if (message.type === "EDITOR_PHOTO_PASTE_TARGET") return photoRequest({ ...message, type: "EDITOR_PHOTO_EMPTY" });
-    if (message.type === "EDITOR_PHOTO_PASTE_CARET") {
+    if (message.type === "EDITOR_PHOTO_UPLOAD_CARET") {
       const selection = window.getSelection();
       const node = selection?.focusNode;
       const parent = node?.nodeType === 1 ? node as Element : node?.parentElement;
       const paragraph = parent?.closest<HTMLElement>(".se-text-paragraph");
-      if (!selection?.isCollapsed || !paragraph || normalizeForPosition(paragraph.innerText ?? "") || actualPhotoOffset(true) !== state.characterOffset) throw new Error("사진 paste target caret이 빈 문단 위치와 다릅니다.");
+      if (!selection?.isCollapsed || !paragraph || normalizeForPosition(paragraph.innerText ?? "") || actualPhotoOffset(true) !== state.characterOffset) throw new Error("사진 upload target caret이 빈 문단 위치와 다릅니다.");
       state.imageCount = document.querySelectorAll(".se-component.se-image").length;
       return {};
+    }
+    if (message.type === "EDITOR_PHOTO_BUTTON") {
+      const buttons = [...document.querySelectorAll<HTMLElement>(".se-image-toolbar-button")].filter(visible);
+      if (buttons.length !== 1) throw new Error("사진 버튼을 확인하지 못했습니다.");
+      return { position: targetPosition(buttons[0]) };
     }
     if (message.type === "EDITOR_PHOTO_VERIFY") {
       const deadline = Date.now() + 30000;
@@ -243,14 +254,6 @@
         const count = document.querySelectorAll(".se-component.se-image").length;
         if (count > state.imageCount + 1) throw new Error("사진이 1장보다 많이 추가됐습니다.");
         if (count === state.imageCount + 1) {
-          if (!message.task) throw new Error("본문 검증할 초안 없음");
-          const expected = normalizeForPosition(message.task.bodyText);
-          const actual = normalizeForPosition(photoTextNodes().map((node) => node.textContent ?? "").join(""));
-          if (actual !== expected) {
-            const extraSuffixLength = Math.max(0, actual.length - expected.length);
-            throw new Error(`사진 삽입 후 본문 문자/순서 불일치${extraSuffixLength ? `: ${JSON.stringify({ extraSuffixLength,
-              extraSuffixPreview: actual.slice(expected.length, expected.length + 40) })}` : ""}`);
-          }
           photoState = undefined;
           return { imageReady: true };
         }
@@ -262,7 +265,7 @@
   }
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
-    if (sender.id !== chrome.runtime.id || !["EDITOR_DIAGNOSE", "EDITOR_TARGET", "EDITOR_VERIFY", "EDITOR_PHOTO_TARGET", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY", "EDITOR_PHOTO_PASTE_TARGET", "EDITOR_PHOTO_PASTE_CARET", "EDITOR_PHOTO_VERIFY"].includes(message.type)) return;
+    if (sender.id !== chrome.runtime.id || !["EDITOR_DIAGNOSE", "EDITOR_TARGET", "EDITOR_VERIFY", "EDITOR_PHOTO_TARGET", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY", "EDITOR_PHOTO_UPLOAD_CARET", "EDITOR_PHOTO_BUTTON", "EDITOR_PHOTO_VERIFY", "EDITOR_PHOTO_BODY_VERIFY"].includes(message.type)) return;
     void (async (): Promise<ExtensionReply> => {
       if (message.type.startsWith("EDITOR_PHOTO_")) return photoRequest(message);
       if (message.type === "EDITOR_DIAGNOSE") return { diagnostic: inspect().diagnostic };
