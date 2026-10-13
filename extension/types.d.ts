@@ -15,6 +15,7 @@ type ExtensionMessage = {
   type: string; id?: string; draftId?: string; baseUrl?: string; token?: string; task?: ExtensionTask; overwrite?: boolean;
   field?: "title" | "body";
   publisher?: "blocks" | "legacy";
+  blockNumber?: number; imageNumber?: number;
 };
 type ExtensionReply = {
   error?: string; tasks?: { id: string | number; draftId?: string | number; title: string; status: string }[]; task?: ExtensionTask;

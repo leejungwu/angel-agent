@@ -123,7 +123,33 @@
   }
 
   const normalizeForPosition = (text: string) => text.replace(/\r/g, "").replace(/\u00a0/g, " ").replace(/[\u200b-\u200f\u2060\ufeff]/g, "").replace(/\s/g, "");
-  let photoState: { characterOffset: number; paragraphCount: number; emptyCount: number; imageCount: number } | undefined;
+  type BlockImageSnapshot = { components: HTMLElement[]; textBefore: string; blockNumber: number; imageNumber: number };
+  let photoState: { characterOffset: number; paragraphCount: number; emptyCount: number; imageCount: number; block?: BlockImageSnapshot } | undefined;
+
+  function checkBlockImage(snapshot: BlockImageSnapshot) {
+    const components = [...document.querySelectorAll<HTMLElement>(".se-component.se-image")];
+    const expected = snapshot.components.length + 1;
+    const result = { ready: false, invalid: false, reason: "component_pending", expected, actual: components.length };
+    if (components.length > expected) return { ...result, invalid: true, reason: "component_count" };
+    if (components.length !== expected) return result;
+    const image = components[components.length - 1];
+    // Existing components may be rebuilt. Compare surviving components without requiring node identity.
+    if (snapshot.components.some((previous) => components.includes(previous) &&
+      !(previous.compareDocumentPosition(image) & Node.DOCUMENT_POSITION_FOLLOWING))) {
+      return { ...result, invalid: true, reason: "append_order" };
+    }
+    const precedingText = normalizeForPosition(photoTextNodes().filter((node) =>
+      !!(node.compareDocumentPosition(image) & Node.DOCUMENT_POSITION_FOLLOWING))
+      .map((node) => node.textContent ?? "").join(""));
+    if (precedingText !== snapshot.textBefore) return { ...result, invalid: true, reason: "text_boundary" };
+    const ready = [...image.querySelectorAll<HTMLImageElement>("img")].some((img) => {
+      const source = img.currentSrc || img.getAttribute("src") || "";
+      return /^(https?:\/\/|blob:|data:image\/)/i.test(source) && visible(img) &&
+        !img.closest('.se-blind, [hidden], [aria-hidden="true"]') &&
+        img.complete && img.naturalWidth > 0 && img.naturalHeight > 0;
+    });
+    return { ...result, ready, reason: ready ? "ready" : "image_pending" };
+  }
 
   function photoTextNodes(): Text[] {
     const roots = [...document.querySelectorAll<HTMLElement>(".se-component.se-text .se-text-paragraph")];
@@ -262,7 +288,9 @@
       if (message.type === "EDITOR_BLOCK_IMAGE_TARGET") {
         const current = inspect();
         photoState = { characterOffset: 0, paragraphCount: current.paragraphs.length, emptyCount: 0,
-          imageCount: document.querySelectorAll(".se-component.se-image").length };
+          imageCount: document.querySelectorAll(".se-component.se-image").length,
+          block: { components: [...document.querySelectorAll<HTMLElement>(".se-component.se-image")],
+            textBefore: blockBodyText(), blockNumber: message.blockNumber ?? 0, imageNumber: message.imageNumber ?? 0 } };
       }
       const range = document.createRange();
       range.selectNodeContents(paragraph); range.collapse(true);
@@ -337,7 +365,18 @@
     }
     if (message.type === "EDITOR_PHOTO_VERIFY") {
       const deadline = Date.now() + 30000;
+      let lastResult;
       while (Date.now() < deadline) {
+        if (state.block) {
+          lastResult = checkBlockImage(state.block);
+          if (lastResult.invalid) throw new Error(`DOM_VALIDATION block=${state.block.blockNumber} image=${state.block.imageNumber} expected=${lastResult.expected} actual=${lastResult.actual} reason=${lastResult.reason}`);
+          if (lastResult.ready) {
+            photoState = undefined;
+            return { imageReady: true };
+          }
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          continue;
+        }
         const count = document.querySelectorAll(".se-component.se-image").length;
         if (count > state.imageCount + 1) throw new Error("사진이 1장보다 많이 추가됐습니다.");
         if (count === state.imageCount + 1) {
@@ -346,6 +385,7 @@
         }
         await new Promise((resolve) => setTimeout(resolve, 200));
       }
+      if (state.block && lastResult) throw new Error(`TIMEOUT block=${state.block.blockNumber} image=${state.block.imageNumber} expected=${lastResult.expected} actual=${lastResult.actual} reason=${lastResult.reason}`);
       throw new Error("이미지 컴포넌트 생성 시간 초과");
     }
     throw new Error("지원하지 않는 사진 요청");

@@ -58,6 +58,7 @@
     let detachFailure: unknown;
     let blockInterception = false;
     let imageBlockNumber = 0;
+    let blockNumber = 0;
     const temporaryImages = new Set<string>();
     const cleanupWarnings = new Set<string>();
     async function removeTempImage(tempId: string) {
@@ -234,7 +235,8 @@
         if (body.existing) { await key("a", 65, 2); await key("Backspace", 8); }
         await frameRequest({ type: "EDITOR_BLOCK_START" });
         let appended = "";
-        for (const block of blocks) {
+        for (const [blockIndex, block] of blocks.entries()) {
+          blockNumber = blockIndex + 1;
           if (block.type === "text") {
             stage = "BLOCK_TEXT";
             await frameRequest({ type: "EDITOR_BLOCK_CARET" });
@@ -244,7 +246,7 @@
             await frameRequest({ type: "EDITOR_BLOCK_TEXT_END" });
           } else {
             imageBlockNumber++;
-            console.info("V3 image block", { imageBlockNumber, totalImages: task.images.length, imageIndex: block.index });
+            console.info("V3 image block", { blockNumber, imageBlockNumber, totalImages: task.images.length, imageIndex: block.index });
             stage = "PHOTO_TEMP_CREATE";
             const image = task.images.find((image) => image.index === block.index)!;
             const downloaded = await createPhotoTemp(image);
@@ -252,7 +254,7 @@
             await frameRequest({ type: "EDITOR_BLOCK_CARET" });
             await key("Enter", 13);
             await key("Enter", 13);
-            await frameRequest({ type: "EDITOR_BLOCK_IMAGE_TARGET" });
+            await frameRequest({ type: "EDITOR_BLOCK_IMAGE_TARGET", blockNumber: blockIndex + 1, imageNumber: imageBlockNumber });
             await frameRequest({ type: "EDITOR_BLOCK_CARET" });
             await uploadPhoto(downloaded.filename);
             stage = "BLOCK_NEXT_TEXT";
@@ -290,7 +292,7 @@
       }
     } catch (error) {
       failure = error;
-      if (publisher === "blocks") console.warn("V3 input failed", { stage, imageBlockNumber, totalImages: task.images.length,
+      if (publisher === "blocks") console.warn("V3 input failed", { stage, blockNumber, imageBlockNumber, totalImages: task.images.length,
         errorName: error instanceof Error ? error.name : "UnknownError" });
     }
     finally {

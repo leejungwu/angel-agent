@@ -113,7 +113,7 @@ assert.equal(cleanupOne.erased.length, 6);
 const plain = await scenario({ ...task, images: [] });
 assert.equal(plain.reply.error, undefined); assert.equal(plain.downloads.length, 0);
 console.log("Multi-photo checks passed: 3-image cap, reverse offsets, intercepted chooser, absolute paths, server temp cleanup/warning, failure gating, final body verify, unchanged V1.");
-for (const count of [0, 2, 8, 10]) {
+for (const count of [0, 1, 2, 8, 10]) {
   const images = Array.from({ length: count }, (_, index) => ({ index, signedUrl: `https://fixture.test/${index}.png` }));
   const blocks = images.flatMap((image, index) => [{ type: "text", text: `text${index + 1}` }, { type: "image", ...image }]);
   blocks.push({ type: "text", text: `text${count + 1}` });
@@ -162,4 +162,4 @@ for (const count of [0, 2, 8, 10]) {
     assert.equal(seventh.logs.find(([name]) => name === "V3 input failed")[1].imageBlockNumber, 7);
   }
 }
-console.log("Block loop checks passed: 0/2/8/10 images, forward text/image order, next paragraph recovery, failure gating, cleanup, no position remapping.");
+console.log("Block loop checks passed: 0/1/2/8/10 images, forward text/image order, next paragraph recovery, failure gating, cleanup, no position remapping.");
