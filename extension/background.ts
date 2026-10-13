@@ -324,7 +324,8 @@
         case "TASKS": return { tasks: (await api("/api/extension/blog-tasks")).tasks };
         case "TASK":
           if (!message.id || !/^[1-9]\d*$/.test(message.id)) throw new Error("Task ID를 확인해 주세요.");
-          return { task: await api(`/api/extension/blog-tasks/${message.id}`) };
+          if (message.draftId !== undefined && !/^[1-9]\d*$/.test(message.draftId)) throw new Error("Draft ID를 확인해 주세요.");
+          return { task: await api(`/api/extension/blog-tasks/${message.id}${message.draftId ? `?draftId=${message.draftId}` : ""}`) };
         case "DIAGNOSE": {
           const editor = await scanEditorFrames();
           const writingFrames = editor.diagnostics.filter((frame) => frame.diagnostic?.writing);

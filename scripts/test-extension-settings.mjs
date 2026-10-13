@@ -26,7 +26,7 @@ async function openPanel(fail = false, selectionTask) {
     storage, permissions: { request: async () => true },
     runtime: { sendMessage: async (message) => { requests.push(message); if (message.type === "TASK" && selectionTask) return { task: selectionTask };
       if (message.type === "DIAGNOSE") return { diagnostic: { ready: true, existing: false } };
-      return fail ? { error: "fixture failure" } : { tasks: [] }; } },
+      return fail ? { error: "fixture failure" } : { tasks: selectionTask ? [{ id: 1, draftId: 2, title: "제목", status: "approved" }] : [] }; } },
   } });
   await settle();
   return { element, requests };
@@ -77,10 +77,12 @@ assert.equal(failed.element("connectionActions").hidden, true);
 
 let listener;
 let authenticated = false;
+let fetchedPath;
 vm.runInNewContext(backgroundCode, { URL, chrome: {
   storage, sidePanel: { setPanelBehavior: async () => {} },
   runtime: { id: "fixture", onMessage: { addListener: (handler) => { listener = handler; } } },
 }, fetch: async (url, options) => {
+  fetchedPath = `${url.pathname}${url.search}`;
   authenticated = url.origin === saved.appUrl && options.headers.Authorization === `Bearer ${saved.extensionToken}`;
   return { ok: true, json: async () => ({ tasks: [] }) };
 } });
@@ -92,7 +94,10 @@ const inserted = multiPanel.requests.find((message) => message.type === "INSERT"
 assert.ok(inserted);
 assert.equal("clipboardReady" in inserted, false);
 assert.equal(inserted.task.images.length, 3);
+assert.equal(multiPanel.requests.find((message) => message.type === "TASK").draftId, "2");
 const reply = await new Promise((resolve) => listener({ type: "TASKS" }, { id: "fixture" }, resolve));
 assert.equal(reply.error, undefined);
 assert.equal(authenticated, true);
+await new Promise((resolve) => listener({ type: "TASK", id: "1", draftId: "2" }, { id: "fixture" }, resolve));
+assert.equal(fetchedPath, "/api/extension/blog-tasks/1?draftId=2");
 console.log("Settings checks passed: first setup, automatic reconnect, collapse, edit/cancel/save, refresh without save, failure opens form, authentication.");

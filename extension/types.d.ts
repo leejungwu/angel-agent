@@ -1,7 +1,7 @@
 type ExtensionTask = {
   id: string | number; draftId: string | number; title: string; bodyText: string;
   images: { id: string | number; index: number; insertOffset: number; insertPrefix: string; signedUrl: string; expiresIn: number }[];
-  blocks?: ({ type: "text"; text: string } | { type: "image"; index: number; signedUrl: string })[];
+  blocks?: import("../lib/blog-publishing/blocks").BlogExecutionBlock<{ index: number; signedUrl: string }>[];
 };
 type EditorDiagnostic = {
   url: string; writing: boolean; ready: boolean; existing: boolean;
@@ -12,12 +12,12 @@ type EditorDiagnostic = {
 };
 type EditorTargetPosition = { x: number; y: number; rect: { x: number; y: number; width: number; height: number } };
 type ExtensionMessage = {
-  type: string; id?: string; baseUrl?: string; token?: string; task?: ExtensionTask; overwrite?: boolean;
+  type: string; id?: string; draftId?: string; baseUrl?: string; token?: string; task?: ExtensionTask; overwrite?: boolean;
   field?: "title" | "body";
   publisher?: "blocks" | "legacy";
 };
 type ExtensionReply = {
-  error?: string; tasks?: { id: string | number; title: string; status: string }[]; task?: ExtensionTask;
+  error?: string; tasks?: { id: string | number; draftId?: string | number; title: string; status: string }[]; task?: ExtensionTask;
   diagnostic?: EditorDiagnostic; frameId?: number; message?: string;
   diagnostics?: { frameId: number; diagnostic?: EditorDiagnostic; reason?: string }[];
   position?: EditorTargetPosition; existing?: boolean;

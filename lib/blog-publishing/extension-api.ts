@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { supabase } from "@/lib/supabase";
 import { orderedTaskImages } from "./downloads";
 import { prepareBlogPost } from "./preparation";
+import { createBlogExecutionBlocks } from "./blocks";
 import { BLOG_TASK_ASSET_BUCKET, type BlogTaskAsset } from "@/lib/blog-task-assets";
 
 export function authorizeExtension(request: Request): Response | null {
@@ -13,10 +14,12 @@ export function authorizeExtension(request: Request): Response | null {
   return null;
 }
 
-export async function getExtensionBlogTask(id: string) {
+export async function getExtensionBlogTask(id: string, draftId?: string) {
+  let draftQuery = supabase.from("blog_drafts").select("id,title,intro,sections,closing,status").eq("blog_task_id", id);
+  if (draftId) draftQuery = draftQuery.eq("id", draftId);
   const [task, draftResult, assets] = await Promise.all([
     supabase.from("blog_tasks").select("id").eq("id", id).maybeSingle(),
-    supabase.from("blog_drafts").select("id,title,intro,sections,closing,status").eq("blog_task_id", id)
+    draftQuery
       .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("blog_task_assets").select("id,storage_path,file_name,sort_order").eq("blog_task_id", id)
       .order("sort_order", { ascending: true }).order("id", { ascending: true }).returns<BlogTaskAsset[]>(),
@@ -40,15 +43,7 @@ export async function getExtensionBlogTask(id: string) {
     const insertOffset = prepared.imageInsertOffsets[index];
     return { id: asset.id, index, insertOffset, insertPrefix: prepared.executionBodyText.slice(0, insertOffset), sortOrder: asset.sort_order, signedUrl: data.signedUrl, expiresIn: 600 };
   }));
-  // Slice the clean body at existing planned boundaries; concatenated text stays byte-for-byte identical.
-  const blocks: ({ type: "text"; text: string } | { type: "image"; index: number; signedUrl: string })[] = [];
-  let cursor = 0;
-  for (const image of signedImages) {
-    if (image.insertOffset > cursor) blocks.push({ type: "text", text: prepared.executionBodyText.slice(cursor, image.insertOffset) });
-    blocks.push({ type: "image", index: image.index, signedUrl: image.signedUrl });
-    cursor = image.insertOffset;
-  }
-  if (cursor < prepared.executionBodyText.length) blocks.push({ type: "text", text: prepared.executionBodyText.slice(cursor) });
+  const blocks = createBlogExecutionBlocks(prepared.executionBodyText, signedImages);
   return {
     id: task.data.id, draftId: draft.id, status: draft.status, title: prepared.title,
     paragraphs: prepared.blocks.filter((b) => b.type === "text").map((b) => b.text),

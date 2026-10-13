@@ -15,6 +15,7 @@
     });
   }
   let selected: ExtensionTask | undefined;
+  const taskDraftIds = new Map<string, string>();
   let busy = false;
   const request = async (message: ExtensionMessage) => {
     const reply = await chrome.runtime.sendMessage(message);
@@ -34,12 +35,16 @@
     }
   }
   async function loadTasks() {
+    taskDraftIds.clear();
     selected = undefined; tasks.replaceChildren(new Option("작업을 선택하세요", ""));
     element("title").textContent = "선택한 글 없음"; element("images").textContent = "이미지 0개";
     connection.textContent = "연결 확인 중…";
     try {
       const reply = await request({ type: "TASKS" });
-      for (const task of reply.tasks ?? []) tasks.add(new Option(`#${task.id} · ${task.title} (${task.status})`, String(task.id)));
+      for (const task of reply.tasks ?? []) {
+        tasks.add(new Option(`#${task.id} · ${task.title} (${task.status})`, String(task.id)));
+        if (task.draftId !== undefined) taskDraftIds.set(String(task.id), String(task.draftId));
+      }
       connected = true; connection.textContent = "Angel Agent 연결됨";
       result.textContent = "작업을 선택해 주세요."; showSettings(false);
     } catch {
@@ -81,7 +86,7 @@
     selected = undefined;
     element("title").textContent = "선택한 글 없음"; element("images").textContent = "이미지 0개";
     if (!tasks.value) { result.textContent = "작업을 선택해 주세요."; return; }
-    const reply = await request({ type: "TASK", id: tasks.value }); selected = reply.task;
+    const reply = await request({ type: "TASK", id: tasks.value, draftId: taskDraftIds.get(tasks.value) }); selected = reply.task;
     element("title").textContent = selected?.title ?? "초안 없음";
     element("images").textContent = `이미지 ${selected?.images.length ?? 0}개`;
     result.textContent = "네이버 글쓰기 탭에서 DOM 진단 후 입력하세요.";
