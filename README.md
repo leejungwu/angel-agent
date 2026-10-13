@@ -17,22 +17,30 @@ Internal E-commerce AI Operating System for product management, VOC intelligence
 
 ### AI Blog Content Generator
 
+Current main uses Chrome Extension + CDP + content script for user-started Naver
+editor input. V3 processes all text/image blocks without a photo-count cap; a real
+stored draft with 10 photos, correct text/image order and final body input was
+verified by the user. /prepare remains the manual copy/review fallback, and legacy
+maximum-3-photo input remains selectable. Final review and publishing are manual.
+The former Playwright publisher and publish API are removed. The items marked
+planned below are not current runtime capabilities.
+
 - Product-based Blog Task Creation
-- Keyword / Topic / Purpose Input
+- Keyword / Topic / Per-task Instructions (purpose is a historical field)
 - Product Knowledge Retrieval
 - Structured Blog Draft Generation
 - Title / Introduction / Section / Closing Generation
-- Image Placement Suggestions
+- Rule-based Image Placement Guidance (AI suggestions planned)
 - Draft Storage
 - Draft Editing
 - Human Review
 - Approval Status Management
-- Product Asset Integration
-- VOC Integration
-- Brand Rule Application
-- Naver Blog Publishing Workflow
-- Scheduled Publishing
-- Published URL / Result Tracking
+- Blog Task Photo Asset Integration (separate from product_assets)
+- VOC Integration (planned)
+- Brand Rule Application (planned)
+- Naver Blog Input via Chrome Extension V3
+- Scheduled Publishing (planned; reservation remains manual)
+- Published URL / Result Tracking (planned)
 
 ### VOC & Market Intelligence
 
@@ -381,12 +389,11 @@ flowchart TD
 
 ## AI Blog Workflow
 
+Current Blog workflow. VOC, brand-rule retrieval and product_assets selection are
+future integrations; current photos belong to blog_task_assets.
+
 ```text
-Product
-+ Product Assets
-+ VOC
-+ Brand Rules
-+ Content Strategy
+Product + Blog Task Instructions
 ↓
 AI Blog Generator
 ↓
@@ -398,14 +405,19 @@ Human Review
 ↓
 Approved
 ↓
-Publishing Queue
+Selected draftId + Ordered Blog Task Assets
 ↓
-Playwright / OpenClaw
+V3 Blocks + Signed URLs + Server Temp Images
 ↓
-Naver Blog
+Chrome Extension + CDP + Content Script
 ↓
-Published URL / Result Tracking
+Naver Editor Input
+↓
+User Review + Manual Final Publishing
 ```
+
+/prepare manual copy/review and legacy maximum-3-photo input remain fallbacks.
+Final publish/reservation automation and published URL/result tracking are planned.
 
 ---
 
@@ -450,7 +462,7 @@ Published URL / Result Tracking
 - Cron Jobs
 - Webhooks
 - Background Workflows
-- Playwright
+- Playwright (former Blog path; removed from current main)
 
 ### Generative Media
 

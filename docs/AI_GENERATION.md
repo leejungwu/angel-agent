@@ -26,8 +26,8 @@ Actual model availability depends on the provider account.
 Edit `lib/blog-generation/prompts.ts`:
 
 - `BLOG_FIXED_INSTRUCTIONS`: mandatory factuality and output rules.
-- `BLOG_CONTENT_STRATEGY_GUIDE`: empty slot for curated `CONTENT_STRATEGY.md` guidance.
-- `BLOG_COPYWRITING_SKILLS_GUIDE`: empty slot for curated `COPYWRITING_SKILLS.md` guidance.
+- `BLOG_CONTENT_STRATEGY_GUIDE`: in-code content strategy guidance.
+- `BLOG_COPYWRITING_SKILLS_GUIDE`: in-code writing guidance.
 
 The Markdown files are not read automatically. Reference guides are serialized
 separately from product facts and task-specific instructions. Fixed rules take
@@ -43,10 +43,48 @@ spaces, and counts Unicode code points. Out-of-range output is saved with a
 warning, not rejected. The API returns `bodyLength`; the editor recalculates it
 for saved and edited drafts. Explicit task length instructions take priority.
 
-## Manual blog publishing preparation
+## Blog generation and Naver input responsibilities
 
-The app prepares content; users paste text and insert photos in Naver themselves.
-Playwright, persistent profiles, automatic editor input and publish APIs have been removed.
+The generation API owns product/task retrieval, AI transport, output validation and
+draft storage. It does not control Naver. Chrome Extension background owns CDP
+commands and upload sequencing; its content script owns SmartEditor DOM and
+selection checks. The server Extension API owns draft/asset retrieval, blocks,
+signed URLs and local temporary files. Final review and publishing belong to the user.
+
+Current architecture follows main ffcca198: Chrome Extension + CDP + content script.
+The former Playwright publisher, persistent profile, /api/blog/publish,
+PublishingStatusControl and Naver live test script are absent from current main.
+Automatic editor input now uses the Extension; final publish/reservation clicks
+are not automated.
+
+## V3 Block input
+
+Side Panel reads the task list, keeps the selected draftId and requests
+/api/extension/blog-tasks/{taskId}?draftId={draftId}. getExtensionBlogTask verifies
+the draft belongs to the task, orders blog_task_assets by sort_order ASC / id ASC,
+reuses planBlogImages and serializes all photos through createBlogExecutionBlocks.
+Text blocks concatenate to the clean body exactly. Signed URLs expire after 600
+seconds; automatic refresh is not implemented. Images are task-owned, with no
+draft-specific image snapshot. Extension approved-only enforcement is also pending.
+
+V3 processes text/image blocks from beginning to end without an image-count cap.
+Input.insertText handles text; the temp-image API and DOM.setFileInputFiles handle
+images. Native dialogs are suppressed for the loop, while each current file input
+is queried through DOM.getDocument. No chooser event wait is required in V3.
+The server and Chrome must share the same PC for absolute temporary paths to work.
+Cleanup runs in finally with retries; abnormal-exit cleanup and resumable input are pending.
+
+User-confirmed operational verification: a real stored draft and all 10 photos
+were entered in Naver SmartEditor, in text/image order through the final body text.
+The message "입력 완료 - 네이버에서 직접 확인 후 발행하세요" was confirmed.
+This documentation task did not rerun Naver or provider APIs. The 10-image success
+does not mark approval enforcement, stronger upload/order checks or recovery as complete.
+Legacy maximum-3-image input remains a selectable fallback; it is not removed.
+
+## Manual blog publishing preparation / fallback
+
+The /prepare screen provides manual copy, inspection and fallback materials.
+It does not launch the Extension. In this path users paste text and insert photos themselves.
 Open /content/blog/publishing for approved drafts or /content/blog/{taskId}/prepare
 for a task. A draftId query selects the exact stored draft within that task.
 Title copy uses plain text. Body copy includes numbered photo insertion markers by

@@ -2,10 +2,11 @@
 
 ## Current Focus
 
-기준: 2026-10-08, feat/kin-prompt-tuning (최신 main 병합 완료). [x]는 명시한 범위의 코드 구현을 뜻하며 운영 품질 보장을 뜻하지 않는다. (partial)은 미완료로 유지한다. 실테스트 표시는 이전 실제 테스트 기록이며 이번 문서 작업에서 API를 재호출하지 않았다.
+기준: 2026-10-13, main ffcca198 이후의 Chrome Extension 기반 구조를 chore/blog-cleanup에서 문서화한다. [x]는 명시한 범위의 구현 완료를 뜻한다. 실검증 완료는 별도로 표시하며 모든 상황의 운영 품질 보장을 뜻하지 않는다. (partial)은 미완료로 유지한다. V3 사진 10장 검증은 사용자가 실제 운영 환경에서 확인한 사실이며 이번 문서 작업에서 API/Naver를 재실행하지 않았다.
 
 - Blog v1: 실제 윗잠베개 Product 정보 입력, prompt 강하게 튜닝, CONTENT_STRATEGY / COPYWRITING 자료 정리, 실제 사진 asset 확보.
-- Blog v1: 발행 준비 화면에서 제목/본문 복사와 번호순 사진 다운로드 후, 네이버에서 사람이 직접 검수·발행.
+- Blog: Chrome Extension + CDP + content script의 V3 Block 순차 입력을 사용한다. 실제 저장 draft의 사진 10장, text/image 순서, 마지막 본문과 입력 완료 안내까지 사용자 실검증 완료.
+- /prepare는 수동 복사·검수·fallback 경로다. legacy 최대 3장 입력도 fallback으로 유지한다. 최종 네이버 발행 버튼은 사람이 직접 클릭한다.
 - KIN: prompt tuning 마무리, 실제 답변 품질 검수, 완료 후 main merge.
 - Blog v1 운영 가능 전까지 자동 발행 / 다계정 / OpenClaw는 우선순위가 아니다.
 
@@ -31,7 +32,7 @@
 
 ## 2. AI Blog Content Generator
 
-구현 근거: app/products/, app/content/blog/, app/api/blog/generate/route.ts, lib/blog-generation/, lib/blog-publishing/, product_assets migrations.
+구현 근거: app/content/blog/, app/api/blog/generate/route.ts, app/api/extension/, lib/blog-generation/, lib/blog-publishing/, extension/, blog_task_assets migration. 상품 사진 관리(product_assets)는 블로그 작업 사진(blog_task_assets)과 별개다.
 
 ### Product & Content Input
 
@@ -39,7 +40,7 @@
 - [x] Product Knowledge Retrieval
 - [x] Keyword Input
 - [x] Topic Input
-- [x] Content Purpose Input
+- [ ] Content Purpose Input — 역사적 purpose 컬럼은 목록에서만 표시하며 현재 생성/편집/prompt 입력에는 사용하지 않음.
 - [x] Writing Instructions
 - [ ] Brand Rules Integration
 
@@ -100,6 +101,8 @@
 
 ### Product Asset Integration
 
+아래는 상품 단위 asset 관리 현황이다. 현재 Blog 입력/발행 준비는 상품 asset 자동 연결 대신 작업별 blog_task_assets를 사용한다.
+
 - [x] Supabase Storage Integration
 - [x] Product Asset Database
 - [ ] Manual Asset Categories
@@ -119,10 +122,41 @@
 - [x] Numbered Image ZIP Download
 - [x] Blog Task Photo Upload / Compression / Storage
 
-Playwright 자동입력, persistent profile, 자동발행 API와 Naver E2E는 제거했다.
-발행 준비는 기존 Draft와 task 사진을 읽으며 DB status를 변경하지 않는다.
-기존 queued/publishing/ready_for_review 등은 역사적 값으로 보존한다.
-네이버 붙여넣기, 사진 배치, 검수, 최종 발행은 사용자가 직접 한다.
+현재 /prepare는 특정 draftId와 작업 사진을 읽어 수동 복사·검수·fallback 자료를 제공한다. Extension을 직접 실행하는 화면은 아니다. 준비 및 Extension 입력은 DB 발행 status를 변경하지 않으며 기존 queued/publishing/ready_for_review 등은 역사적 값으로 보존한다.
+
+### Naver Chrome Extension Input
+
+- [x] Chrome Extension + CDP + content script 입력 구조
+- [x] Side Panel 연결 설정 저장 / 자동 복원 / 자동 연결
+- [x] Extension 전용 token 인증
+- [x] 특정 draftId 조회 및 Side Panel / background / API 전달
+- [x] 전체 사진 blocks 직렬화 — 기존 planBlogImages 배치 및 사진 순서 유지, 임의 3장 제한 없음
+- [x] V3 Block 순차 입력 — 앞에서 뒤로 text → image → text 반복, 과거 위치 재탐색 없음
+- [x] 서버 temp image 생성 / CDP DOM.setFileInputFiles / cleanup 및 retry
+- [x] V3 실제 저장 draft + 사진 10장 Naver SmartEditor 입력 실검증 완료 — 사용자 확인
+- [x] text/image 순서 및 마지막 본문 입력 실검증 완료 — 사용자 확인
+- [x] "입력 완료 - 네이버에서 직접 확인 후 발행하세요" 안내 확인 — 사용자 확인
+- [x] legacy 최대 3장 입력 fallback 유지 — 아직 제거하지 않음
+- [ ] 최종 Naver 발행 / 예약 버튼 자동 클릭 — 현재 사용자가 직접 수행, 별도 후속 단계
+- [ ] 최종 발행 결과 / URL / 시간 기록 — 별도 후속 단계
+
+V3는 현재 task의 image block 전부를 순서대로 처리하며 사진 수 상한을 별도로 두지 않는다. 실제 운영 검증 범위는 사진 10장이다. native dialog는 차단하고 사진 버튼 클릭 후 file input을 DOM에서 조회해 파일을 지정한다. localhost 서버와 Chrome은 같은 PC에서 실행한다.
+
+과거 Playwright publisher, persistent profile, /api/blog/publish, PublishingStatusControl 및 Naver live test script는 현재 main에서 제거된 상태다. 현재 자동입력은 Extension 방식이며 삭제된 Playwright 코드를 복원하지 않는다. 최종 검수·발행은 사람의 책임이다.
+
+### Blog Input Technical Debt — Priority Order
+
+1. [ ] Extension에서 approved draft만 사용하도록 승인 정책 통일
+2. [ ] Side Panel 작업 선택 race 수정
+3. [ ] 이미지 업로드 완료 / 순서 검증 강화 — 현재 component 수 증가 검증을 보완
+4. [ ] 실행 snapshot 및 실패 이력 — draft별 사진 snapshot은 현재 없음
+5. [ ] 중간 실패 재개
+6. [ ] signed URL 갱신 — 현재 생성 시 600초, 자동 갱신 없음
+7. [ ] 비정상 종료 후 temp cleanup — 현재 정상 종료 finally / retry 경로만 있음
+8. [ ] V3 충분히 안정화 후 legacy 제거 검토 — 10장 성공만으로 즉시 제거하지 않음
+9. [ ] 최종 발행 / 예약 및 발행 결과 기록 — 별도 후속 단계
+
+10장 실제 입력 성공은 완료 사실이다. 위 승인 정책, 검증 강화, 복구 및 이력 항목은 그 성공과 별개인 미완료 기술 부채다.
 
 ### Future Intelligence
 
@@ -466,11 +500,11 @@ lib/kin/quality-check.ts의 문구·횟수 기반 heuristic 경고와 결과 UI 
 - [ ] Automated Work Logs
 - [ ] Task / Workflow History
 - [x] Blog Publishing Preparation List (승인 초안의 수동 발행 자료 준비)
-- [ ] Publishing Retry Workflow — 자동입력 제거로 Blog 대상에서 제외.
+- [ ] Publishing Retry Workflow — Extension은 실패 단계/사진 번호를 표시하나 중간 실패 재개·영속 실행 이력은 미구현.
 
 ---
 
-Blog는 발행 준비 도구이며 사이트 자동조작을 수행하지 않는다. Cron / OpenClaw / 자동 스케줄 실행 / 완전 자동 발행 미구현.
+Blog는 수동 발행 준비와 사용자 시작형 Extension 자동입력을 제공한다. Cron / OpenClaw / 자동 스케줄 실행 / 최종 발행·예약 버튼 자동 클릭은 미구현.
 
 ## 17. Generative Media
 
@@ -564,17 +598,20 @@ Product Retrieval
 Blog workflow:
 
 ```text
-Product Retrieval
-→ Product Asset Retrieval
-→ VOC Retrieval
-→ Brand Rule Retrieval
-→ Blog Task Analysis
+Product / Blog Task Retrieval
 → Structured Draft Generation
-→ Draft Save
-→ Human Approval
-→ Copy Text / Download Ordered Photos
-→ User Publishes in Naver Blog
+→ Draft Save / Edit / Human Approval
+→ Selected draftId + Ordered Blog Task Assets
+→ Clean Body / V3 Blocks / Signed URLs
+→ Side Panel / Extension API
+→ Chrome CDP + Content Script Sequential Input
+→ User Reviews and Publishes in Naver Blog
+
+Fallback: /prepare Copy Text / Download Ordered Photos
+Legacy fallback: Full Body Input + Maximum 3 Images
 ```
+
+승인 workflow는 앱에 있으나 Extension의 approved-only 강제 검사는 아직 미구현이다. VOC / Brand Rule / Product Asset 자동 조회·연결은 현재 Blog 생성/입력 경로에 포함되지 않는다.
 
 ---
 
@@ -603,7 +640,7 @@ Product Retrieval
 - [ ] Important Change Alerts
 - [ ] Human Approval Queue — (partial) Blog 승인 목록만 구현; 전사 승인 큐 미완료.
 - [ ] Draft Approval Queue — (partial) Blog 승인·발행 목록 구현; 범용 승인 큐 미완료.
-- [ ] Approval before Publishing — (partial) Blog approved 검사 구현; 전체 채널 승인 체계 미완료.
+- [ ] Approval before Publishing — (partial) 앱 준비 목록은 approved만 표시하나 Extension 목록/상세 API는 approved-only를 강제하지 않음. 승인 정책 통일 필요.
 - [ ] Approval before Ad Changes
 - [ ] Publishing Failure Alerts
 
@@ -643,7 +680,7 @@ Product Retrieval
 - [ ] API Credential Management
 - [ ] Agent Execution History
 - [ ] Automation Execution History
-- [ ] Publishing History — (partial) Draft별 현재 상태·오류만 존재; 감사/실행 이력 미구현.
+- [ ] Publishing History — 과거 DB 발행 상태/오류는 보존하지만 Extension 입력 완료·실패 및 실제 최종 발행을 기록하지 않음. 실행/실패/발행 결과 이력 미구현.
 
 ---
 
