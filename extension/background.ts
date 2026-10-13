@@ -1,11 +1,12 @@
 (() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  const settingsReady = chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
 
   async function api(path: string) {
-    const { baseUrl } = await chrome.storage.local.get(["baseUrl"]);
-    const { token } = await chrome.storage.session.get(["token"]);
-    if (!baseUrl || !token) throw new Error("Angel Agent 주소와 연결 토큰을 설정해 주세요.");
-    const response = await fetch(new URL(path, baseUrl), { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+    await settingsReady;
+    const { appUrl, extensionToken } = await chrome.storage.local.get(["appUrl", "extensionToken"]);
+    if (!appUrl || !extensionToken) throw new Error("Angel Agent 주소와 연결 토큰을 설정해 주세요.");
+    const response = await fetch(new URL(path, appUrl), { headers: { Authorization: `Bearer ${extensionToken}` }, cache: "no-store" });
     const value = await response.json();
     if (!response.ok) throw new Error(value.error ?? `API 오류 (${response.status})`);
     return value;
@@ -86,6 +87,9 @@
       if (!checked.verification?.titleMatches || (field === "body" && !checked.verification.bodyMatches)) throw new Error("DOM 검증 결과가 없습니다.");
     };
     try {
+      stage = "PHOTO_FETCH";
+      const image = task.images[0];
+      if (image && (image.index !== 0 || !Number.isSafeInteger(image.insertOffset) || image.insertOffset < 0 || image.insertOffset > task.bodyText.length)) throw new Error("첫 사진 insertOffset을 확인해 주세요.");
       await assertCurrentTab(tabId);
       const check = await frameRequest({ type: "EDITOR_DIAGNOSE" });
       if (check.diagnostic?.ready !== true || !check.diagnostic.titleFound || !check.diagnostic.bodyFound) throw new Error("Naver 글쓰기 frame/제목/본문을 다시 확인해 주세요.");
@@ -94,6 +98,35 @@
       attached = true;
       await insertField("title", task.title);
       await insertField("body", task.bodyText);
+      if (image) {
+        const clickPhotoTarget = async (type: string) => {
+          const reply = await frameRequest({ type, task });
+          if (!reply.position) throw new Error("사진 입력 좌표 없음");
+          const { x, y } = reply.position;
+          await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+          await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
+        };
+        const key = async (name: string, code: number, modifiers = 0) => {
+          await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: name, windowsVirtualKeyCode: code, modifiers });
+          await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", { type: "keyUp", key: name, windowsVirtualKeyCode: code, modifiers });
+        };
+        stage = "PHOTO_POSITION";
+        await clickPhotoTarget("EDITOR_PHOTO_TARGET");
+        stage = "PHOTO_CARET";
+        await frameRequest({ type: "EDITOR_PHOTO_CARET" });
+        stage = "PHOTO_EMPTY_PARAGRAPH";
+        await key("Enter", 13);
+        await key("Enter", 13);
+        await clickPhotoTarget("EDITOR_PHOTO_EMPTY");
+        stage = "PHOTO_PASTE_TARGET";
+        await clickPhotoTarget("EDITOR_PHOTO_PASTE_TARGET");
+        await frameRequest({ type: "EDITOR_PHOTO_PASTE_CARET" });
+        stage = "PHOTO_UPLOAD";
+        await key("v", 86, 2);
+        stage = "PHOTO_VERIFY";
+        const finished = await frameRequest({ type: "EDITOR_PHOTO_VERIFY", task });
+        if (!finished.imageReady) throw new Error("첫 사진 최종 검증 결과 없음");
+      }
     } catch (error) { failure = error; }
     finally {
       try { if (attached) await chrome.debugger.detach(debuggee); }
@@ -124,6 +157,7 @@
         }
         case "INSERT": {
           if (!message.task) throw new Error("선택된 초안이 없습니다.");
+          if (message.task.images.length && message.clipboardReady !== true) throw new Error("PHOTO_CLIPBOARD_WRITE: Side Panel에서 첫 사진 clipboard 준비가 필요합니다.");
           const editor = await scanEditorFrames();
           if (editor.found.length !== 1) throw new Error(`SmartEditor 입력 프레임을 확정하지 못했습니다 (${editor.found.length}개). DOM 진단을 확인해 주세요.`);
           const target = editor.found[0];

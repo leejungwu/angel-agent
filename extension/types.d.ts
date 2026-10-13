@@ -1,7 +1,6 @@
 type ExtensionTask = {
   id: string | number; draftId: string | number; title: string; bodyText: string;
-  paragraphs: string[]; imageMarkers: { imageIndex: number; blockIndex: number; text: string }[];
-  images: { id: string | number; index: number; signedUrl: string; expiresIn: number }[];
+  images: { id: string | number; index: number; insertOffset: number; insertPrefix: string; signedUrl: string; expiresIn: number }[];
 };
 type EditorDiagnostic = {
   url: string; writing: boolean; ready: boolean; existing: boolean;
@@ -14,12 +13,16 @@ type EditorTargetPosition = { x: number; y: number; rect: { x: number; y: number
 type ExtensionMessage = {
   type: string; id?: string; baseUrl?: string; token?: string; task?: ExtensionTask; overwrite?: boolean;
   field?: "title" | "body";
+  clipboardReady?: boolean;
 };
 type ExtensionReply = {
   error?: string; tasks?: { id: string | number; title: string; status: string }[]; task?: ExtensionTask;
   diagnostic?: EditorDiagnostic; frameId?: number; message?: string;
   diagnostics?: { frameId: number; diagnostic?: EditorDiagnostic; reason?: string }[];
   position?: EditorTargetPosition; existing?: boolean;
+  imageReady?: boolean;
+  clipboardWritten?: boolean;
+  clipboardStage?: "PHOTO_FETCH" | "PHOTO_CONVERT" | "PHOTO_CLIPBOARD_API" | "PHOTO_CLIPBOARD_FOCUS" | "PHOTO_CLIPBOARD_WRITE";
   verification?: { titleMatches: boolean; bodyMatches: boolean; actualLength: number; expectedLength: number };
 };
 declare const chrome: {
@@ -32,10 +35,12 @@ declare const chrome: {
       removeListener(listener: (source: { tabId?: number }, reason: string) => void): void;
     };
   };
-  runtime: { onMessage: { addListener(listener: (message: ExtensionMessage, sender: { id?: string }, respond: (reply: ExtensionReply) => void) => boolean | void): void }; sendMessage(message: ExtensionMessage): Promise<ExtensionReply>; id: string };
+  runtime: { onMessage: { addListener(listener: (message: ExtensionMessage, sender: { id?: string }, respond: (reply: ExtensionReply) => void) => boolean | void): void }; sendMessage(message: ExtensionMessage): Promise<ExtensionReply>; getURL(path: string): string; id: string };
   sidePanel: { setPanelBehavior(options: { openPanelOnActionClick: boolean }): Promise<void> };
-  storage: { local: { get(keys: string[]): Promise<Record<string, string>>; set(value: Record<string, string>): Promise<void> }; session: { get(keys: string[]): Promise<Record<string, string>>; set(value: Record<string, string>): Promise<void> } };
+  storage: { local: { get(keys: string[]): Promise<Record<string, string>>; set(value: Record<string, string>): Promise<void>; setAccessLevel(options: { accessLevel: "TRUSTED_CONTEXTS" }): Promise<void> }; session: { get(keys: string[]): Promise<Record<string, string>>; set(value: Record<string, string>): Promise<void> } };
   tabs: { query(options: { active: boolean; currentWindow: boolean }): Promise<{ id?: number; url?: string }[]>; sendMessage(id: number, message: ExtensionMessage, options: { frameId: number }): Promise<ExtensionReply> };
   webNavigation: { getAllFrames(options: { tabId: number }): Promise<{ frameId: number; url: string }[] | null> };
   permissions: { request(options: { origins: string[] }): Promise<boolean> };
 };
+
+interface Window { prepareImageClipboard(signedUrl: string | undefined): Promise<ExtensionReply>; }

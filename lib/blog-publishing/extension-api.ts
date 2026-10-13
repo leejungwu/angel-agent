@@ -37,13 +37,13 @@ export async function getExtensionBlogTask(id: string) {
   const signedImages = await Promise.all(images.map(async (asset, index) => {
     const { data, error } = await supabase.storage.from(BLOG_TASK_ASSET_BUCKET).createSignedUrl(asset.storage_path, 600);
     if (error || !data?.signedUrl) throw new Error("사진 접근 URL을 준비하지 못했습니다.");
-    return { id: asset.id, index, sortOrder: asset.sort_order, signedUrl: data.signedUrl, expiresIn: 600 };
+    const insertOffset = prepared.imageInsertOffsets[index];
+    return { id: asset.id, index, insertOffset, insertPrefix: prepared.executionBodyText.slice(0, insertOffset), sortOrder: asset.sort_order, signedUrl: data.signedUrl, expiresIn: 600 };
   }));
   return {
     id: task.data.id, draftId: draft.id, status: draft.status, title: prepared.title,
     paragraphs: prepared.blocks.filter((b) => b.type === "text").map((b) => b.text),
-    bodyText: prepared.bodyWithMarkers, originalBodyText: prepared.body,
-    imageMarkers: prepared.blocks.flatMap((b, blockIndex) => b.type === "image" ? [{ imageIndex: b.imageIndex, blockIndex, text: `[사진 ${String(b.imageIndex + 1).padStart(2, "0")} 삽입]` }] : []),
+    bodyText: prepared.executionBodyText,
     images: signedImages,
   };
 }

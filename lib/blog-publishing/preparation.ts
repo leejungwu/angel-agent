@@ -23,6 +23,8 @@ export function prepareBlogPost(draft: BlogBody & { title: string }, imageCount:
   return {
     title: draft.title.trim(), blocks,
     body: composeBlogBody(draft),
+    executionBodyText: paragraphs.join("\n\n"),
+    imageInsertOffsets: plan.beforeParagraphs.map((boundary) => paragraphs.slice(0, boundary).join("\n\n").length),
     bodyWithMarkers: blocks.map((block) => block.type === "text" ? block.text : `[사진 ${String(block.imageIndex + 1).padStart(2, "0")} 삽입]`).join("\n\n"),
   };
 }

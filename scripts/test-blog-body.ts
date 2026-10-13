@@ -12,6 +12,15 @@ for (const count of [0, 1, 10, 15]) {
   const prepared = prepareBlogPost(copyDraft, count);
   assert.equal(prepared.title, "복사 제목");
   assert.equal(prepared.body, composeBlogBody(copyDraft));
+  assert.equal(prepared.executionBodyText.includes("[사진 "), false);
+  assert.equal(prepared.imageInsertOffsets.length, count);
+  const plannedParagraphs = prepared.blocks.flatMap((block) => block.type === "text" ? [block.text] : []);
+  assert.equal(prepared.executionBodyText, plannedParagraphs.join("\n\n"));
+  const preceding: string[] = [];
+  for (const block of prepared.blocks) {
+    if (block.type === "text") preceding.push(block.text);
+    else assert.equal(prepared.imageInsertOffsets[block.imageIndex], preceding.join("\n\n").length);
+  }
   assert.deepEqual(prepared.blocks.filter((block) => block.type === "image").map((block) => block.imageIndex), Array.from({ length: count }, (_, index) => index));
   assert.equal((prepared.bodyWithMarkers.match(/\[사진 \d+ 삽입\]/g) ?? []).length, count);
   assert.equal(prepared.blocks.flatMap((block) => block.type === "text" ? [block.text] : []).join("").replace(/\s/g, ""), composeBlogBody(copyDraft).replace(/\s/g, ""));
