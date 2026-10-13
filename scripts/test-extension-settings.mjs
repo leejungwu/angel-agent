@@ -25,7 +25,8 @@ async function openPanel(fail = false, selectionTask, options = {}) {
   };
   vm.runInNewContext(panelCode, { URL, Option: class { constructor(text, value) { this.text = text; this.value = value; } }, document: { getElementById: element }, chrome: {
     storage, permissions: { request: async () => true },
-    runtime: { sendMessage: async (message) => { requests.push(message); if (message.type === "TASK" && selectionTask) {
+    runtime: { sendMessage: async (message) => { requests.push(message); if (message.type === "TASK" && options.onTask) return options.onTask(message);
+    if (message.type === "TASK" && selectionTask) {
       taskRequests++;
       return options.revoke && taskRequests > 1 ? { error: "초안 승인이 취소되었습니다." } : { task: selectionTask };
     }
@@ -123,4 +124,57 @@ assert.equal(reply.error, undefined);
 assert.equal(authenticated, true);
 await new Promise((resolve) => listener({ type: "TASK", id: "1", draftId: "2" }, { id: "fixture" }, resolve));
 assert.equal(fetchedPath, "/api/extension/blog-tasks/1?draftId=2");
+const listed = [1, 2, 3].map((id) => ({ id, draftId: id * 10, title: `task${id}`, status: "approved" }));
+const taskFor = (id) => ({ ...approvedTask, id, draftId: id * 10, title: `task${id}` });
+async function racePanel() {
+  const pending = []; let defer = true;
+  const panel = await openPanel(false, undefined, { tasks: listed, onTask: (message) => defer
+    ? new Promise((resolve) => pending.push({ message, resolve })) : { task: taskFor(Number(message.id)) } });
+  const choose = (id) => { panel.element("tasks").value = String(id); panel.element("tasks").listeners.change(); };
+  return { ...panel, pending, choose, immediate: () => { defer = false; } };
+}
+for (const order of [[0, 1], [1, 0]]) {
+  const panel = await racePanel(); panel.choose(1); panel.choose(2);
+  assert.equal(panel.pending.length, 2, "Second selection must not be dropped while first request is pending");
+  assert.equal(panel.element("insert").disabled, true);
+  for (const index of order) { panel.pending[index].resolve({ task: taskFor(index + 1) }); await settle(); }
+  assert.equal(panel.element("tasks").value, "2"); assert.equal(panel.element("title").textContent, "task2");
+  assert.equal(panel.element("insert").disabled, false);
+  panel.immediate(); panel.element("insert").listeners.click(); await settle();
+  const execution = panel.requests.find((message) => message.type === "INSERT");
+  assert.equal(execution.task.id, 2); assert.equal(execution.task.draftId, 20);
+  assert.equal(panel.requests.filter((m) => m.type === "TASK").at(-1).draftId, "20");
+}
+const many = await racePanel();
+for (const id of [1, 2, 3, 1, 3]) many.choose(id);
+for (const index of [4, 1, 0, 3, 2]) { many.pending[index].resolve({ task: taskFor(Number(many.pending[index].message.id)) }); await settle(); }
+assert.equal(many.element("title").textContent, "task3");
+const cleared = await racePanel(); cleared.choose(1); cleared.choose("");
+cleared.pending[0].resolve({ task: taskFor(1) }); await settle();
+assert.equal(cleared.element("title").textContent, "선택한 글 없음"); assert.equal(cleared.element("insert").disabled, true);
+const staleFailure = await racePanel(); staleFailure.choose(1); staleFailure.choose(2);
+staleFailure.pending[1].resolve({ task: taskFor(2) }); await settle();
+staleFailure.pending[0].resolve({ error: "old failure" }); await settle();
+assert.equal(staleFailure.element("title").textContent, "task2"); assert.equal(staleFailure.element("result").textContent.includes("old failure"), false);
+const mismatch = await racePanel(); mismatch.choose(2);
+mismatch.pending[0].resolve({ task: { ...taskFor(2), draftId: 999 } }); await settle();
+assert.equal(mismatch.element("insert").disabled, true);
+const executing = await racePanel(); executing.choose(1);
+executing.pending[0].resolve({ task: taskFor(1) }); await settle();
+executing.element("insert").listeners.click();
+assert.equal(executing.element("tasks").disabled, true);
+assert.equal(executing.element("publisher").disabled, true);
+assert.equal(executing.pending[1].message.id, "1"); assert.equal(executing.pending[1].message.draftId, "10");
+executing.choose(2); // Forced change despite disabled UI must also cancel execution.
+executing.pending[1].resolve({ task: taskFor(1) }); await settle();
+assert.equal(executing.requests.some((message) => ["DIAGNOSE", "INSERT"].includes(message.type)), false);
+assert.equal(executing.element("insert").disabled, true);
+const loading = await racePanel(); loading.choose(1);
+loading.element("insert").listeners.click();
+assert.equal(loading.requests.some((message) => message.type === "INSERT"), false);
+loading.element("refreshTasks").listeners.click(); await settle();
+loading.pending[0].resolve({ task: taskFor(1) }); await settle();
+assert.equal(loading.element("title").textContent, "선택한 글 없음");
+assert.equal(loading.element("insert").disabled, true);
+console.log("Selection race checks passed: overlapping requests, reverse responses, rapid changes, stale errors, clear/refresh, task/draft identity, execution lock/cancellation.");
 console.log("Settings checks passed: first setup, automatic reconnect, collapse, edit/cancel/save, refresh without save, failure opens form, authentication.");

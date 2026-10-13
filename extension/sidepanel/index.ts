@@ -17,6 +17,12 @@
   let selected: ExtensionTask | undefined;
   const taskDraftIds = new Map<string, string>();
   let busy = false;
+  let selectionSequence = 0;
+  let selectionLoading = false;
+  function matchesSelection(task: ExtensionTask | undefined, taskId = tasks.value, draftId = taskDraftIds.get(taskId)): task is ExtensionTask {
+    return !!task && task.status === "approved" && !!taskId && !!draftId && String(task.id) === taskId && String(task.draftId) === draftId;
+  }
+  function updateInsertState() { insert.disabled = busy || selectionLoading || !matchesSelection(selected); }
   const request = async (message: ExtensionMessage) => {
     const reply = await chrome.runtime.sendMessage(message);
     if (reply.error) throw new Error(reply.error);
@@ -25,18 +31,22 @@
   async function run(action: () => Promise<void>) {
     if (busy) return;
     busy = true; insert.disabled = true; result.textContent = "처리 중…";
+    tasks.disabled = true; element<HTMLSelectElement>("publisher").disabled = true;
     connectionButtons.forEach((button) => { button.disabled = true; });
     baseUrl.disabled = true; token.disabled = true;
     try { await action(); } catch (error) { result.textContent = error instanceof Error ? error.message : "처리 실패"; }
     finally {
-      busy = false; insert.disabled = !selected;
+      busy = false; updateInsertState();
+      tasks.disabled = false; element<HTMLSelectElement>("publisher").disabled = false;
       connectionButtons.forEach((button) => { button.disabled = false; });
       baseUrl.disabled = false; token.disabled = false;
     }
   }
   async function loadTasks() {
+    selectionSequence++; selectionLoading = false;
     taskDraftIds.clear();
     selected = undefined; tasks.replaceChildren(new Option("작업을 선택하세요", ""));
+    tasks.value = "";
     element("title").textContent = "선택한 글 없음"; element("images").textContent = "이미지 0개";
     connection.textContent = "연결 확인 중…";
     try {
@@ -83,17 +93,33 @@
       } catch { showSettings(true); throw new Error("연결 설정 저장 또는 연결에 실패했습니다. 주소·토큰·서버 상태를 확인해 주세요."); }
     });
   });
-  tasks.addEventListener("change", () => { void run(async () => {
+  async function loadSelectedTask() {
+    const sequence = ++selectionSequence;
+    const taskId = tasks.value, draftId = taskDraftIds.get(taskId);
     selected = undefined;
+    selectionLoading = false;
+    updateInsertState();
     element("title").textContent = "선택한 글 없음"; element("images").textContent = "이미지 0개";
-    if (!tasks.value) { result.textContent = "작업을 선택해 주세요."; return; }
-    const reply = await request({ type: "TASK", id: tasks.value, draftId: taskDraftIds.get(tasks.value) });
-    if (!reply.task || reply.task.status !== "approved") throw new Error("승인된 초안만 선택할 수 있습니다.");
-    selected = reply.task;
-    element("title").textContent = selected?.title ?? "초안 없음";
-    element("images").textContent = `이미지 ${selected?.images.length ?? 0}개`;
-    result.textContent = "네이버 글쓰기 탭에서 DOM 진단 후 입력하세요.";
-  }); });
+    if (busy) return;
+    if (!taskId) { result.textContent = "작업을 선택해 주세요."; return; }
+    if (!draftId) { result.textContent = "승인된 초안 목록에서 작업을 선택해 주세요."; return; }
+    selectionLoading = true; updateInsertState(); result.textContent = "초안 조회 중…";
+    const current = () => sequence === selectionSequence && tasks.value === taskId && taskDraftIds.get(taskId) === draftId;
+    try {
+      const reply = await request({ type: "TASK", id: taskId, draftId });
+      if (!current()) return;
+      if (!matchesSelection(reply.task, taskId, draftId)) throw new Error("선택한 작업/draft와 일치하는 승인된 초안만 사용할 수 있습니다.");
+      selected = reply.task;
+      element("title").textContent = selected.title;
+      element("images").textContent = `이미지 ${selected.images.length}개`;
+      result.textContent = "네이버 글쓰기 탭에서 DOM 진단 후 입력하세요.";
+    } catch (error) {
+      if (current()) result.textContent = error instanceof Error ? error.message : "초안 조회 실패";
+    } finally {
+      if (current()) { selectionLoading = false; updateInsertState(); }
+    }
+  }
+  tasks.addEventListener("change", () => { void loadSelectedTask(); });
   async function diagnose() {
     const reply = await request({ type: "DIAGNOSE" });
     element("diagnostic").textContent = JSON.stringify(reply.diagnostics, null, 2);
@@ -104,18 +130,20 @@
     result.textContent = diagnostic?.ready === true ? "네이버 글쓰기 화면을 확인했습니다." : diagnostic?.reason ?? "입력 영역을 확정하지 못했습니다. 프레임별 DOM 진단을 확인해 주세요.";
   }); });
   insert.addEventListener("click", () => {
-    if (busy) return;
+    if (busy || selectionLoading) return;
     void run(async () => {
-    if (!selected || selected.status !== "approved") throw new Error("승인된 초안을 먼저 선택해 주세요.");
+    const taskId = tasks.value, draftId = taskDraftIds.get(taskId), sequence = selectionSequence;
+    if (!matchesSelection(selected, taskId, draftId)) throw new Error("화면에 선택한 승인된 초안을 먼저 조회해 주세요.");
     // Approval may have been revoked after selection. Recheck the same draft before any editor action.
-    const chosen = selected; selected = undefined;
-    const refreshed = await request({ type: "TASK", id: String(chosen.id), draftId: String(chosen.draftId) });
-    if (!refreshed.task || refreshed.task.status !== "approved") throw new Error("초안 승인이 변경되었습니다. 승인 상태를 확인하세요.");
+    selected = undefined;
+    const refreshed = await request({ type: "TASK", id: taskId, draftId });
+    if (sequence !== selectionSequence || tasks.value !== taskId || taskDraftIds.get(taskId) !== draftId || !matchesSelection(refreshed.task, taskId, draftId)) throw new Error("선택한 작업/draft 또는 승인 상태가 변경되었습니다. 다시 선택해 주세요.");
     selected = refreshed.task;
     const diagnostic = await diagnose();
     if (diagnostic?.ready !== true) throw new Error(diagnostic?.reason ?? "입력 영역을 확정하지 못했습니다. 프레임별 DOM 진단을 확인해 주세요.");
     const overwrite = !!diagnostic?.existing;
     if (overwrite && !window.confirm("현재 글에 제목 또는 본문이 있습니다. 선택한 초안으로 덮어쓰시겠습니까?")) { result.textContent = "입력을 취소했습니다."; return; }
+    if (sequence !== selectionSequence || !matchesSelection(selected, taskId, draftId) || tasks.value !== taskId || taskDraftIds.get(taskId) !== draftId) throw new Error("작업 선택이 변경되어 입력을 중단했습니다.");
     const publisher = element<HTMLSelectElement>("publisher").value === "legacy" ? "legacy" : "blocks";
     const reply = await request({ type: "INSERT", task: selected, overwrite, publisher }); result.textContent = reply.message ?? "입력 결과를 확인해 주세요.";
   }); });

@@ -46,4 +46,4 @@ API 인증·signed URL 생성은 기존 방식이며 DB 상태를 변경하지 �
 
 과거 Playwright publisher, /api/blog/publish, PublishingStatusControl, Naver live test script는 현재 main에 없습니다. 현재 방식은 Chrome Extension + CDP + content script입니다. Playwright 코드를 복원하거나 최종 발행을 자동 실행하지 않습니다.
 
-V3 10장 실검증은 완료입니다. approved-only 정책은 목록/상세 API와 입력 전 재조회에 구현했습니다. 향후 작업은 승인 후 편집의 재승인 정책, 작업 선택 race, 업로드 완료/순서 검증 강화, 실행 snapshot/실패 이력, 중간 재개, signed URL 갱신, 비정상 종료 cleanup, 충분한 안정화 후 legacy 제거 검토입니다. 최종 발행/예약 자동화와 결과 기록은 별도 단계입니다.
+V3 10장 실검증은 완료입니다. approved-only 정책은 목록/상세 API와 입력 전 재조회에 구현했습니다. Side Panel은 최신 선택 요청만 반영하며 taskId/draftId를 조회·실행 시 대조하고 실행 중 선택을 잠급니다. 선택 race 수정은 mock으로 검증했습니다. 향후 작업은 승인 후 편집의 재승인 정책, 업로드 완료/순서 검증 강화, 실행 snapshot/실패 이력, 중간 재개, signed URL 갱신, 비정상 종료 cleanup, 충분한 안정화 후 legacy 제거 검토입니다. 최종 발행/예약 자동화와 결과 기록은 별도 단계입니다.

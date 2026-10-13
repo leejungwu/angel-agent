@@ -147,7 +147,7 @@ V3는 현재 task의 image block 전부를 순서대로 처리하며 사진 수 
 ### Blog Input Technical Debt — Priority Order
 
 1. [x] Extension에서 approved draft만 사용하도록 승인 정책 통일 — 목록은 작업별 최신 승인 draft, 상세는 명시 draftId도 승인 검사, 입력 클릭 시 같은 draftId 재조회. 코드/fixture 완료이며 실제 Chrome 재검증은 이번 작업에서 수행하지 않음.
-2. [ ] Side Panel 작업 선택 race 수정
+2. [x] Side Panel 작업 선택 race 수정 — 조회 요청 번호 및 taskId/draftId 일치 검사, 오래된 응답/오류 무시, 실행 중 선택 잠금 및 재조회/실행 ID 대조. mock/fixture 완료; 이번 작업에서 Chrome 실테스트는 수행하지 않음.
 3. [ ] 이미지 업로드 완료 / 순서 검증 강화 — 현재 component 수 증가 검증을 보완
 4. [ ] 실행 snapshot 및 실패 이력 — draft별 사진 snapshot은 현재 없음
 5. [ ] 중간 실패 재개
