@@ -1,5 +1,14 @@
 # Angel Agent Blog Extension
 
+## V3 순차 입력 (Chrome 검증 대기)
+
+- Side Panel의 `V3 순차 입력`은 API의 `blocks`를 앞에서 뒤로 처리합니다. text block은 `Input.insertText`, image block은 기존 temp API와 CDP file chooser 업로드를 사용합니다. 사진 수 제한은 없습니다.
+- 기존 데이터와 최대 3장 입력 경로는 유지합니다. `기존 안정 버전 · 최대 3장`을 선택하면 해당 경로로 실행합니다. 실패한 V3를 같은 글에서 자동 재실행하지 않습니다.
+- 첫 실제 검증은 사진 2장 작업으로 진행합니다. 사진 업로드 후 다음 빈 본문 문단에서 텍스트가 이어지는지 확인해야 합니다. 최종 발행은 실행하지 않습니다.
+- V3는 사진 버튼 클릭 후 `DOM.getDocument`로 현재 file input을 조회하고 `DOM.setFileInputFiles`로 지정합니다. chooser 이벤트를 기다리지 않습니다. native dialog 차단은 전체 loop 동안 유지하며 종료 시 해제합니다. 실패 단계와 image block 번호를 표시합니다. 기존 3장 경로의 chooser 방식은 유지합니다.
+
+## 기존 안정 경로
+
 1. `npm.cmd run build:extension` 후 `extension/dist`를 Chrome에 압축해제된 확장프로그램으로 로드합니다.
 2. 최초 1회 앱 주소와 전용 `ANGEL_EXTENSION_TOKEN`을 입력하고 연결 저장합니다. 설정은 `chrome.storage.local`의 `appUrl`, `extensionToken`에 보관하며 TRUSTED_CONTEXTS로 제한합니다. 재열기/reload 시 자동 연결합니다.
 3. 직접 로그인한 새 Naver 글쓰기 탭을 열고 초안을 선택해 입력합니다. 제목/본문은 기존 V1 CDP 입력·검증을 유지합니다. 사진이 이미 있는 글에는 입력하지 않습니다.

@@ -83,7 +83,7 @@
     if (!tasks.value) { result.textContent = "작업을 선택해 주세요."; return; }
     const reply = await request({ type: "TASK", id: tasks.value }); selected = reply.task;
     element("title").textContent = selected?.title ?? "초안 없음";
-    element("images").textContent = `이미지 ${selected?.images.length ?? 0}개 · 최대 3장 자동 삽입`;
+    element("images").textContent = `이미지 ${selected?.images.length ?? 0}개`;
     result.textContent = "네이버 글쓰기 탭에서 DOM 진단 후 입력하세요.";
   }); });
   async function diagnose() {
@@ -102,7 +102,8 @@
     if (diagnostic?.ready !== true) throw new Error(diagnostic?.reason ?? "입력 영역을 확정하지 못했습니다. 프레임별 DOM 진단을 확인해 주세요.");
     const overwrite = !!diagnostic?.existing;
     if (overwrite && !window.confirm("현재 글에 제목 또는 본문이 있습니다. 선택한 초안으로 덮어쓰시겠습니까?")) { result.textContent = "입력을 취소했습니다."; return; }
-    const reply = await request({ type: "INSERT", task: selected, overwrite }); result.textContent = reply.message ?? "입력 결과를 확인해 주세요.";
+    const publisher = element<HTMLSelectElement>("publisher").value === "legacy" ? "legacy" : "blocks";
+    const reply = await request({ type: "INSERT", task: selected, overwrite, publisher }); result.textContent = reply.message ?? "입력 결과를 확인해 주세요.";
   }); });
   void chrome.storage.local.get(["appUrl", "extensionToken", "baseUrl"]).then((saved) => {
     savedSettings = { appUrl: saved.appUrl ?? saved.baseUrl ?? "http://localhost:3000", extensionToken: saved.extensionToken ?? "" };

@@ -37,6 +37,11 @@ assert.equal(result.bodyText, prepared.executionBodyText);
 assert.equal(result.bodyText.includes("[사진 "), false);
 assert.equal(result.imageMarkers, undefined);
 assert.equal(result.images.length, 2);
+assert.equal(result.blocks.filter((block) => block.type === "image").length, 2);
+assert.equal(result.blocks.filter((block) => block.type === "text").map((block) => block.text).join(""), result.bodyText);
+for (const block of result.blocks.filter((block) => block.type === "image")) {
+  assert.equal(block.signedUrl, result.images[block.index].signedUrl);
+}
 result.images.forEach((image, index) => {
   assert.equal(image.index, index);
   assert.equal(image.insertOffset, prepared.imageInsertOffsets[index]);
@@ -44,4 +49,15 @@ result.images.forEach((image, index) => {
   assert.equal(image.expiresIn, 600);
 });
 assert.ok(prepared.bodyWithMarkers.includes("[사진 01 삽입]"), "Manual preview must remain separate");
+for (const count of [0, 8, 10]) {
+  assets.splice(0, assets.length, ...Array.from({ length: count }, (_, index) => ({ id: index + 1, storage_path: `tasks/1/${index}.jpg`, sort_order: index })));
+  const all = await api.getExtensionBlogTask("1");
+  assert.equal(all.blocks.filter((b) => b.type === "image").length, count);
+  assert.equal(all.blocks.filter((b) => b.type === "text").map((b) => b.text).join(""), all.bodyText);
+  let text = "";
+  for (const block of all.blocks) {
+    if (block.type === "text") text += block.text;
+    else assert.equal(text.length, all.images[block.index].insertOffset);
+  }
+}
 console.log("Extension API fixture passed: clean body, planned offsets, unchanged signed URL expiry, separate manual preview.");

@@ -191,6 +191,93 @@
     return consumed;
   }
 
+  let blockInitialImages = 0;
+
+  function blockBodyText() {
+    return normalizeForPosition(photoTextNodes().map((node) => node.textContent ?? "").join(""));
+  }
+
+  function blockTailParagraph() {
+    const paragraphs = inspect().paragraphs;
+    const images = [...document.querySelectorAll<HTMLElement>(".se-component.se-image")];
+    const lastImage = images[images.length - 1];
+    const following = paragraphs.filter((paragraph) => !lastImage || !!(lastImage.compareDocumentPosition(paragraph) & Node.DOCUMENT_POSITION_FOLLOWING));
+    return following[following.length - 1];
+  }
+
+  function setBlockSelection(element: HTMLElement, range: Range) {
+    const editable = element.closest<HTMLElement>('[contenteditable="true"]') ?? element;
+    editable.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    if (!selection) throw new Error("본문 selection 없음");
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  async function blockRequest(message: ExtensionMessage): Promise<ExtensionReply> {
+    if (message.type === "EDITOR_BLOCK_START") {
+      assertSafeEditor();
+      if (blockBodyText()) throw new Error("V3는 빈 본문에서 시작해야 합니다.");
+      blockInitialImages = document.querySelectorAll(".se-component.se-image").length;
+      return {};
+    }
+    if (message.type === "EDITOR_BLOCK_TEXT_VERIFY" || message.type === "EDITOR_BLOCK_VERIFY") {
+      if (!message.task) throw new Error("본문 검증 데이터 없음");
+      const expected = normalizeForPosition(message.task.bodyText);
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        if (blockBodyText() === expected) {
+          if (message.type === "EDITOR_BLOCK_VERIFY" && document.querySelectorAll(".se-component.se-image").length - blockInitialImages !== message.task.images.length) throw new Error("사진 block 수와 실제 사진 수 불일치");
+          return {};
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error("순차 입력 본문 문자/순서 불일치");
+    }
+    const paragraph = blockTailParagraph();
+    if (message.type === "EDITOR_BLOCK_CARET") {
+      const selection = window.getSelection();
+      const node = selection?.anchorNode;
+      const element = node?.nodeType === 1 ? node as Element : node?.parentElement;
+      if (!paragraph || !selection?.isCollapsed || !node || !paragraph.contains(node) ||
+        element?.closest('.se-blind, [hidden], [aria-hidden="true"]')) throw new Error("마지막 본문 문단 caret 없음");
+      const remainder = document.createRange();
+      remainder.selectNodeContents(paragraph);
+      remainder.setStart(node, selection.anchorOffset);
+      if (normalizeForPosition(remainder.toString())) throw new Error("본문 끝 caret이 아닙니다.");
+      return {};
+    }
+    if (message.type === "EDITOR_BLOCK_NEXT_TEXT" && !paragraph) {
+      const images = [...document.querySelectorAll<HTMLElement>(".se-component.se-image")];
+      const image = images[images.length - 1];
+      if (!image) throw new Error("다음 문단을 만들 사진 없음");
+      const range = document.createRange();
+      range.setStartAfter(image); range.collapse(true);
+      setBlockSelection(image, range);
+      return { needsParagraph: true };
+    }
+    if (!paragraph) throw new Error("다음 본문 문단 없음");
+    if (message.type === "EDITOR_BLOCK_IMAGE_TARGET" || message.type === "EDITOR_BLOCK_NEXT_TEXT") {
+      if (normalizeForPosition(paragraph.textContent ?? "")) throw new Error("사진 뒤/사진 입력 문단이 비어 있지 않습니다.");
+      if (message.type === "EDITOR_BLOCK_IMAGE_TARGET") {
+        const current = inspect();
+        photoState = { characterOffset: 0, paragraphCount: current.paragraphs.length, emptyCount: 0,
+          imageCount: document.querySelectorAll(".se-component.se-image").length };
+      }
+      const range = document.createRange();
+      range.selectNodeContents(paragraph); range.collapse(true);
+      setBlockSelection(paragraph, range);
+      return {};
+    }
+    if (message.type === "EDITOR_BLOCK_TEXT_END") {
+      const range = document.createRange();
+      range.selectNodeContents(paragraph); range.collapse(false);
+      setBlockSelection(paragraph, range);
+      return {};
+    }
+    throw new Error("지원하지 않는 block 요청");
+  }
+
   async function photoRequest(message: ExtensionMessage): Promise<ExtensionReply> {
     if (message.type === "EDITOR_PHOTO_BODY_VERIFY") {
       if (!message.task) throw new Error("본문 검증할 초안 없음");
@@ -265,9 +352,10 @@
   }
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
-    if (sender.id !== chrome.runtime.id || !["EDITOR_DIAGNOSE", "EDITOR_TARGET", "EDITOR_VERIFY", "EDITOR_PHOTO_TARGET", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY", "EDITOR_PHOTO_UPLOAD_CARET", "EDITOR_PHOTO_BUTTON", "EDITOR_PHOTO_VERIFY", "EDITOR_PHOTO_BODY_VERIFY"].includes(message.type)) return;
+    if (sender.id !== chrome.runtime.id || !["EDITOR_DIAGNOSE", "EDITOR_TARGET", "EDITOR_VERIFY", "EDITOR_PHOTO_TARGET", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY", "EDITOR_PHOTO_UPLOAD_CARET", "EDITOR_PHOTO_BUTTON", "EDITOR_PHOTO_VERIFY", "EDITOR_PHOTO_BODY_VERIFY", "EDITOR_BLOCK_START", "EDITOR_BLOCK_CARET", "EDITOR_BLOCK_TEXT_VERIFY", "EDITOR_BLOCK_VERIFY", "EDITOR_BLOCK_NEXT_TEXT", "EDITOR_BLOCK_IMAGE_TARGET", "EDITOR_BLOCK_TEXT_END"].includes(message.type)) return;
     void (async (): Promise<ExtensionReply> => {
       if (message.type.startsWith("EDITOR_PHOTO_")) return photoRequest(message);
+      if (message.type.startsWith("EDITOR_BLOCK_")) return blockRequest(message);
       if (message.type === "EDITOR_DIAGNOSE") return { diagnostic: inspect().diagnostic };
       if (message.field !== "title" && message.field !== "body") throw new Error("입력 대상이 올바르지 않습니다.");
       if (message.type === "EDITOR_VERIFY") {

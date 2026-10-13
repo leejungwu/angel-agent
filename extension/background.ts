@@ -47,7 +47,7 @@
     }
   }
 
-  async function insertWithDebugger(tabId: number, frameId: number, task: ExtensionTask, overwrite: boolean) {
+  async function insertWithDebugger(tabId: number, frameId: number, task: ExtensionTask, overwrite: boolean, publisher: "blocks" | "legacy" = "legacy") {
     if (inputRunning) throw new Error("입력 작업이 이미 진행 중입니다.");
     if (!task.title?.trim() || !task.bodyText?.trim()) throw new Error("제목 또는 본문이 비어 있습니다.");
     inputRunning = true;
@@ -56,6 +56,8 @@
     let stage = "attach";
     let failure: unknown;
     let detachFailure: unknown;
+    let blockInterception = false;
+    let imageBlockNumber = 0;
     const temporaryImages = new Set<string>();
     const cleanupWarnings = new Set<string>();
     async function removeTempImage(tempId: string) {
@@ -107,9 +109,105 @@
       const checked = await frameRequest({ type: "EDITOR_VERIFY", field, task });
       if (!checked.verification?.titleMatches || (field === "body" && !checked.verification.bodyMatches)) throw new Error("DOM 검증 결과가 없습니다.");
     };
+    const clickPhotoTarget = async (type: string, photoTask = task) => {
+      const reply = await frameRequest({ type, task: photoTask });
+      if (!reply.position) throw new Error("사진 입력 좌표 없음");
+      const { x, y } = reply.position;
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+      await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
+    };
+    const key = async (name: string, code: number, modifiers = 0) => {
+      await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: name, windowsVirtualKeyCode: code, modifiers });
+      await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", { type: "keyUp", key: name, windowsVirtualKeyCode: code, modifiers });
+    };
+    type FileInputNode = {
+      nodeName: string; backendNodeId?: number; attributes?: string[]; documentURL?: string;
+      children?: FileInputNode[]; contentDocument?: FileInputNode; shadowRoots?: FileInputNode[];
+    };
+    const findBlockFileInput = async () => {
+      // Re-query every time: SmartEditor can reuse or replace its hidden file input.
+      for (let attempt = 0; attempt < 60; attempt++) {
+        await assertCurrentTab(tabId);
+        const tree = await chrome.debugger.sendCommand(debuggee, "DOM.getDocument", { depth: -1, pierce: true }) as { root?: FileInputNode } | undefined;
+        const inputs: number[] = [];
+        const visit = (node: FileInputNode, documentURL = "") => {
+          const url = node.documentURL || documentURL;
+          const attributes = node.attributes ?? [];
+          const attr = (name: string) => { const i = attributes.indexOf(name); return i < 0 ? undefined : attributes[i + 1]; };
+          if (node.nodeName === "INPUT" && attr("type")?.toLowerCase() === "file" && attr("disabled") === undefined &&
+            /^https:\/\/blog\.naver\.com\//.test(url) && /PostWriteForm\.naver|\/postwrite(?:\?|$|\/)/i.test(url) &&
+            (!attr("accept") || /image\/|\.(?:jpe?g|png|webp|gif|bmp)(?:\s|,|$)/i.test(attr("accept")!)) &&
+            Number.isSafeInteger(node.backendNodeId) && node.backendNodeId! > 0) inputs.push(node.backendNodeId!);
+          for (const child of node.children ?? []) visit(child, url);
+          if (node.contentDocument) visit(node.contentDocument, url);
+          for (const root of node.shadowRoots ?? []) visit(root, url);
+        };
+        if (tree?.root) visit(tree.root);
+        const unique = [...new Set(inputs)];
+        if (unique.length > 1) throw new Error(`사진 file input이 여러 개입니다 (${unique.length}개).`);
+        if (unique.length === 1) return unique[0];
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      throw new Error("사진 버튼 클릭 후 file input을 찾지 못했습니다.");
+    };
+    const uploadPhoto = async (filename: string) => {
+      if (publisher === "blocks") {
+        stage = "PHOTO_FILE_CHOOSER";
+        if (!blockInterception) {
+          await send("Page.enable", {});
+          await send("Page.setInterceptFileChooserDialog", { enabled: true });
+          blockInterception = true;
+        }
+        await clickPhotoTarget("EDITOR_PHOTO_BUTTON");
+        stage = "PHOTO_FILE_INPUT";
+        const backendNodeId = await findBlockFileInput();
+        stage = "PHOTO_UPLOAD";
+        await send("DOM.setFileInputFiles", { files: [filename], backendNodeId });
+        const finished = await frameRequest({ type: "EDITOR_PHOTO_VERIFY" });
+        if (!finished.imageReady) throw new Error("사진 업로드 검증 결과 없음");
+        return;
+      }
+      stage = "PHOTO_FILE_CHOOSER";
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let rejectChooser: (error: Error) => void = () => {};
+      let onChooser: Parameters<typeof chrome.debugger.onEvent.addListener>[0] = () => {};
+      const chooser = new Promise<{ source: { tabId?: number; sessionId?: string }; backendNodeId: number }>((resolve, reject) => {
+        rejectChooser = reject;
+        onChooser = (source, method, params) => {
+          if (source.tabId !== tabId || method !== "Page.fileChooserOpened") return;
+          const nodeId = params?.backendNodeId;
+          if (typeof nodeId !== "number" || !Number.isSafeInteger(nodeId) || nodeId <= 0) reject(new Error("file input backendNodeId 없음"));
+          else resolve({ source, backendNodeId: nodeId });
+        };
+        chrome.debugger.onEvent.addListener(onChooser);
+        timer = setTimeout(() => reject(new Error("사진 파일 선택 이벤트 시간 초과")), 15000);
+      });
+      // 클릭/프로토콜 실패로 이벤트 대기가 종료되기 전에도 rejection을 처리합니다.
+      void chooser.catch(() => {});
+      try {
+        await send("Page.enable", {});
+        await send("Page.setInterceptFileChooserDialog", { enabled: true });
+        await clickPhotoTarget("EDITOR_PHOTO_BUTTON");
+        const opened = await chooser;
+        stage = "PHOTO_UPLOAD";
+        await assertCurrentTab(tabId);
+        await chrome.debugger.sendCommand(opened.source, "DOM.setFileInputFiles", { files: [filename], backendNodeId: opened.backendNodeId });
+      } catch (error) {
+        rejectChooser(new Error("사진 파일 선택 중단"));
+        if (error instanceof Error && error.message.includes("backendNodeId")) throw error;
+        throw new Error(stage === "PHOTO_UPLOAD" ? "사진 파일 지정 실패" : "사진 파일 선택 interception 실패");
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+        chrome.debugger.onEvent.removeListener(onChooser);
+        if (attached) await chrome.debugger.sendCommand(debuggee, "Page.setInterceptFileChooserDialog", { enabled: false });
+      }
+      stage = "PHOTO_UPLOAD";
+      const finished = await frameRequest({ type: "EDITOR_PHOTO_VERIFY" });
+      if (!finished.imageReady) throw new Error("사진 업로드 검증 결과 없음");
+    };
     try {
       stage = "PHOTO_POSITION";
-      const images = task.images.slice(0, 3).sort((a, b) => b.insertOffset - a.insertOffset || b.index - a.index);
+      const images = (publisher === "blocks" ? [] : task.images.slice(0, 3)).sort((a, b) => b.insertOffset - a.insertOffset || b.index - a.index);
       if (images.some((image) => !Number.isSafeInteger(image.insertOffset) || image.insertOffset < 0 || image.insertOffset > task.bodyText.length)) throw new Error("사진 insertOffset을 확인해 주세요.");
       await assertCurrentTab(tabId);
       const check = await frameRequest({ type: "EDITOR_DIAGNOSE" });
@@ -118,74 +216,88 @@
       await chrome.debugger.attach(debuggee, "1.3");
       attached = true;
       await insertField("title", task.title);
-      await insertField("body", task.bodyText);
+      if (publisher === "blocks") {
+        stage = "BLOCK_DATA";
+        const blocks = task.blocks;
+        if (!Array.isArray(blocks) || !blocks.length ||
+          blocks.some((block) => block.type === "text" ? typeof block.text !== "string" :
+            block.type !== "image" || !task.images.some((image) => image.index === block.index && image.signedUrl === block.signedUrl)) ||
+          blocks.filter((block) => block.type === "text").map((block) => block.text).join("") !== task.bodyText ||
+          blocks.filter((block) => block.type === "image").length !== task.images.length ||
+          new Set(blocks.filter((block) => block.type === "image").map((block) => block.index)).size !== task.images.length) throw new Error("본문 block 데이터를 확인해 주세요.");
+        stage = "BLOCK_BODY_START";
+        const body = await frameRequest({ type: "EDITOR_TARGET", field: "body", overwrite });
+        if (!body.position) throw new Error("본문 입력 좌표 없음");
+        const { x, y } = body.position;
+        await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+        await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
+        if (body.existing) { await key("a", 65, 2); await key("Backspace", 8); }
+        await frameRequest({ type: "EDITOR_BLOCK_START" });
+        let appended = "";
+        for (const block of blocks) {
+          if (block.type === "text") {
+            stage = "BLOCK_TEXT";
+            await frameRequest({ type: "EDITOR_BLOCK_CARET" });
+            await send("Input.insertText", { text: block.text });
+            appended += block.text;
+            await frameRequest({ type: "EDITOR_BLOCK_TEXT_VERIFY", task: { ...task, bodyText: appended } });
+            await frameRequest({ type: "EDITOR_BLOCK_TEXT_END" });
+          } else {
+            imageBlockNumber++;
+            console.info("V3 image block", { imageBlockNumber, totalImages: task.images.length, imageIndex: block.index });
+            stage = "PHOTO_TEMP_CREATE";
+            const image = task.images.find((image) => image.index === block.index)!;
+            const downloaded = await createPhotoTemp(image);
+            stage = "PHOTO_EMPTY_PARAGRAPH";
+            await frameRequest({ type: "EDITOR_BLOCK_CARET" });
+            await key("Enter", 13);
+            await key("Enter", 13);
+            await frameRequest({ type: "EDITOR_BLOCK_IMAGE_TARGET" });
+            await frameRequest({ type: "EDITOR_BLOCK_CARET" });
+            await uploadPhoto(downloaded.filename);
+            stage = "BLOCK_NEXT_TEXT";
+            const next = await frameRequest({ type: "EDITOR_BLOCK_NEXT_TEXT" });
+            if (next.needsParagraph) {
+              await key("Enter", 13);
+              const created = await frameRequest({ type: "EDITOR_BLOCK_NEXT_TEXT" });
+              if (created.needsParagraph) throw new Error("사진 뒤 빈 본문 문단 생성 실패");
+            }
+            await frameRequest({ type: "EDITOR_BLOCK_CARET" });
+          }
+        }
+        stage = "BLOCK_VERIFY";
+        await frameRequest({ type: "EDITOR_BLOCK_VERIFY", task });
+      } else {
+        await insertField("body", task.bodyText);
+      }
       for (const image of images) {
         stage = "PHOTO_TEMP_CREATE";
         const downloaded = await createPhotoTemp(image);
         const photoTask = { ...task, images: [image] };
-        const clickPhotoTarget = async (type: string) => {
-          const reply = await frameRequest({ type, task: photoTask });
-          if (!reply.position) throw new Error("사진 입력 좌표 없음");
-          const { x, y } = reply.position;
-          await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
-          await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
-        };
-        const key = async (name: string, code: number, modifiers = 0) => {
-          await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: name, windowsVirtualKeyCode: code, modifiers });
-          await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", { type: "keyUp", key: name, windowsVirtualKeyCode: code, modifiers });
-        };
         stage = "PHOTO_POSITION";
-        await clickPhotoTarget("EDITOR_PHOTO_TARGET");
+        await clickPhotoTarget("EDITOR_PHOTO_TARGET", photoTask);
         await frameRequest({ type: "EDITOR_PHOTO_CARET" });
         stage = "PHOTO_EMPTY_PARAGRAPH";
         await key("Enter", 13);
         await key("Enter", 13);
-        await clickPhotoTarget("EDITOR_PHOTO_EMPTY");
+        await clickPhotoTarget("EDITOR_PHOTO_EMPTY", photoTask);
         await frameRequest({ type: "EDITOR_PHOTO_UPLOAD_CARET" });
-        stage = "PHOTO_FILE_CHOOSER";
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        let rejectChooser: (error: Error) => void = () => {};
-        let onChooser: Parameters<typeof chrome.debugger.onEvent.addListener>[0] = () => {};
-        const chooser = new Promise<{ source: { tabId?: number; sessionId?: string }; backendNodeId: number }>((resolve, reject) => {
-          rejectChooser = reject;
-          onChooser = (source, method, params) => {
-            if (source.tabId !== tabId || method !== "Page.fileChooserOpened") return;
-            const nodeId = params?.backendNodeId;
-            if (typeof nodeId !== "number" || !Number.isSafeInteger(nodeId) || nodeId <= 0) reject(new Error("file input backendNodeId 없음"));
-            else resolve({ source, backendNodeId: nodeId });
-          };
-          chrome.debugger.onEvent.addListener(onChooser);
-          timer = setTimeout(() => reject(new Error("사진 파일 선택 이벤트 시간 초과")), 15000);
-        });
-        // 클릭/프로토콜 실패로 이벤트 대기가 종료되기 전에도 rejection을 처리합니다.
-        void chooser.catch(() => {});
-        try {
-          await send("Page.enable", {});
-          await send("Page.setInterceptFileChooserDialog", { enabled: true });
-          await clickPhotoTarget("EDITOR_PHOTO_BUTTON");
-          const opened = await chooser;
-          stage = "PHOTO_UPLOAD";
-          await assertCurrentTab(tabId);
-          await chrome.debugger.sendCommand(opened.source, "DOM.setFileInputFiles", { files: [downloaded.filename], backendNodeId: opened.backendNodeId });
-        } catch (error) {
-          rejectChooser(new Error("사진 파일 선택 중단"));
-          if (error instanceof Error && error.message.includes("backendNodeId")) throw error;
-          throw new Error(stage === "PHOTO_UPLOAD" ? "사진 파일 지정 실패" : "사진 파일 선택 interception 실패");
-        } finally {
-          if (timer !== undefined) clearTimeout(timer);
-          chrome.debugger.onEvent.removeListener(onChooser);
-          if (attached) await chrome.debugger.sendCommand(debuggee, "Page.setInterceptFileChooserDialog", { enabled: false });
-        }
-        stage = "PHOTO_UPLOAD";
-        const finished = await frameRequest({ type: "EDITOR_PHOTO_VERIFY" });
-        if (!finished.imageReady) throw new Error("사진 업로드 검증 결과 없음");
+        await uploadPhoto(downloaded.filename);
       }
       if (images.length) {
         stage = "PHOTO_VERIFY";
         await frameRequest({ type: "EDITOR_PHOTO_BODY_VERIFY", task });
       }
-    } catch (error) { failure = error; }
+    } catch (error) {
+      failure = error;
+      if (publisher === "blocks") console.warn("V3 input failed", { stage, imageBlockNumber, totalImages: task.images.length,
+        errorName: error instanceof Error ? error.name : "UnknownError" });
+    }
     finally {
+      if (blockInterception && attached) {
+        try { await chrome.debugger.sendCommand(debuggee, "Page.setInterceptFileChooserDialog", { enabled: false }); }
+        catch { if (!failure) { stage = "PHOTO_FILE_CHOOSER"; failure = new Error("file chooser interception 해제 실패"); } }
+      }
       for (const delay of [0, 500, 1500, 3000]) {
         if (!temporaryImages.size) break;
         if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
@@ -199,7 +311,8 @@
     if (failure || detachFailure) {
       const reason = failure instanceof Error ? failure.message : failure ? "입력 실패" : "";
       const detachReason = detachFailure ? " debugger detach 실패: Chrome에서 연결 상태를 확인해 주세요." : "";
-      throw new Error(`${stage}: ${reason}${detachReason}${cleanupWarning} 일부 입력되었을 수 있으니 직접 확인하세요.`);
+      const blockDiagnostic = publisher === "blocks" && imageBlockNumber ? ` (image block ${imageBlockNumber}/${task.images.length})` : "";
+      throw new Error(`${stage}${blockDiagnostic}: ${reason}${detachReason}${cleanupWarning} 일부 입력되었을 수 있으니 직접 확인하세요.`);
     }
     return { message: `입력 완료 - 네이버에서 직접 확인 후 발행하세요${cleanupWarning}` };
   }
@@ -224,7 +337,7 @@
           if (editor.found.length !== 1) throw new Error(`SmartEditor 입력 프레임을 확정하지 못했습니다 (${editor.found.length}개). DOM 진단을 확인해 주세요.`);
           const target = editor.found[0];
           if (target.diagnostic.existing && !message.overwrite) throw new Error("기존 글이 있습니다. 덮어쓰기 확인이 필요합니다.");
-          return insertWithDebugger(editor.tabId, target.frameId, message.task, !!message.overwrite);
+          return insertWithDebugger(editor.tabId, target.frameId, message.task, !!message.overwrite, message.publisher);
         }
         default: throw new Error("지원하지 않는 요청입니다.");
       }

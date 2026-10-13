@@ -40,10 +40,20 @@ export async function getExtensionBlogTask(id: string) {
     const insertOffset = prepared.imageInsertOffsets[index];
     return { id: asset.id, index, insertOffset, insertPrefix: prepared.executionBodyText.slice(0, insertOffset), sortOrder: asset.sort_order, signedUrl: data.signedUrl, expiresIn: 600 };
   }));
+  // Slice the clean body at existing planned boundaries; concatenated text stays byte-for-byte identical.
+  const blocks: ({ type: "text"; text: string } | { type: "image"; index: number; signedUrl: string })[] = [];
+  let cursor = 0;
+  for (const image of signedImages) {
+    if (image.insertOffset > cursor) blocks.push({ type: "text", text: prepared.executionBodyText.slice(cursor, image.insertOffset) });
+    blocks.push({ type: "image", index: image.index, signedUrl: image.signedUrl });
+    cursor = image.insertOffset;
+  }
+  if (cursor < prepared.executionBodyText.length) blocks.push({ type: "text", text: prepared.executionBodyText.slice(cursor) });
   return {
     id: task.data.id, draftId: draft.id, status: draft.status, title: prepared.title,
     paragraphs: prepared.blocks.filter((b) => b.type === "text").map((b) => b.text),
     bodyText: prepared.executionBodyText,
     images: signedImages,
+    blocks,
   };
 }

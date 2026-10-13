@@ -1,6 +1,7 @@
 type ExtensionTask = {
   id: string | number; draftId: string | number; title: string; bodyText: string;
   images: { id: string | number; index: number; insertOffset: number; insertPrefix: string; signedUrl: string; expiresIn: number }[];
+  blocks?: ({ type: "text"; text: string } | { type: "image"; index: number; signedUrl: string })[];
 };
 type EditorDiagnostic = {
   url: string; writing: boolean; ready: boolean; existing: boolean;
@@ -13,6 +14,7 @@ type EditorTargetPosition = { x: number; y: number; rect: { x: number; y: number
 type ExtensionMessage = {
   type: string; id?: string; baseUrl?: string; token?: string; task?: ExtensionTask; overwrite?: boolean;
   field?: "title" | "body";
+  publisher?: "blocks" | "legacy";
 };
 type ExtensionReply = {
   error?: string; tasks?: { id: string | number; title: string; status: string }[]; task?: ExtensionTask;
@@ -20,6 +22,7 @@ type ExtensionReply = {
   diagnostics?: { frameId: number; diagnostic?: EditorDiagnostic; reason?: string }[];
   position?: EditorTargetPosition; existing?: boolean;
   imageReady?: boolean;
+  needsParagraph?: boolean;
   verification?: { titleMatches: boolean; bodyMatches: boolean; actualLength: number; expectedLength: number };
 };
 declare const chrome: {
