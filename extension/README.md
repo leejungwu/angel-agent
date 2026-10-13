@@ -12,7 +12,7 @@
 1. `npm.cmd run build:extension` 후 `extension/dist`를 Chrome에 압축해제된 확장프로그램으로 로드합니다.
 2. 최초 1회 앱 주소와 전용 `ANGEL_EXTENSION_TOKEN`을 입력하고 연결 저장합니다. 설정은 `chrome.storage.local`의 `appUrl`, `extensionToken`에 보관하며 TRUSTED_CONTEXTS로 제한합니다. 재열기/reload 시 자동 연결합니다.
 3. 직접 로그인한 새 Naver 글쓰기 탭을 열고 초안을 선택해 입력합니다. 제목은 기존 V1 CDP 입력·검증을 사용하고, V3 본문은 text/image block을 순차 입력합니다. 사진이 이미 있는 글에는 입력하지 않습니다.
-4. Side Panel 기본 입력 방식은 V3입니다. 목록에서 선택한 draftId를 /api/extension/blog-tasks/{taskId}?draftId={draftId}로 전달하며 해당 draft의 clean body와 전체 사진 blocks를 받습니다. approved-only 정책은 아직 강제하지 않으므로 사용할 초안의 승인 상태를 확인합니다.
+4. Side Panel 기본 입력 방식은 V3입니다. 목록은 작업별 최신 승인 draft만 표시합니다. 선택한 draftId를 /api/extension/blog-tasks/{taskId}?draftId={draftId}로 전달하며, 서버는 명시 draftId도 승인 여부를 검사합니다. 입력 버튼 클릭 시 같은 draftId를 다시 조회하고 승인된 응답에만 입력을 시작합니다. 승인 draft가 없는 작업은 목록에서 제외됩니다.
 5. /prepare는 앱의 수동 복사·검수·fallback 화면이며 Extension을 직접 실행하지 않습니다.
 
 ## Legacy V2: 최대 3장 fallback — 현재 유지
@@ -46,4 +46,4 @@ API 인증·signed URL 생성은 기존 방식이며 DB 상태를 변경하지 �
 
 과거 Playwright publisher, /api/blog/publish, PublishingStatusControl, Naver live test script는 현재 main에 없습니다. 현재 방식은 Chrome Extension + CDP + content script입니다. Playwright 코드를 복원하거나 최종 발행을 자동 실행하지 않습니다.
 
-V3 10장 실검증은 완료입니다. 향후 작업은 approved-only 정책, 작업 선택 race, 업로드 완료/순서 검증 강화, 실행 snapshot/실패 이력, 중간 재개, signed URL 갱신, 비정상 종료 cleanup, 충분한 안정화 후 legacy 제거 검토 순서입니다. 최종 발행/예약 자동화와 결과 기록은 별도 단계입니다.
+V3 10장 실검증은 완료입니다. approved-only 정책은 목록/상세 API와 입력 전 재조회에 구현했습니다. 향후 작업은 승인 후 편집의 재승인 정책, 작업 선택 race, 업로드 완료/순서 검증 강화, 실행 snapshot/실패 이력, 중간 재개, signed URL 갱신, 비정상 종료 cleanup, 충분한 안정화 후 legacy 제거 검토입니다. 최종 발행/예약 자동화와 결과 기록은 별도 단계입니다.

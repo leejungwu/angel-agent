@@ -14,9 +14,14 @@ export function authorizeExtension(request: Request): Response | null {
   return null;
 }
 
+export class ExtensionDraftError extends Error {
+  constructor(message: string, public status: number, public code: string) { super(message); }
+}
+
 export async function getExtensionBlogTask(id: string, draftId?: string) {
   let draftQuery = supabase.from("blog_drafts").select("id,title,intro,sections,closing,status").eq("blog_task_id", id);
   if (draftId) draftQuery = draftQuery.eq("id", draftId);
+  else draftQuery = draftQuery.eq("status", "approved");
   const [task, draftResult, assets] = await Promise.all([
     supabase.from("blog_tasks").select("id").eq("id", id).maybeSingle(),
     draftQuery
@@ -25,8 +30,13 @@ export async function getExtensionBlogTask(id: string, draftId?: string) {
       .order("sort_order", { ascending: true }).order("id", { ascending: true }).returns<BlogTaskAsset[]>(),
   ]);
   if (task.error || draftResult.error || assets.error) throw new Error("발행 준비 자료를 조회하지 못했습니다.");
-  if (!task.data || !draftResult.data) return null;
+  if (!task.data) return null;
+  if (!draftResult.data) {
+    if (draftId) return null;
+    throw new ExtensionDraftError("승인된 초안이 없습니다. 앱에서 초안을 승인한 후 다시 선택하세요.", 409, "NO_APPROVED_DRAFT");
+  }
   const draft = draftResult.data;
+  if (draft.status !== "approved") throw new ExtensionDraftError("승인된 초안만 네이버 입력에 사용할 수 있습니다.", 403, "DRAFT_NOT_APPROVED");
   let sections: unknown = draft.sections;
   if (typeof sections === "string") sections = JSON.parse(sections);
   if (typeof draft.title !== "string" || !draft.title.trim() ||

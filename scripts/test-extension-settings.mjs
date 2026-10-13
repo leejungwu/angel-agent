@@ -14,19 +14,23 @@ const storage = {
   session: { get: async () => ({}), set: async () => {} },
 };
 const settle = () => new Promise((resolve) => setImmediate(resolve));
-async function openPanel(fail = false, selectionTask) {
+async function openPanel(fail = false, selectionTask, options = {}) {
   const elements = new Map();
   const requests = [];
+  let taskRequests = 0;
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, { value: "", textContent: "", hidden: true, listeners: {},
-      addEventListener(event, handler) { this.listeners[event] = handler; }, replaceChildren() {}, add() {} });
+      options: [], addEventListener(event, handler) { this.listeners[event] = handler; }, replaceChildren() { this.options = []; }, add(option) { this.options.push(option); } });
     return elements.get(id);
   };
-  vm.runInNewContext(panelCode, { URL, Option: class {}, document: { getElementById: element }, chrome: {
+  vm.runInNewContext(panelCode, { URL, Option: class { constructor(text, value) { this.text = text; this.value = value; } }, document: { getElementById: element }, chrome: {
     storage, permissions: { request: async () => true },
-    runtime: { sendMessage: async (message) => { requests.push(message); if (message.type === "TASK" && selectionTask) return { task: selectionTask };
+    runtime: { sendMessage: async (message) => { requests.push(message); if (message.type === "TASK" && selectionTask) {
+      taskRequests++;
+      return options.revoke && taskRequests > 1 ? { error: "초안 승인이 취소되었습니다." } : { task: selectionTask };
+    }
       if (message.type === "DIAGNOSE") return { diagnostic: { ready: true, existing: false } };
-      return fail ? { error: "fixture failure" } : { tasks: selectionTask ? [{ id: 1, draftId: 2, title: "제목", status: "approved" }] : [] }; } },
+      return fail ? { error: "fixture failure" } : { tasks: options.tasks ?? (selectionTask ? [{ id: 1, draftId: 2, title: "제목", status: "approved" }] : []) }; } },
   } });
   await settle();
   return { element, requests };
@@ -86,7 +90,8 @@ vm.runInNewContext(backgroundCode, { URL, chrome: {
   authenticated = url.origin === saved.appUrl && options.headers.Authorization === `Bearer ${saved.extensionToken}`;
   return { ok: true, json: async () => ({ tasks: [] }) };
 } });
-const multiPanel = await openPanel(false, { title: "제목", bodyText: "본문", images: [0, 1, 2].map((index) => ({ signedUrl: `https://fixture.test/${index}.png` })) });
+const approvedTask = { id: 1, draftId: 2, status: "approved", title: "제목", bodyText: "본문", images: [0, 1, 2].map((index) => ({ signedUrl: `https://fixture.test/${index}.png` })) };
+const multiPanel = await openPanel(false, approvedTask);
 multiPanel.element("tasks").value = "1";
 multiPanel.element("tasks").listeners.change(); await settle();
 multiPanel.element("insert").listeners.click(); await settle();
@@ -95,6 +100,24 @@ assert.ok(inserted);
 assert.equal("clipboardReady" in inserted, false);
 assert.equal(inserted.task.images.length, 3);
 assert.equal(multiPanel.requests.find((message) => message.type === "TASK").draftId, "2");
+assert.equal(multiPanel.requests.filter((message) => message.type === "TASK").length, 2, "Approval must be rechecked on input click");
+for (const status of ["draft", "rejected"]) {
+  const denied = await openPanel(false, { ...approvedTask, status }, { tasks: [{ id: 1, status }, { id: 2, draftId: 4, title: "승인", status: "approved" }] });
+  assert.deepEqual(denied.element("tasks").options.map((option) => option.value), ["2"]);
+  denied.element("tasks").value = "1";
+  denied.element("tasks").listeners.change(); await settle();
+  assert.equal(denied.element("insert").disabled, true);
+  assert.match(denied.element("result").textContent, /승인된 초안/);
+}
+const empty = await openPanel(false);
+assert.match(empty.element("result").textContent, /승인된 초안이 없습니다/);
+assert.equal(empty.element("insert").disabled, true);
+const revoked = await openPanel(false, approvedTask, { revoke: true });
+revoked.element("tasks").value = "1"; revoked.element("tasks").listeners.change(); await settle();
+revoked.element("insert").listeners.click(); await settle();
+assert.equal(revoked.requests.some((message) => ["DIAGNOSE", "INSERT"].includes(message.type)), false);
+assert.equal(revoked.element("insert").disabled, true);
+assert.match(revoked.element("result").textContent, /승인/);
 const reply = await new Promise((resolve) => listener({ type: "TASKS" }, { id: "fixture" }, resolve));
 assert.equal(reply.error, undefined);
 assert.equal(authenticated, true);

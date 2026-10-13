@@ -19,6 +19,8 @@ const taskAssets = await load("lib/blog-task-assets.ts");
 const downloads = await load("lib/blog-publishing/downloads.ts", { "../blog-task-assets": taskAssets });
 const draft = { id: 2, title: "제목", intro: "도입😀입니다.", sections: [{ heading: "소제목", body: "본문입니다. 다음 내용입니다." }], closing: "마무리입니다.", status: "approved" };
 const assets = [{ id: 1, storage_path: "tasks/1/a.jpg", sort_order: 0 }, { id: 2, storage_path: "tasks/1/b.jpg", sort_order: 1 }];
+const drafts = [draft];
+let signedUrlCalls = 0;
 const supabase = {
   from(table) {
     const filters = new Map();
@@ -26,11 +28,13 @@ const supabase = {
       maybeSingle: async () => {
         if (table === "blog_tasks") return { data: filters.get("id") === "1" ? { id: 1 } : null };
         assert.equal(filters.get("blog_task_id"), "1");
-        return { data: !filters.has("id") || filters.get("id") === String(draft.id) ? draft : null };
+        const matching = drafts.filter((item) => (!filters.has("id") || filters.get("id") === String(item.id)) && (!filters.has("status") || filters.get("status") === item.status));
+        return { data: matching.sort((a, b) => b.id - a.id)[0] ?? null };
       }, returns: async () => ({ data: assets }) };
     return query;
   },
   storage: { from: () => ({ createSignedUrl: async (path, expires) => {
+    signedUrlCalls++;
     assert.equal(expires, 600);
     return { data: { signedUrl: `https://storage.example.invalid/${path}` } };
   } }) },
@@ -91,4 +95,27 @@ for (const [body, images] of [["ABC", [{ index: 0, insertOffset: 4 }]], ["ABC", 
 }
 const sharedBoundary = blockUtils.createBlogExecutionBlocks("AAA\n\nBBB", [{ index: 0, insertOffset: 3 }, { index: 1, insertOffset: 3 }]);
 assert.deepEqual(Array.from(sharedBoundary, (b) => b.type), ["text", "image", "image", "text"]);
+drafts.push({ ...draft, id: 3, status: "draft", title: "미승인 최신 초안" });
+assert.equal((await api.getExtensionBlogTask("1")).draftId, 2, "Newest unapproved draft must not hide the approved draft");
+const callsBeforeRejection = signedUrlCalls;
+let rejected = await route.GET(new Request("http://localhost/api/extension/blog-tasks/1?draftId=3"), { params: Promise.resolve({ id: "1" }) });
+assert.equal(rejected.status, 403);
+assert.equal((await rejected.json()).code, "DRAFT_NOT_APPROVED");
+draft.status = "rejected";
+rejected = await route.GET(new Request("http://localhost/api/extension/blog-tasks/1?draftId=2"), { params: Promise.resolve({ id: "1" }) });
+assert.equal(rejected.status, 403);
+assert.equal((await rejected.json()).blocks, undefined);
+rejected = await route.GET(new Request("http://localhost/api/extension/blog-tasks/1"), { params: Promise.resolve({ id: "1" }) });
+assert.equal(rejected.status, 409);
+assert.equal((await rejected.json()).code, "NO_APPROVED_DRAFT");
+assert.equal(signedUrlCalls, callsBeforeRejection, "Rejected drafts must not produce signed image URLs");
+draft.status = "approved";
+const listRoute = await load("app/api/extension/blog-tasks/route.ts", {
+  "@/lib/blog-publishing/extension-api": { authorizeExtension: () => null },
+  "@/lib/supabase": { supabase: { from() { return { select() { return this; }, eq(key, value) { assert.equal(key, "status"); assert.equal(value, "approved"); this.status = value; return this; }, order() { return this; }, then(resolve) { return Promise.resolve({ data: [
+    { id: 6, blog_task_id: 2, status: "rejected" }, { id: 5, blog_task_id: 1, status: "draft" },
+    { id: 4, blog_task_id: 1, status: "approved" }, { id: 2, blog_task_id: 1, status: "approved" },
+  ].filter((item) => item.status === this.status) }).then(resolve); } }; } } },
+});
+assert.deepEqual((await (await listRoute.GET(new Request("http://localhost/api/extension/blog-tasks"))).json()).tasks.map((item) => item.draftId), [4]);
 console.log("Extension API fixture passed: clean body, planned offsets, unchanged signed URL expiry, separate manual preview.");

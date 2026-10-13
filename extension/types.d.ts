@@ -1,5 +1,5 @@
 type ExtensionTask = {
-  id: string | number; draftId: string | number; title: string; bodyText: string;
+  id: string | number; draftId: string | number; status: string; title: string; bodyText: string;
   images: { id: string | number; index: number; insertOffset: number; insertPrefix: string; signedUrl: string; expiresIn: number }[];
   blocks?: import("../lib/blog-publishing/blocks").BlogExecutionBlock<{ index: number; signedUrl: string }>[];
 };

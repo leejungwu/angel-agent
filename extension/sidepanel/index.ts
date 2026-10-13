@@ -41,12 +41,13 @@
     connection.textContent = "연결 확인 중…";
     try {
       const reply = await request({ type: "TASKS" });
-      for (const task of reply.tasks ?? []) {
+      const approvedTasks = (reply.tasks ?? []).filter((task) => task.status === "approved");
+      for (const task of approvedTasks) {
         tasks.add(new Option(`#${task.id} · ${task.title} (${task.status})`, String(task.id)));
         if (task.draftId !== undefined) taskDraftIds.set(String(task.id), String(task.draftId));
       }
       connected = true; connection.textContent = "Angel Agent 연결됨";
-      result.textContent = "작업을 선택해 주세요."; showSettings(false);
+      result.textContent = approvedTasks.length ? "승인된 초안을 선택해 주세요." : "승인된 초안이 없습니다. 앱에서 승인 후 목록을 새로고침하세요."; showSettings(false);
     } catch {
       connected = false; connection.textContent = "Angel Agent 연결 실패"; showSettings(true);
       throw new Error("연결에 실패했습니다. 주소·토큰·서버 상태를 확인해 주세요.");
@@ -86,7 +87,9 @@
     selected = undefined;
     element("title").textContent = "선택한 글 없음"; element("images").textContent = "이미지 0개";
     if (!tasks.value) { result.textContent = "작업을 선택해 주세요."; return; }
-    const reply = await request({ type: "TASK", id: tasks.value, draftId: taskDraftIds.get(tasks.value) }); selected = reply.task;
+    const reply = await request({ type: "TASK", id: tasks.value, draftId: taskDraftIds.get(tasks.value) });
+    if (!reply.task || reply.task.status !== "approved") throw new Error("승인된 초안만 선택할 수 있습니다.");
+    selected = reply.task;
     element("title").textContent = selected?.title ?? "초안 없음";
     element("images").textContent = `이미지 ${selected?.images.length ?? 0}개`;
     result.textContent = "네이버 글쓰기 탭에서 DOM 진단 후 입력하세요.";
@@ -103,6 +106,12 @@
   insert.addEventListener("click", () => {
     if (busy) return;
     void run(async () => {
+    if (!selected || selected.status !== "approved") throw new Error("승인된 초안을 먼저 선택해 주세요.");
+    // Approval may have been revoked after selection. Recheck the same draft before any editor action.
+    const chosen = selected; selected = undefined;
+    const refreshed = await request({ type: "TASK", id: String(chosen.id), draftId: String(chosen.draftId) });
+    if (!refreshed.task || refreshed.task.status !== "approved") throw new Error("초안 승인이 변경되었습니다. 승인 상태를 확인하세요.");
+    selected = refreshed.task;
     const diagnostic = await diagnose();
     if (diagnostic?.ready !== true) throw new Error(diagnostic?.reason ?? "입력 영역을 확정하지 못했습니다. 프레임별 DOM 진단을 확인해 주세요.");
     const overwrite = !!diagnostic?.existing;

@@ -1,4 +1,4 @@
-import { authorizeExtension, getExtensionBlogTask } from "@/lib/blog-publishing/extension-api";
+import { authorizeExtension, getExtensionBlogTask, ExtensionDraftError } from "@/lib/blog-publishing/extension-api";
 
 export const dynamic = "force-dynamic";
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -11,7 +11,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const task = await getExtensionBlogTask(id, draftId);
     return task ? Response.json(task, { headers: { "Cache-Control": "no-store" } }) : Response.json({ error: "Task 또는 초안이 없습니다." }, { status: 404 });
-  } catch {
+  } catch (error) {
+    if (error instanceof ExtensionDraftError) return Response.json({ error: error.message, code: error.code }, { status: error.status, headers: { "Cache-Control": "no-store" } });
     return Response.json({ error: "초안 형식 또는 사진 접근 권한을 확인해 주세요." }, { status: 500 });
   }
 }

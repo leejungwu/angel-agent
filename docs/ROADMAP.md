@@ -146,7 +146,7 @@ V3는 현재 task의 image block 전부를 순서대로 처리하며 사진 수 
 
 ### Blog Input Technical Debt — Priority Order
 
-1. [ ] Extension에서 approved draft만 사용하도록 승인 정책 통일
+1. [x] Extension에서 approved draft만 사용하도록 승인 정책 통일 — 목록은 작업별 최신 승인 draft, 상세는 명시 draftId도 승인 검사, 입력 클릭 시 같은 draftId 재조회. 코드/fixture 완료이며 실제 Chrome 재검증은 이번 작업에서 수행하지 않음.
 2. [ ] Side Panel 작업 선택 race 수정
 3. [ ] 이미지 업로드 완료 / 순서 검증 강화 — 현재 component 수 증가 검증을 보완
 4. [ ] 실행 snapshot 및 실패 이력 — draft별 사진 snapshot은 현재 없음
@@ -156,7 +156,7 @@ V3는 현재 task의 image block 전부를 순서대로 처리하며 사진 수 
 8. [ ] V3 충분히 안정화 후 legacy 제거 검토 — 10장 성공만으로 즉시 제거하지 않음
 9. [ ] 최종 발행 / 예약 및 발행 결과 기록 — 별도 후속 단계
 
-10장 실제 입력 성공은 완료 사실이다. 위 승인 정책, 검증 강화, 복구 및 이력 항목은 그 성공과 별개인 미완료 기술 부채다.
+10장 실제 입력 성공은 완료 사실이다. 승인 정책 통일은 코드/fixture에서 완료했다. 나머지 검증 강화, 복구 및 이력 항목은 미완료 기술 부채다. 승인 후 편집 시 approved 유지 문제도 별도 후속 작업으로 남는다.
 
 ### Future Intelligence
 
@@ -611,7 +611,7 @@ Fallback: /prepare Copy Text / Download Ordered Photos
 Legacy fallback: Full Body Input + Maximum 3 Images
 ```
 
-승인 workflow는 앱에 있으나 Extension의 approved-only 강제 검사는 아직 미구현이다. VOC / Brand Rule / Product Asset 자동 조회·연결은 현재 Blog 생성/입력 경로에 포함되지 않는다.
+앱 승인 workflow와 Extension의 approved-only 목록/상세 검사 및 입력 직전 재조회가 구현되어 있다. VOC / Brand Rule / Product Asset 자동 조회·연결은 현재 Blog 생성/입력 경로에 포함되지 않는다.
 
 ---
 
@@ -640,7 +640,7 @@ Legacy fallback: Full Body Input + Maximum 3 Images
 - [ ] Important Change Alerts
 - [ ] Human Approval Queue — (partial) Blog 승인 목록만 구현; 전사 승인 큐 미완료.
 - [ ] Draft Approval Queue — (partial) Blog 승인·발행 목록 구현; 범용 승인 큐 미완료.
-- [ ] Approval before Publishing — (partial) 앱 준비 목록은 approved만 표시하나 Extension 목록/상세 API는 approved-only를 강제하지 않음. 승인 정책 통일 필요.
+- [ ] Approval before Publishing — (partial) Blog 앱 준비 목록 및 Extension은 approved만 사용. 명시 draftId 승인 검사와 입력 직전 재조회 구현; 승인 후 편집의 재승인 정책 및 전체 채널 승인 체계는 미완료.
 - [ ] Approval before Ad Changes
 - [ ] Publishing Failure Alerts
 

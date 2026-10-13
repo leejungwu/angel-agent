@@ -6,6 +6,7 @@ export async function GET(request: Request) {
   const denied = authorizeExtension(request);
   if (denied) return denied;
   const { data, error } = await supabase.from("blog_drafts").select("id,blog_task_id,title,status,created_at")
+    .eq("status", "approved")
     .order("created_at", { ascending: false }).order("id", { ascending: false });
   if (error) return Response.json({ error: "Blog Task 목록을 조회하지 못했습니다." }, { status: 500 });
   const seen = new Set<string>();

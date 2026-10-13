@@ -65,7 +65,12 @@ the draft belongs to the task, orders blog_task_assets by sort_order ASC / id AS
 reuses planBlogImages and serializes all photos through createBlogExecutionBlocks.
 Text blocks concatenate to the clean body exactly. Signed URLs expire after 600
 seconds; automatic refresh is not implemented. Images are task-owned, with no
-draft-specific image snapshot. Extension approved-only enforcement is also pending.
+draft-specific image snapshot. The Extension list selects the newest approved draft
+per task, and the detail API rejects explicit draftIds that are not approved (403,
+DRAFT_NOT_APPROVED). Tasks with no approved draft are omitted from the list and
+return 409 / NO_APPROVED_DRAFT on a detail request without draftId. Side Panel
+rechecks the same draftId on input click before editor diagnostics or input.
+Editing an approved draft still retains its status; reapproval after editing is a separate task.
 
 V3 processes text/image blocks from beginning to end without an image-count cap.
 Input.insertText handles text; the temp-image API and DOM.setFileInputFiles handle
