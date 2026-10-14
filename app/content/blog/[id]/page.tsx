@@ -58,6 +58,7 @@ export default async function BlogTaskDetailPage({
   }
 
   let initialDraft: Draft | null = null;
+  let draftHistory: Draft[] = [];
   let draftErrorMessage: string | undefined;
   let assets: BlogTaskAsset[] = [];
   let assetsErrorMessage: string | undefined;
@@ -78,11 +79,10 @@ export default async function BlogTaskDetailPage({
       .eq("blog_task_id", task.id)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-      .returns<Draft>();
+      .returns<Draft[]>();
 
-    initialDraft = data;
+    draftHistory = data ?? [];
+    initialDraft = draftHistory[0] ?? null;
     draftErrorMessage = error?.message;
   }
 
@@ -133,6 +133,7 @@ export default async function BlogTaskDetailPage({
           key={task.id}
           taskId={Number(task.id)}
           initialDraft={initialDraft}
+          initialDrafts={draftHistory}
           initialSettings={task.generation_settings}
         />
       )}

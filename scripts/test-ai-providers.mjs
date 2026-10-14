@@ -65,22 +65,23 @@ const database = {
   from(table) {
     let operation = "read";
     let changes;
+    const filters = {};
     return {
-      select() { return this; }, eq() { return this; }, order() { return this; }, limit() { return this; },
+      select() { return this; }, eq(key, value) { filters[key] = value; return this; }, order() { return this; }, limit() { return this; },
       insert(value) { operation = "insert"; changes = value; return this; },
       update(value) { operation = "update"; changes = value; return this; },
       async maybeSingle() {
         if (operation === "update") {
           if (table === "blog_tasks" && "generation_settings" in changes && failSettingsSave) return { data: null, error: { code: "MOCK_SAVE_FAILED" } };
-          writes.push({ table, changes });
+          writes.push({ table, changes, filters });
           if (table === "blog_tasks" && "generation_settings" in changes) task.generation_settings = JSON.parse(JSON.stringify(changes.generation_settings));
-          return { data: { id: 1 }, error: null };
+          return { data: { id: 1, status: changes.status }, error: null };
         }
         return { data: table === "products" ? product : task, error: null };
       },
       async single() {
-        writes.push({ table, changes });
-        return { data: { id: table.startsWith("kin_") ? "12345678-1234-1234-1234-123456789abc" : 3 }, error: null };
+        writes.push({ table, changes, filters });
+        return { data: { id: table.startsWith("kin_") ? "12345678-1234-1234-1234-123456789abc" : 3, created_at: "2026-10-14T01:02:03.000Z", status: changes?.status }, error: null };
       },
     };
   },
@@ -117,7 +118,7 @@ const GenerateBlogDraft = load("app/content/blog/[id]/GenerateBlogDraft.tsx", {
     useState(initial) {
       const index = hookIndex++;
       if (!(index in hookValues)) hookValues[index] = typeof initial === "function" ? initial() : initial;
-      return [hookValues[index], (value) => { hookValues[index] = value; }];
+      return [hookValues[index], (value) => { hookValues[index] = typeof value === "function" ? value(hookValues[index]) : value; }];
     },
     useRef(value) { return { current: value }; },
   },
@@ -130,9 +131,9 @@ const GenerateBlogDraft = load("app/content/blog/[id]/GenerateBlogDraft.tsx", {
   "@/lib/blog-generation/settings": blogSettings,
   "./GenerationSettingsPanel": { __esModule: true, default: SettingsPanel },
 }).default;
-function renderBlog(initialDraft = null, initialSettings = undefined) {
+function renderBlog(initialDraft = null, initialSettings = undefined, initialDrafts = []) {
   hookIndex = 0;
-  return GenerateBlogDraft({ taskId: 1, initialDraft, initialSettings });
+  return GenerateBlogDraft({ taskId: 1, initialDraft, initialSettings, initialDrafts });
 }
 function nodes(tree) {
   if (!tree || typeof tree !== "object") return [];
@@ -254,19 +255,24 @@ try {
     if (kind === "anthropic") assert.equal(call.request.max_tokens, 12000);
 
     const selectedSettings = { template: "comparison", tone: "formal", targetLength: 2400, sectionCount: 4,
-      mainKeyword: "눈가주름", keywordUsage: { min: 1, max: 3 }, additionalInstructions: "짧은 문장" };
+      mainKeyword: "눈가주름", keywordUsage: { min: 1, max: 3 }, additionalInstructions: "느낌표를 사용해라" };
     writes.length = 0;
     const configured = await route.POST(request({ taskId: 1, provider: kind, settings: selectedSettings }));
     assert.equal(configured.status, 200);
-    assert.deepEqual((await configured.json()).bodyLength, blogBody.checkBlogBodyLength(draft, 2400));
+    const configuredResult = await configured.json();
+    assert.deepEqual(configuredResult.bodyLength, blogBody.checkBlogBodyLength(draft, 2400));
+    assert.equal(configuredResult.createdAt, "2026-10-14T01:02:03.000Z");
     const configuredCall = calls.at(-1).request;
     const configuredInput = JSON.parse(kind === "openai" ? configuredCall.input : configuredCall.messages[kind === "xai" ? 1 : 0].content);
     assert.equal(configuredInput.generationInstructions.template, settingsPrompts.BLOG_TEMPLATE_INSTRUCTIONS.comparison);
     assert.equal(configuredInput.generationInstructions.tone, settingsPrompts.BLOG_TONE_INSTRUCTIONS.formal);
     assert.match(configuredInput.bodyLengthGuide, /2400.*1920~2880/);
-    assert.equal(configuredInput.generationInstructions.additionalInstructions, "짧은 문장");
+    assert.equal(configuredInput.generationInstructions.additionalInstructions, "느낌표를 사용해라");
+    const system = kind === "openai" ? configuredCall.instructions : kind === "anthropic" ? configuredCall.system : configuredCall.messages[0].content;
+    assert.match(system, /구두점.*additionalInstructions.*우선/);
     assert.deepEqual(writes.find((write) => write.table === "blog_drafts").changes, saved, "Settings must not alter Draft persistence");
     assert.equal(task.generation_settings.targetLength, 2400);
+    assert.equal(task.generation_settings.additionalInstructions, "느낌표를 사용해라");
     const restored = await settingsRoute.GET(request({}), { params: Promise.resolve({ id: "1" }) });
     assert.equal((await restored.json()).settings.targetLength, 2400);
     reply = success(kind, draft);
@@ -275,6 +281,7 @@ try {
     const regenerateCall = calls.at(-1).request;
     const regenerateInput = JSON.parse(kind === "openai" ? regenerateCall.input : regenerateCall.messages[kind === "xai" ? 1 : 0].content);
     assert.equal(regenerateInput.generationInstructions.template, settingsPrompts.BLOG_TEMPLATE_INSTRUCTIONS.comparison);
+    assert.equal(regenerateInput.generationInstructions.additionalInstructions, "느낌표를 사용해라");
 
     reply = success(kind, { answer: "실제 질문에 대한 충분한 한국어 답변입니다. ".repeat(15), questionIntent: "질문의 구체적인 의도를 확인합니다.", productMentioned: false });
     const result = await kinProvider.generateKinWithProvider({ provider: kind, systemInstructions: "KIN fixed", input: "{}" });
@@ -332,18 +339,53 @@ try {
   tree = renderBlog();
   panel = nodes(tree).find((node) => node.type === SettingsPanel);
   assert.equal(panel.props.value.targetLength, 2200);
+  nodes(SettingsPanel(panel.props)).find((node) => node.type === "textarea").props.onChange({ target: { value: "느낌표를 사용해라" } });
+  tree = renderBlog();
+  panel = nodes(tree).find((node) => node.type === SettingsPanel);
   const uiFetch = globalThis.fetch;
   let sent;
   try {
     globalThis.fetch = async (url, options) => {
       sent = JSON.parse(options.body);
-      return url.includes("/settings") ? Response.json({ settings: sent.settings }) : Response.json({ ok: true, draftId: 3, draft });
+      return url.includes("/settings") ? Response.json({ settings: sent.settings }) : Response.json({ ok: true, draftId: 3, draft, createdAt: "2026-10-14T02:00:00.000Z", model: "returned-model" });
     };
     await panel.props.onSave();
     assert.equal(sent.settings.targetLength, 2200);
+    assert.equal(sent.settings.additionalInstructions, "느낌표를 사용해라");
     await nodes(tree).find((node) => node.type === "button" && node.props.children === "AI 초안 생성").props.onClick();
     assert.equal(sent.settings.targetLength, 2200);
+    assert.equal(sent.settings.additionalInstructions, "느낌표를 사용해라");
+    tree = renderBlog();
+    assert.ok(nodes(tree).some((node) => node.type === "article"));
+    const generatedPreview = nodes(tree).find((node) => node.type === "article");
+    assert.match(JSON.stringify(generatedPreview), /Draft #.*3/);
+    assert.match(JSON.stringify(generatedPreview), /최신 생성/);
+    assert.match(JSON.stringify(generatedPreview), /이번 세션 생성에 사용한 설정/);
+    assert.match(JSON.stringify(generatedPreview), /returned-model/);
   } finally { globalThis.fetch = uiFetch; }
+  hookValues.length = 0;
+  const older = { ...draft, id: 1, title: "이전 제목", status: "draft", model: "old-model", created_at: "2026-10-13T00:00:00Z" };
+  const newer = { ...draft, id: 2, title: "새 제목", status: "approved", model: "new-model", created_at: "2026-10-14T00:00:00Z" };
+  tree = renderBlog(newer, undefined, [newer, older]);
+  assert.match(JSON.stringify(nodes(tree).find((node) => node.type === "article")), /생성 당시 설정은 기록되지/);
+  const oldItem = nodes(tree).find((node) => node.type === "li" && JSON.stringify(node).includes("이전 제목"));
+  nodes(oldItem).find((node) => node.type === "button").props.onClick();
+  tree = renderBlog(newer, undefined, [newer, older]);
+  assert.match(JSON.stringify(nodes(tree).find((node) => node.type === "article")), /이전 제목/);
+  assert.match(JSON.stringify(nodes(tree).find((node) => node.type === "article")), /이전 생성본 미리보기/);
+  const editing = nodes(tree).find((node) => node.type === "button" && node.props.children === "편집");
+  editing.props.onClick();
+  tree = renderBlog(newer, undefined, [newer, older]);
+  assert.equal(nodes(tree).find((node) => node.type === "input" && node.props.value === "이전 제목").props.value, "이전 제목");
+  assert.ok(nodes(tree).filter((node) => node.type === "button" && node.props.children === "이 생성본 보기").every((node) => node.props.disabled));
+  nodes(tree).find((node) => node.type === "button" && node.props.children === "취소").props.onClick();
+  tree = renderBlog(newer, undefined, [newer, older]);
+  await nodes(tree).find((node) => node.type === "button" && node.props.children === "승인").props.onClick();
+  const approval = writes.findLast((write) => write.table === "blog_drafts");
+  assert.equal(approval.filters.id, 1);
+  assert.equal(approval.filters.blog_task_id, 1);
+  assert.equal(approval.changes.status, "approved");
+  hookValues.length = 0;
   delete task.generation_settings;
   for (const settings of [null, { targetLength: 0 }, { sectionCount: 0 }, { keywordUsage: { min: 4, max: 1 } }, { tone: "bad" }]) {
     const callCount = calls.length;

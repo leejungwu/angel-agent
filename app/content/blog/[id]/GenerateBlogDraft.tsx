@@ -7,7 +7,7 @@ import { supabase } from "@/lib/supabase";
 import type { AIProvider } from "@/lib/ai/provider";
 import { BLOG_BODY_TARGET_CHARS, BLOG_BODY_MIN_CHARS, BLOG_BODY_MAX_CHARS, checkBlogBodyLength } from "@/lib/blog-generation/body";
 import { BLOG_MODEL_OPTIONS, BLOG_DEFAULT_MODELS, resolveBlogModel } from "@/lib/blog-generation/models";
-import { parseBlogGenerationSettings, readStoredBlogGenerationSettings } from "@/lib/blog-generation/settings";
+import { parseBlogGenerationSettings, readStoredBlogGenerationSettings, BLOG_TEMPLATE_OPTIONS, BLOG_TONE_OPTIONS, type BlogGenerationSettings } from "@/lib/blog-generation/settings";
 import GenerationSettingsPanel from "./GenerationSettingsPanel";
 
 export type Draft = {
@@ -20,6 +20,7 @@ export type Draft = {
   model?: string | null;
   provider?: AIProvider;
   created_at?: string | null;
+  generationSettings?: BlogGenerationSettings; // This session only; not a persisted Draft snapshot.
 };
 
 const PROVIDER_LABELS: Record<AIProvider, string> = {
@@ -48,14 +49,21 @@ function isDraft(value: unknown): value is Draft {
     });
 }
 
+function formatCreatedAt(value?: string | null) {
+  if (!value || !Number.isFinite(Date.parse(value))) return "생성일시 확인 불가";
+  return new Date(value).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
 export default function GenerateBlogDraft({
   taskId,
   initialDraft = null,
   initialSettings,
+  initialDrafts = [],
 }: {
   taskId: number;
   initialDraft?: Draft | null;
   initialSettings?: unknown;
+  initialDrafts?: Draft[];
 }) {
   const router = useRouter();
   const [settings, setSettings] = useState(() => readStoredBlogGenerationSettings(initialSettings).settings);
@@ -65,6 +73,7 @@ export default function GenerateBlogDraft({
   const [model, setModel] = useState(() => resolveBlogModel(provider, initialDraft?.model) ?? BLOG_DEFAULT_MODELS[provider]);
   const [generating, setGenerating] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(initialDraft);
+  const [sessionDrafts, setSessionDrafts] = useState<Draft[]>([]);
   const [editingDraft, setEditingDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -73,6 +82,18 @@ export default function GenerateBlogDraft({
   const actualProvider = draft?.provider ?? providerFromModel(draft?.model);
   const visibleDraft = editingDraft ?? draft;
   const bodyLength = visibleDraft ? checkBlogBodyLength(visibleDraft, Number.isFinite(settings.targetLength) ? settings.targetLength : undefined) : null;
+  const historyMap = new Map<string, Draft>();
+  for (const item of [...initialDrafts, ...(initialDraft ? [initialDraft] : []), ...sessionDrafts]) {
+    if (item.id != null) historyMap.set(String(item.id), item);
+  }
+  const history = [...historyMap.values()].sort((a, b) =>
+    (Date.parse(b.created_at ?? "") || 0) - (Date.parse(a.created_at ?? "") || 0) || String(b.id).localeCompare(String(a.id), "en", { numeric: true }));
+  const summarySettings = draft?.generationSettings ?? settings;
+  const controlsBusy = generating || saving || savingSettings || changingStatus || !!editingDraft;
+  function rememberDraft(value: Draft) {
+    setDraft(value);
+    setSessionDrafts((current) => [...current.filter((item) => String(item.id) !== String(value.id)), value]);
+  }
 
   async function saveSettings() {
     if (inFlight.current || editingDraft) return;
@@ -120,9 +141,11 @@ export default function GenerateBlogDraft({
         return;
       }
 
-      setDraft({
+      rememberDraft({
         ...data.draft,
-        id: typeof data.draftId === "number" ? data.draftId : undefined,
+        id: typeof data.draftId === "number" || typeof data.draftId === "string" ? data.draftId : undefined,
+        created_at: typeof data.createdAt === "string" ? data.createdAt : null,
+        generationSettings: validated,
         status: "draft",
         model: typeof data.model === "string" ? data.model : undefined,
         provider: data.provider === "openai" || data.provider === "anthropic" || data.provider === "xai"
@@ -175,7 +198,7 @@ export default function GenerateBlogDraft({
         return;
       }
 
-      setDraft({ ...editingDraft, ...changes });
+      rememberDraft({ ...editingDraft, ...changes });
       setEditingDraft(null);
       setSaved(true);
       router.refresh();
@@ -207,7 +230,7 @@ export default function GenerateBlogDraft({
         return;
       }
 
-      setDraft({ ...draft, status: data.status });
+      rememberDraft({ ...draft, status: data.status });
       router.refresh();
     } catch {
       alert("초안 상태를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요.");
@@ -383,13 +406,13 @@ export default function GenerateBlogDraft({
         {draft?.id && !editingDraft && <Link href={`/content/blog/${taskId}/prepare?draftId=${draft.id}`} className="mt-4 inline-block rounded-lg border px-4 py-2 text-sm">네이버 발행 준비</Link>}
         {draft && !editingDraft && (
           <article className="mt-6 rounded-xl border bg-white p-6">
+            <p className="mb-2 text-sm font-medium">Draft #{draft.id ?? "-"} · {String(draft.id) === String(history[0]?.id) ? "최신 생성" : "이전 생성본 미리보기"}</p>
             <h2 className="text-xl font-bold">{draft.title}</h2>
             <p className="mt-2 text-sm text-zinc-500">
-              상태: {draft.status || "-"} · 제공자: {actualProvider ? PROVIDER_LABELS[actualProvider] : "확인 불가"} · 모델: {draft.model || "-"} · 생성일: {draft.created_at
-                ? new Date(draft.created_at).toLocaleString("ko-KR", {
-                    timeZone: "Asia/Seoul",
-                  })
-                : "-"}
+              상태: {draft.status || "-"} · 제공자: {actualProvider ? PROVIDER_LABELS[actualProvider] : "확인 불가"} · 모델: {draft.model || "-"} · 생성일시: {formatCreatedAt(draft.created_at)}
+            </p>
+            <p className="mt-2 text-sm text-zinc-600">
+              {draft.generationSettings ? "이번 세션 생성에 사용한 설정" : "현재 화면 설정 참고 · 이 생성본의 생성 당시 설정은 기록되지 않았습니다"}: {BLOG_TEMPLATE_OPTIONS.find((item) => item.value === summarySettings.template)?.label} · {BLOG_TONE_OPTIONS.find((item) => item.value === summarySettings.tone)?.label} · 목표 {summarySettings.targetLength}자 · 소제목 {summarySettings.sectionCount}개
             </p>
             <section className="mt-6">
               <h3 className="font-semibold">도입</h3>
@@ -408,6 +431,16 @@ export default function GenerateBlogDraft({
           </article>
         )}
       </div>
+      {history.length > 0 && <section className="mt-6 rounded-xl border bg-white p-5">
+        <h2 className="font-semibold">생성 이력 · 최신순</h2>
+        <p className="mt-2 text-sm text-zinc-500">선택한 생성본을 위에서 미리보고 편집·승인할 수 있습니다. 재생성은 현재 Task의 콘텐츠 설정을 사용합니다.</p>
+        <ol className="mt-4 space-y-3">{history.map((item) => <li key={item.id} className="rounded-lg border p-3">
+          <p className="font-medium">Draft #{item.id} · {item.title} {String(item.id) === String(history[0]?.id) && <span className="text-xs text-blue-700">최신 생성</span>}</p>
+          <p className="mt-1 text-xs text-zinc-500">{formatCreatedAt(item.created_at)} · {item.model || "모델 확인 불가"} · {item.status || "-"}</p>
+          <button type="button" disabled={controlsBusy || String(item.id) === String(draft?.id)} onClick={() => { if (inFlight.current || editingDraft) return; setDraft(item); setSaved(false); }}
+            className="mt-2 rounded-lg border px-3 py-1 text-sm disabled:opacity-50">{String(item.id) === String(draft?.id) ? "현재 미리보기" : "이 생성본 보기"}</button>
+        </li>)}</ol>
+      </section>}
     </div>
   );
 }

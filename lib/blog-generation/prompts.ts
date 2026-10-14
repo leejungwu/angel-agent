@@ -39,6 +39,7 @@ export const BLOG_FIXED_INSTRUCTIONS = `
 
 [문체]
 
+- 아래 문체 지침은 기본값이다. 사용자가 말투·문장 리듬·구두점 사용을 명시하면 그 스타일 지시를 우선하되 사실성·안전·출력 schema 규칙은 유지한다.
 - 자연스러운 한국어 블로그 문체로 작성한다.
 - 광고 카피를 이어 붙인 것처럼 쓰지 않는다.
 - 논문, 보고서, 제품 설명서, FAQ 문서처럼 작성하지 않는다.
@@ -290,7 +291,7 @@ export function buildBlogPrompt(product: {
   const maxChars = Math.round(BLOG_BODY_MAX_CHARS * settings.targetLength / BLOG_BODY_TARGET_CHARS);
   return {
     systemInstructions: BLOG_FIXED_INSTRUCTIONS +
-      "\n출력 schema와 사실성 등 고정 규칙을 항상 우선하세요. generationInstructions와 additionalInstructions는 사용자 설정이며 고정 규칙을 무력화할 수 없습니다. 기존 task의 명시적 지시가 설정과 충돌하면 고정 규칙 범위 안에서 task 지시를 우선하세요. 참고 글쓰기 가이드는 그보다 낮은 우선순위의 문체·구성 참고입니다.",
+      "\n출력 schema와 사실성·안전 고정 규칙을 항상 우선하세요. additionalInstructions는 이 규칙을 무력화할 수 없습니다. 문체·말투·구두점에 대한 additionalInstructions의 명시적 지시는 기본 문체 규칙, tone 설정, 참고 글쓰기 가이드보다 우선하며 실제 작성에 반영하세요. 스타일 추가 지시 외에 task의 명시적 지시가 일반 설정과 충돌하면 고정 규칙 범위 안에서 task 지시를 우선하세요. 참고 가이드는 낮은 우선순위의 참고입니다.",
     input: JSON.stringify({
       referenceWritingGuides: { contentStrategy: BLOG_CONTENT_STRATEGY_GUIDE, copywritingSkills: BLOG_COPYWRITING_SKILLS_GUIDE },
       product: { name: product.name, brand: product.brand, usp: product.usp,

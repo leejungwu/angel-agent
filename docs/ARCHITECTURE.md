@@ -67,6 +67,10 @@ Task + 선택적 Generation Settings → generate API → Settings 검증·기�
 | AI 호출 | `lib/ai/provider.ts` | OpenAI Responses / Anthropic Messages / xAI Chat Completions → outputText/provider/model |
 | 편집·승인 | `[id]/GenerateBlogDraft.tsx` | 기존 draft 수정, draft/approved/rejected 상태 저장 |
 
+Task 상세 page는 같은 blog_task_id의 draft를 최신순으로 조회하고 생성 화면에 이력을 전달한다.
+선택한 이전 draft를 같은 preview에서 편집·승인할 수 있으며, 생성 API는 저장된 created_at을 반환해 새 결과의 ID·시간·모델을 표시한다.
+방금 생성한 draft의 설정 요약은 해당 요청의 세션 내 설정이다. draft별 설정 DB snapshot은 없으므로 재진입/과거 draft에는 생성 당시 설정 기록이 없음을 표시하고 현재 화면 설정을 참고값으로 구분한다.
+
 현재 purpose는 목록에서만 읽는 역사적 필드이며 생성 prompt 입력은 keyword/topic/instructions다.
 참고 Markdown 문서가 자동으로 prompt에 로딩되지는 않고 `prompts.ts`의 상수가 사용된다.
 재생성은 새 draft를 저장한다. draft 저장과 Task 상태 변경은 별도 DB 요청이다.
@@ -76,7 +80,7 @@ Generation Settings는 `blog_tasks.generation_settings` JSONB에 저장한다. `
 잘못된 DB 설정은 화면/설정 GET에서 기본값과 경고를 제공한다. settings 없는 생성은 409로 중단하고, 유효한 화면 설정을 저장/전달하면 복구한다.
 설정 조회·저장에는 `202610140001_blog_task_generation_settings.sql`의 nullable JSONB 컬럼이 필요하다. 기존 행을 일괄 재작성하지 않는다.
 기본 분량은 기존 1,500자(1,200~1,800자 안내)를 유지하고, template은 informational, tone은 natural, 목표 section은 3개다.
-기존 Task 명시적 지시는 고정 규칙 범위 안에서 설정보다 우선한다. mainKeyword가 없으면 keywordUsage는 강제하지 않는다.
+고정 사실성·안전·schema 규칙은 우선한다. 명시적인 스타일 additionalInstructions는 기본 문체·tone·참고 가이드보다 우선하며, 그 외 Task 명시적 지시는 일반 설정보다 우선한다. mainKeyword가 없으면 keywordUsage는 강제하지 않는다.
 template/section/keyword 수는 생성 목표이며 결과의 의미적 준수를 강제 검사하는 schema 확장은 아니다.
 현재 승인된 draft를 편집해도 자동으로 승인이 해제되지는 않는다.
 

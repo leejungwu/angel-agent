@@ -148,7 +148,7 @@ export async function POST(request: Request) {
         status: "draft",
         model: response.model,
       })
-      .select("id")
+      .select("id,created_at")
       .single();
 
     if (draftError || !savedDraft) {
@@ -169,7 +169,7 @@ export async function POST(request: Request) {
       return serverError("초안은 저장되었지만 작업 상태를 변경하지 못했습니다.");
     }
 
-    return Response.json({ ok: true, taskId, draftId: savedDraft.id, draft, bodyLength: checkBlogBodyLength(draft, settings.targetLength), provider: response.provider, model: response.model });
+    return Response.json({ ok: true, taskId, draftId: savedDraft.id, createdAt: savedDraft.created_at, draft, bodyLength: checkBlogBodyLength(draft, settings.targetLength), provider: response.provider, model: response.model });
   } catch (error) {
     if (error instanceof ProviderOutputError) stage = `${provider} output validation: ${error.reason}`;
     logFailure(stage, error);
