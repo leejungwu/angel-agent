@@ -1,491 +1,60 @@
-# ANGEL AGENT
+# Angel Agent
 
-Internal E-commerce AI Operating System for product management, VOC intelligence, advertising, content generation, commerce analytics, automation, and AI agent workflows.
+## 프로젝트 소개
 
-## Features
+Angel Agent는 상품 정보와 고객 리뷰를 콘텐츠 제작·운영에 연결하는 내부 이커머스 운영 도구입니다.
+현재 상품 관리, VOC 분석, AI 블로그 초안과 지식인 답변 생성을 하나의 시스템에서 다룹니다.
+승인된 블로그 글과 사진은 Chrome Extension으로 네이버 에디터에 입력하며, 최종 검수와 발행은 사람이 수행합니다.
 
-### Product & Commerce
+## 주요 기능
 
-- Product Knowledge Base
-- Product CRUD
-- Product Asset Management
-- USP / Target Customer / Customer Problem Management
-- Product Notes
-- Cost / Price / Margin Management
-- Sales / Order / Inventory Analytics
-- ROAS / CPA / CVR Tracking
+- Blog Task 관리와 AI draft 생성 / 재생성 / 편집 / 승인
+- Chrome Extension 기반 Naver 제목·본문·사진 순차 입력
+- Task 사진 업로드·기본 압축, 수동 발행 준비·복사·사진 다운로드
+- CSV/XLSX 리뷰 가져오기와 AI VOC 분석·인사이트 화면
+- KIN 답변 생성, 작성 preset, 품질 경고와 결과 복사
+- 상품 기본 관리, 제품 정보·제품 사진 관리
 
-### AI Blog Content Generator
-
-Current main uses Chrome Extension + CDP + content script for user-started Naver
-editor input. V3 processes all text/image blocks without a photo-count cap; a real
-stored draft with 10 photos, correct text/image order and final body input was
-verified by the user. /prepare remains the manual copy/review fallback, and legacy
-maximum-3-photo input remains selectable. Final review and publishing are manual.
-The former Playwright publisher and publish API are removed. The items marked
-planned below are not current runtime capabilities.
-
-- Product-based Blog Task Creation
-- Keyword / Topic / Per-task Instructions (purpose is a historical field)
-- Product Knowledge Retrieval
-- Structured Blog Draft Generation
-- Title / Introduction / Section / Closing Generation
-- Rule-based Image Placement Guidance (AI suggestions planned)
-- Draft Storage
-- Draft Editing
-- Human Review
-- Approval Status Management
-- Blog Task Photo Asset Integration (separate from product_assets)
-- VOC Integration (planned)
-- Brand Rule Application (planned)
-- Naver Blog Input via Chrome Extension V3
-- Scheduled Publishing (planned; reservation remains manual)
-- Published URL / Result Tracking (planned)
-
-### VOC & Market Intelligence
-
-- CSV / XLSX Review Import
-- Review Database
-- AI VOC Analysis
-- Pain Point Extraction
-- Desire & Purchase Motivation Analysis
-- Customer Language Extraction
-- Objection Analysis
-- Product Improvement Insights
-- FAQ Generation
-- Competitor Product / Ad Monitoring
-- Market Opportunity Analysis
-- Supplier / Sourcing Intelligence
-
-### Advertising Intelligence
-
-- Ad Reference Library
-- Competitor Ad Management
-- Product-to-Ad Reference Mapping
-- Hook / Problem / Desire / Proof / CTA Analysis
-- Ad Structure Analysis
-- Creative Tone Analysis
-- Viral Ad Structure Extraction
-
-### AI Content Generation
-
-- Ad Hook Generation
-- Ad Copy Generation
-- Copy Variations
-- Short-form Video Scripts
-- 15 / 30 / 60 Second Scripts
-- Marketing Video Scripts
-- Threads Content
-- Instagram Content
-- Blog Content
-- Product-based Content Generation
-- Brand Rule Application
-- Content Draft Storage
-- Content Approval Workflow
-
-### AI Detail Page
-
-- Detail Page Strategy
-- Detail Page Structure Generation
-- Section-based Page Planning
-- Hero / Problem / Solution / USP / Benefit / Proof / FAQ / CTA Sections
-- Sales Copy Generation
-- Competitor Gap Analysis
-- Brand Tone Application
-- Image Prompt Generation
-- Product Image Generation
-- React Template Rendering
-- Detail Page Preview
-- AI-assisted Editing
-- SVG / Motion Components
-- GIF / Motion Banner Workflow
-- Figma Integration
-
-### Product Sourcing
-
-- Sourcing Candidate Database
-- Supplier Database
-- Supplier Management
-- Supplier Quote Comparison
-- Cost / MOQ / Lead Time Management
-- Competitor Product Analysis
-- Review Analysis
-- Market Opportunity Analysis
-- AI Product Evaluation
-- Supplier Monitoring
-- Product Research Automation
-
-### Commerce Intelligence
-
-- Sales Dashboard
-- Order Analytics
-- Product Profitability
-- Margin Analysis
-- Inventory Management
-- KPI Monitoring
-- Sales Performance Analysis
-- Period-over-Period Comparison
-- Weekly / Monthly Trends
-
-### Advertising Analytics
-
-- Meta Ads API Integration
-- Google Ads API Integration
-- Account / Campaign / Ad Set / Ad Analytics
-- Creative Analytics
-- Spend / CTR / CVR / CPA / CPR / ROAS
-- Period-over-Period Comparison
-- Weekly / Monthly Trends
-- Creative Thumbnail Dashboard
-- Winning Creative Detection
-- Losing Creative Detection
-- AI Action Plan Recommendation
-- New Hook / Creative Suggestions
-
-### Company Knowledge Base
-
-- Product Documents
-- Supplier Quotes
-- Brand Guidelines
-- Brand Tone Rules
-- Content Writing Rules
-- Historical Ad Creatives
-- Historical Content
-- Sales / Advertising Reports
-- Internal SOP Documents
-- Handover Documents
-- Past Decisions / Project History
-- PDF / XLSX / CSV / Image Import
-- Quote / Contract Data Extraction
-- AI Search across Company Knowledge
-- RAG / Knowledge Retrieval
-
-### Social Intelligence
-
-- Threads Content Collection
-- Viral Content Analysis
-- High-performing Hook Analysis
-- Content Structure Analysis
-- Trend Detection
-- Content Generation
-- Automated Social Publishing
-- Content Performance Tracking
-
-### Data & File Operations
-
-- CSV / XLSX Import
-- PDF Data Extraction
-- Spreadsheet Data Extraction
-- Image Data Extraction
-- Structured Data Mapping
-- MAP Automatic Input
-- Automatic File Classification
-- Bulk File Rename
-- Bulk File Conversion
-- Folder Reorganization
-- Product Image Batch Processing
-- Image Resize
-- Image Compression
-- WebP Conversion
-- File Naming Rules
-
-### Automation & Reporting
-
-- Scheduled Data Collection
-- Cron Jobs
-- Webhooks
-- Background Workflows
-- Sales Data Sync
-- Advertising Data Sync
-- Inventory Sync
-- Review Sync
-- Supplier Monitoring
-- Competitor Monitoring
-- File Processing
-- Inventory Alerts
-- Anomaly Detection
-- Daily Reports
-- Weekly Reports
-- Automated Work Logs
-- Task / Workflow History
-- Content Publishing Queue
-- Publishing Retry Workflow
-
-### Generative Media
-
-#### Image
-
-- Gemini Image Integration
-- Image Prompt Generation
-- Product Image Generation
-- Ad Creative Generation
-- Detail Page Image Generation
-- Blog Image Generation
-
-#### Video
-
-- Kling Integration
-- Veo Integration
-- Seedance Integration
-- Video Prompt Generation
-- Product Video Generation
-- Ad Video Generation
-
-#### Post-processing
-
-- Magnific / Upscaling Workflow
-- Photoshop Workflow
-- CapCut Workflow
-
-### AI Agent
-
-- Natural Language Commands
-- Product Retrieval
-- Product Knowledge Retrieval
-- VOC Analysis
-- Competitor Research
-- Market Research
-- Supplier Comparison
-- Cost / Margin Calculation
-- Ad Search & Analysis
-- Ad Performance Analysis
-- Hook Generation
-- Script Generation
-- Content Generation
-- Blog Generation
-- Detail Page Generation
-- Sales Analysis
-- Inventory Analysis
-- Automated Reporting
-- Content Publishing
-- Tool Selection
-- Tool Calling
-- Multi-step Workflow Execution
-- Structured Output
-- Scheduled Execution
-- Conditional Execution
-- Human Approval for Critical Actions
-- MCP / OpenClaw / Codex / Claude Code Integration
-
-### Prompt & Skill Management
-
-- Prompt Template Library
-- Reusable Agent Skills
-- Prompt / Skill Version Management
-- Product-specific Prompts
-- Brand-specific Rules
-- Blog Writing Rules
-- Content Strategy Rules
-- Workflow Templates
-- Structured Output Schemas
-
-### Notifications & Approval
-
-- Slack Notifications
-- Email Notifications
-- Important Change Alerts
-- Human Approval Queue
-- Draft Approval Queue
-- Approval before Publishing
-- Approval before Ad Changes
-- Publishing Failure Alerts
-
-### External Knowledge Sources
-
-- Google Drive Integration
-- Local / Shared Folder Integration
-- Company Document Sync
-- Automatic Knowledge Base Update
-- Product Asset Sync
-- Brand Document Sync
-
-### Growth & Content Operations
-
-- Revenue Goal Planning
-- Content Calendar
-- Blog Content Calendar
-- Upload Schedule Planning
-- Content Performance Feedback Loop
-- Next Content Recommendation
-- Keyword-based Content Planning
-- Creative Testing Plan
-- A/B Test Management
-
-### System & Access Management
-
-- User Authentication
-- Internal User Roles
-- Permissions
-- Activity / Audit Logs
-- API Credential Management
-- Agent Execution History
-- Automation Execution History
-- Publishing History
-
----
-
-## Architecture
-
-```mermaid
-flowchart TD
-
-    subgraph DATA[Data & Knowledge]
-        P[Product DB]
-        PA[Product Assets]
-        V[VOC / Reviews]
-        A[Ad Library]
-        S[Sourcing]
-        C[Commerce Data]
-        K[Company Knowledge Base]
-        B[Brand Rules / Content Strategy]
-    end
-
-    subgraph INTELLIGENCE[AI Intelligence]
-        AGENT[ANGEL AGENT]
-        BLOG[AI Blog Generator]
-    end
-
-    subgraph OUTPUT[Execution & Generation]
-        CONTENT[Content Generator]
-        DETAIL[Detail Page Generator]
-        SALES[Sales Dashboard]
-        AUTO[Automation]
-        DRAFT[Draft / Approval Workflow]
-    end
-
-    subgraph INFRA[Agent Infrastructure]
-        TOOLS[Tool Calling / MCP]
-        CLIENTS[OpenClaw / Codex / Claude Code]
-    end
-
-    P --> AGENT
-    PA --> AGENT
-    V --> AGENT
-    A --> AGENT
-    S --> AGENT
-    C --> AGENT
-    K --> AGENT
-    B --> AGENT
-
-    AGENT --> CONTENT
-    AGENT --> DETAIL
-    AGENT --> SALES
-    AGENT --> AUTO
-    AGENT --> BLOG
-
-    P --> BLOG
-    PA --> BLOG
-    V --> BLOG
-    B --> BLOG
-
-    BLOG --> DRAFT
-    DRAFT --> AUTO
-
-    AGENT --> TOOLS
-    TOOLS --> CLIENTS
-```
-
----
-
-## AI Blog Workflow
-
-Current Blog workflow. VOC, brand-rule retrieval and product_assets selection are
-future integrations; current photos belong to blog_task_assets.
+## 현재 Blog 흐름
 
 ```text
-Product + Blog Task Instructions
-↓
-AI Blog Generator
-↓
-Structured Draft
-↓
-Draft Storage
-↓
-Human Review
-↓
-Approved
-↓
-Selected draftId + Ordered Blog Task Assets
-↓
-V3 Blocks + Signed URLs + Server Temp Images
-↓
-Chrome Extension + CDP + Content Script
-↓
-Naver Editor Input
-↓
-User Review + Manual Final Publishing
+Task → AI Draft → 편집 / 승인 → Task 이미지
+     → text/image Blocks → Chrome Extension → Naver SmartEditor
 ```
 
-/prepare manual copy/review and legacy maximum-3-photo input remain fallbacks.
-Final publish/reservation automation and published URL/result tracking are planned.
+사용자가 현재 열어둔 네이버 글쓰기 탭을 사용합니다. 최종 발행·예약은 사람이 직접 합니다.
 
----
+## 기술 스택
 
-## Tech Stack
-
-### Application
-
-- Next.js 16
-- React
-- TypeScript
+- Next.js App Router / React / TypeScript
 - Tailwind CSS
+- Supabase PostgreSQL / Storage
+- Chrome Extension Manifest V3 / chrome.debugger / CDP
+- OpenAI / Anthropic Claude / xAI Grok
 
-### Backend & Database
+## 로컬 실행
 
-- Next.js Server Components
-- Server Actions / Route Handlers
-- Supabase
-- PostgreSQL
-- Supabase Auth
-- Supabase Storage
+`.env.local`에 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`와
+사용할 AI의 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` 또는 `XAI_API_KEY`를 설정합니다.
 
-### AI
+```sh
+npm install
+npm run dev
+```
 
-- OpenAI API
-- Anthropic Claude API
-- Google Gemini API
-- Structured Output
-- Tool Calling
-- RAG / Knowledge Retrieval
+Extension 빌드:
 
-### Commerce & Marketing Integrations
+```sh
+npm run build:extension
+```
 
-- Cafe24 API
-- Naver Commerce API
-- Coupang API
-- Meta Marketing API
-- Google Ads API
-- Threads API
+Extension 연결에는 `ANGEL_EXTENSION_TOKEN`도 필요합니다.
+사진 입력은 현재 앱 서버와 Chrome이 같은 PC에서 실행되는 환경을 기준으로 합니다.
+설치·연결 방법은 아래 Extension 문서를 참고하세요.
 
-### Automation
+## Documentation
 
-- Cron Jobs
-- Webhooks
-- Background Workflows
-- Playwright (former Blog path; removed from current main)
-
-### Generative Media
-
-- Gemini Image
-- Kling
-- Veo
-- Seedance
-
-### Agent Infrastructure
-
-- MCP
-- OpenClaw
-- Codex
-- Claude Code
-
-### Infrastructure
-
-- Vercel
-- Git
-- GitHub
-
----
-
-## Roadmap
-
-See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+- [ROADMAP](docs/ROADMAP.md): 전체 기능 지도 / 개발 우선순위 / 계획 / 제외 범위
+- [ARCHITECTURE](docs/ARCHITECTURE.md): 현재 시스템 구조 / 데이터 연결 / 코드 흐름 / 수정 위치
+- [AI_GENERATION](docs/AI_GENERATION.md): AI 콘텐츠 생성 상세
+- [Chrome Extension](extension/README.md): 설치 / 연결 / 입력 방식 상세
