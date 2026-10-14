@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { DEFAULT_BLOG_GENERATION_SETTINGS, parseBlogGenerationSettings, BlogGenerationSettingsError, BLOG_TEMPLATE_OPTIONS, BLOG_TONE_OPTIONS } from "../lib/blog-generation/settings";
+import { DEFAULT_BLOG_GENERATION_SETTINGS, parseBlogGenerationSettings, readStoredBlogGenerationSettings, BlogGenerationSettingsError, BLOG_TEMPLATE_OPTIONS, BLOG_TONE_OPTIONS } from "../lib/blog-generation/settings";
 import { buildBlogGenerationInstructions, BLOG_TEMPLATE_INSTRUCTIONS, BLOG_TONE_INSTRUCTIONS } from "../lib/blog-generation/settings-prompts";
 import { buildBlogPrompt, BLOG_FIXED_INSTRUCTIONS } from "../lib/blog-generation/prompts";
 import { checkBlogBodyLength } from "../lib/blog-generation/body";
 
 assert.deepEqual(parseBlogGenerationSettings(), DEFAULT_BLOG_GENERATION_SETTINGS);
 assert.deepEqual(parseBlogGenerationSettings({}), DEFAULT_BLOG_GENERATION_SETTINGS);
+for (const value of [undefined, null]) assert.deepEqual(readStoredBlogGenerationSettings(value), { settings: parseBlogGenerationSettings(), warning: null });
+assert.equal(readStoredBlogGenerationSettings({ tone: "bad" }).settings.tone, "natural");
+assert.ok(readStoredBlogGenerationSettings({ tone: "bad" }).warning);
 assert.deepEqual(parseBlogGenerationSettings(DEFAULT_BLOG_GENERATION_SETTINGS), DEFAULT_BLOG_GENERATION_SETTINGS);
 const parsed = parseBlogGenerationSettings();
 assert.notEqual(parsed.keywordUsage, DEFAULT_BLOG_GENERATION_SETTINGS.keywordUsage);

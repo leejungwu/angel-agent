@@ -14,6 +14,7 @@ type BlogTask = {
   keyword: string | null;
   topic: string | null;
   instructions: string | null;
+  generation_settings?: unknown;
   status: string | null;
   created_at: string | null;
 };
@@ -31,7 +32,7 @@ export default async function BlogTaskDetailPage({
   const { id } = await params;
   const { data: task, error: taskError } = await supabase
     .from("blog_tasks")
-    .select("id, product_id, keyword, topic, instructions, status, created_at")
+    .select("id, product_id, keyword, topic, instructions, status, created_at, generation_settings")
     .eq("id", id)
     .maybeSingle()
     .returns<BlogTask>();
@@ -132,6 +133,7 @@ export default async function BlogTaskDetailPage({
           key={task.id}
           taskId={Number(task.id)}
           initialDraft={initialDraft}
+          initialSettings={task.generation_settings}
         />
       )}
     </main>

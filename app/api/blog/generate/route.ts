@@ -5,7 +5,7 @@ import { DRAFT_SCHEMA, isDraft } from "@/lib/blog-generation/schema";
 import { buildBlogPrompt } from "@/lib/blog-generation/prompts";
 import { checkBlogBodyLength } from "@/lib/blog-generation/body";
 import { resolveBlogModel } from "@/lib/blog-generation/models";
-import { parseBlogGenerationSettings, BlogGenerationSettingsError } from "@/lib/blog-generation/settings";
+import { parseBlogGenerationSettings, readStoredBlogGenerationSettings, BlogGenerationSettingsError } from "@/lib/blog-generation/settings";
 import { supabase } from "@/lib/supabase";
 
 function serverError(message: string) {
@@ -65,6 +65,7 @@ export async function POST(request: Request) {
   if (model === null) {
     return Response.json({ error: "선택한 provider에서 허용된 model을 지정해 주세요." }, { status: 400 });
   }
+  const hasSettings = typeof body === "object" && body !== null && "settings" in body;
   let settings;
   try {
     settings = parseBlogGenerationSettings(typeof body === "object" && body !== null && "settings" in body ? body.settings : undefined);
@@ -79,7 +80,7 @@ export async function POST(request: Request) {
   try {
     const { data: task, error: taskError } = await supabase
       .from("blog_tasks")
-      .select("id, product_id, keyword, topic, instructions")
+      .select("id, product_id, keyword, topic, instructions, generation_settings")
       .eq("id", taskId)
       .maybeSingle();
 
@@ -89,6 +90,11 @@ export async function POST(request: Request) {
     }
     if (!task) {
       return Response.json({ error: "블로그 작업을 찾을 수 없습니다." }, { status: 404 });
+    }
+    if (!hasSettings) {
+      const stored = readStoredBlogGenerationSettings(task.generation_settings);
+      if (stored.warning) return Response.json({ error: stored.warning }, { status: 409 });
+      settings = stored.settings;
     }
     if (task.product_id == null) {
       return Response.json({ error: "연결된 상품을 찾을 수 없습니다." }, { status: 404 });
@@ -109,6 +115,11 @@ export async function POST(request: Request) {
       return Response.json({ error: "연결된 상품을 찾을 수 없습니다." }, { status: 404 });
     }
 
+    if (hasSettings) {
+      stage = "generation settings save";
+      const { data, error } = await supabase.from("blog_tasks").update({ generation_settings: settings }).eq("id", task.id).select("id").maybeSingle();
+      if (error || !data) return serverError("생성 설정을 저장하지 못했습니다. DB migration 적용 여부를 확인해 주세요.");
+    }
     stage = `${provider} generation`;
     const response = await generateStructuredWithProvider({
       provider, model, schema: DRAFT_SCHEMA, schemaName: "blog_draft",

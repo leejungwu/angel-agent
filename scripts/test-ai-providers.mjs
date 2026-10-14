@@ -60,6 +60,7 @@ function success(kind, value) {
 const task = { id: 1, product_id: 2, keyword: "키워드", topic: "주제", purpose: "목적", instructions: "추가 지시" };
 const product = { id: 2, name: "윗잠베개", brand: "브랜드", usp: "USP", target_customer: "대상", customer_problem: "문제", notes: "메모" };
 const writes = [];
+let failSettingsSave = false;
 const database = {
   from(table) {
     let operation = "read";
@@ -69,7 +70,12 @@ const database = {
       insert(value) { operation = "insert"; changes = value; return this; },
       update(value) { operation = "update"; changes = value; return this; },
       async maybeSingle() {
-        if (operation === "update") { writes.push({ table, changes }); return { data: { id: 1 }, error: null }; }
+        if (operation === "update") {
+          if (table === "blog_tasks" && "generation_settings" in changes && failSettingsSave) return { data: null, error: { code: "MOCK_SAVE_FAILED" } };
+          writes.push({ table, changes });
+          if (table === "blog_tasks" && "generation_settings" in changes) task.generation_settings = JSON.parse(JSON.stringify(changes.generation_settings));
+          return { data: { id: 1 }, error: null };
+        }
         return { data: table === "products" ? product : task, error: null };
       },
       async single() {
@@ -100,6 +106,12 @@ const previousKeys = keyNames.map((name) => process.env[name]);
 const hookValues = [];
 let hookIndex = 0;
 const jsx = (type, props) => ({ type, props });
+const SettingsPanel = load("app/content/blog/[id]/GenerationSettingsPanel.tsx", {
+  "react/jsx-runtime": { jsx, jsxs: jsx }, "@/lib/blog-generation/settings": blogSettings,
+}).default;
+const settingsRoute = load("app/api/blog/tasks/[id]/settings/route.ts", {
+  "@/lib/supabase": { supabase: database }, "@/lib/blog-generation/settings": blogSettings,
+});
 const GenerateBlogDraft = load("app/content/blog/[id]/GenerateBlogDraft.tsx", {
   react: {
     useState(initial) {
@@ -115,10 +127,12 @@ const GenerateBlogDraft = load("app/content/blog/[id]/GenerateBlogDraft.tsx", {
   "@/lib/supabase": { supabase: database },
   "@/lib/blog-generation/body": blogBody,
   "@/lib/blog-generation/models": blogModels,
+  "@/lib/blog-generation/settings": blogSettings,
+  "./GenerationSettingsPanel": { __esModule: true, default: SettingsPanel },
 }).default;
-function renderBlog(initialDraft = null) {
+function renderBlog(initialDraft = null, initialSettings = undefined) {
   hookIndex = 0;
-  return GenerateBlogDraft({ taskId: 1, initialDraft });
+  return GenerateBlogDraft({ taskId: 1, initialDraft, initialSettings });
 }
 function nodes(tree) {
   if (!tree || typeof tree !== "object") return [];
@@ -160,7 +174,7 @@ try {
       return Response.json({ ok: true, draftId: 3, draft, provider: "openai", model: "gpt-6-astra" });
     };
     await nodes(tree).find((node) => node.type === "button" && node.props.children === "AI 초안 생성").props.onClick();
-    assert.deepEqual(generationRequest, { taskId: 1, provider: "openai", model: "gpt-6-astra" });
+    assert.deepEqual(generationRequest, { taskId: 1, provider: "openai", model: "gpt-6-astra", settings: JSON.parse(JSON.stringify(blogSettings.parseBlogGenerationSettings())) });
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -208,6 +222,7 @@ try {
   assert.ok(prompts.BLOG_CONTENT_STRATEGY_GUIDE.trim());
   assert.ok(prompts.BLOG_COPYWRITING_SKILLS_GUIDE.trim());
   for (const kind of ["openai", "anthropic", "xai"]) {
+    delete task.generation_settings;
     writes.length = 0;
     reply = success(kind, draft);
     const response = await route.POST(request({ taskId: 1, provider: kind }));
@@ -251,6 +266,15 @@ try {
     assert.match(configuredInput.bodyLengthGuide, /2400.*1920~2880/);
     assert.equal(configuredInput.generationInstructions.additionalInstructions, "짧은 문장");
     assert.deepEqual(writes.find((write) => write.table === "blog_drafts").changes, saved, "Settings must not alter Draft persistence");
+    assert.equal(task.generation_settings.targetLength, 2400);
+    const restored = await settingsRoute.GET(request({}), { params: Promise.resolve({ id: "1" }) });
+    assert.equal((await restored.json()).settings.targetLength, 2400);
+    reply = success(kind, draft);
+    const regenerated = await route.POST(request({ taskId: 1, provider: kind }));
+    assert.equal(regenerated.status, 200);
+    const regenerateCall = calls.at(-1).request;
+    const regenerateInput = JSON.parse(kind === "openai" ? regenerateCall.input : regenerateCall.messages[kind === "xai" ? 1 : 0].content);
+    assert.equal(regenerateInput.generationInstructions.template, settingsPrompts.BLOG_TEMPLATE_INSTRUCTIONS.comparison);
 
     reply = success(kind, { answer: "실제 질문에 대한 충분한 한국어 답변입니다. ".repeat(15), questionIntent: "질문의 구체적인 의도를 확인합니다.", productMentioned: false });
     const result = await kinProvider.generateKinWithProvider({ provider: kind, systemInstructions: "KIN fixed", input: "{}" });
@@ -282,6 +306,45 @@ try {
     assert.equal((await route.POST(request({ taskId: 1, provider: kind }))).status, 500);
     assert.equal(writes.length, 0);
   }
+  reply = success("openai", draft);
+  failSettingsSave = true;
+  const beforeSaveFailure = calls.length;
+  assert.equal((await route.POST(request({ taskId: 1, settings: { tone: "polite" } }))).status, 500);
+  assert.equal(calls.length, beforeSaveFailure, "Settings save failure must prevent AI generation");
+  failSettingsSave = false;
+  task.generation_settings = { tone: "bad" };
+  const invalidStored = await settingsRoute.GET(request({}), { params: Promise.resolve({ id: "1" }) });
+  assert.ok((await invalidStored.json()).warning);
+  assert.equal((await route.POST(request({ taskId: 1 }))).status, 409);
+  const patch = await settingsRoute.PATCH(request({ settings: { tone: "formal" } }), { params: Promise.resolve({ id: "1" }) });
+  assert.equal(patch.status, 200);
+  assert.equal(task.generation_settings.tone, "formal");
+  assert.equal((await (await settingsRoute.GET(request({}), { params: Promise.resolve({ id: "1" }) })).json()).settings.tone, "formal");
+  const badPatch = await settingsRoute.PATCH(request({ settings: { targetLength: 0 } }), { params: Promise.resolve({ id: "1" }) });
+  assert.equal(badPatch.status, 400);
+  assert.equal(task.generation_settings.tone, "formal");
+  hookValues.length = 0;
+  tree = renderBlog(null, task.generation_settings);
+  let panel = nodes(tree).find((node) => node.type === SettingsPanel);
+  assert.equal(panel.props.value.tone, "formal");
+  const panelTree = SettingsPanel(panel.props);
+  nodes(panelTree).find((node) => node.type === "input" && node.props.type === "number" && node.props.value === 1500).props.onChange({ target: { valueAsNumber: 2200 } });
+  tree = renderBlog();
+  panel = nodes(tree).find((node) => node.type === SettingsPanel);
+  assert.equal(panel.props.value.targetLength, 2200);
+  const uiFetch = globalThis.fetch;
+  let sent;
+  try {
+    globalThis.fetch = async (url, options) => {
+      sent = JSON.parse(options.body);
+      return url.includes("/settings") ? Response.json({ settings: sent.settings }) : Response.json({ ok: true, draftId: 3, draft });
+    };
+    await panel.props.onSave();
+    assert.equal(sent.settings.targetLength, 2200);
+    await nodes(tree).find((node) => node.type === "button" && node.props.children === "AI 초안 생성").props.onClick();
+    assert.equal(sent.settings.targetLength, 2200);
+  } finally { globalThis.fetch = uiFetch; }
+  delete task.generation_settings;
   for (const settings of [null, { targetLength: 0 }, { sectionCount: 0 }, { keywordUsage: { min: 4, max: 1 } }, { tone: "bad" }]) {
     const callCount = calls.length;
     writes.length = 0;

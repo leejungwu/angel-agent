@@ -43,6 +43,15 @@ export class BlogGenerationSettingsError extends Error {
   }
 }
 
+export function readStoredBlogGenerationSettings(value: unknown) {
+  if (value == null) return { settings: parseBlogGenerationSettings(), warning: null };
+  try { return { settings: parseBlogGenerationSettings(value), warning: null }; }
+  catch (error) {
+    if (!(error instanceof BlogGenerationSettingsError)) throw error;
+    return { settings: parseBlogGenerationSettings(), warning: "저장된 콘텐츠 설정이 올바르지 않아 기본값을 표시합니다. 설정을 확인한 후 저장하거나 생성해 주세요." };
+  }
+}
+
 /** Omitted fields use defaults. User values are never silently coerced. */
 export function parseBlogGenerationSettings(value: unknown = undefined): BlogGenerationSettings {
   if (value !== undefined && (!value || typeof value !== "object" || Array.isArray(value))) throw new BlogGenerationSettingsError("settings");

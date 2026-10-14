@@ -57,7 +57,7 @@ Task + 선택적 Generation Settings → generate API → Settings 검증·기�
 | 단계 | 핵심 코드 | 입력 / 결과 |
 |---|---|---|
 | Task 생성·수정 | `app/content/blog/new/page.tsx`, `[id]/EditBlogTask.tsx` | 제품과 keyword/topic/instructions 저장 |
-| 요청 UI | `[id]/GenerateBlogDraft.tsx` | taskId/provider/model을 `/api/blog/generate`에 전송 |
+| 요청 UI | `[id]/GenerateBlogDraft.tsx`, `GenerationSettingsPanel.tsx` | DB 설정을 복원하고 taskId/provider/model/settings를 `/api/blog/generate`에 전송 |
 | 생성·저장 | `app/api/blog/generate/route.ts` | Task·제품 조회, AI 호출, 결과 검증, draft 저장, Task를 generated로 갱신 |
 | 작성 규칙 | `lib/blog-generation/prompts.ts` | 고정 규칙 / 참고 글쓰기 가이드 / 작업별 지시 / 제품 사실 분리 |
 | 생성 설정 | `lib/blog-generation/settings.ts` | template/tone/분량/section 수/keyword/제품 노출/CTA/추가 지시의 stable key·표시명·검증·기본값 |
@@ -70,7 +70,11 @@ Task + 선택적 Generation Settings → generate API → Settings 검증·기�
 현재 purpose는 목록에서만 읽는 역사적 필드이며 생성 prompt 입력은 keyword/topic/instructions다.
 참고 Markdown 문서가 자동으로 prompt에 로딩되지는 않고 `prompts.ts`의 상수가 사용된다.
 재생성은 새 draft를 저장한다. draft 저장과 Task 상태 변경은 별도 DB 요청이다.
-generate API의 선택적 `settings`는 요청에만 적용되며 DB에 저장하지 않는다. 미전달/부분 전달은 기본값으로 보완한다.
+Generation Settings는 `blog_tasks.generation_settings` JSONB에 저장한다. `GenerationSettingsPanel.tsx`는 접이식 설정 화면이며 명시적 저장은 `/api/blog/tasks/[id]/settings` PATCH를 사용한다.
+생성 버튼은 화면의 최신 settings를 전달하고 generate API가 AI 호출 전에 Task에 저장한다. settings를 생략한 재생성은 현재 DB 설정을 사용하며 null/누락은 기본값으로 보완한다.
+새 draft는 해당 Task의 현재 설정으로 생성한다. 기존 draft 내용은 변경하지 않으며 draft별 설정 snapshot은 저장하지 않는다.
+잘못된 DB 설정은 화면/설정 GET에서 기본값과 경고를 제공한다. settings 없는 생성은 409로 중단하고, 유효한 화면 설정을 저장/전달하면 복구한다.
+설정 조회·저장에는 `202610140001_blog_task_generation_settings.sql`의 nullable JSONB 컬럼이 필요하다. 기존 행을 일괄 재작성하지 않는다.
 기본 분량은 기존 1,500자(1,200~1,800자 안내)를 유지하고, template은 informational, tone은 natural, 목표 section은 3개다.
 기존 Task 명시적 지시는 고정 규칙 범위 안에서 설정보다 우선한다. mainKeyword가 없으면 keywordUsage는 강제하지 않는다.
 template/section/keyword 수는 생성 목표이며 결과의 의미적 준수를 강제 검사하는 schema 확장은 아니다.
@@ -169,7 +173,7 @@ kin_prompt_presets → 새 KIN Task 생성 시 snapshot으로 복사
 | 데이터 | 역할 |
 |---|---|
 | `products` / `product_assets` | 상품 사실과 제품 사진. Blog Task 사진과 별개 |
-| `blog_tasks` | 제품에 연결된 생성 조건. 같은 Task에서 여러 draft 생성 가능 |
+| `blog_tasks` | 제품에 연결된 생성 조건과 generation_settings JSONB. 같은 Task에서 여러 draft 생성 가능 |
 | `blog_drafts` | 제목·intro·sections·closing·검수 상태·model. Extension은 approved만 사용 |
 | `blog_task_assets` | Task 사진 경로·파일명·sort_order. 실제 bytes는 Storage에 저장 |
 | `reviews` / `review_import_batches` | 제품 리뷰와 가져오기 결과/상태 |
@@ -220,6 +224,7 @@ KIN의 schema·고정/스타일 지시는 `lib/kin/generate.ts`에 있으며, �
 | Blog 모델·분량 | `lib/blog-generation/models.ts`, `body.ts` |
 | Blog 생성·저장 | `app/api/blog/generate/route.ts` |
 | Task 조건·draft 편집/승인 | `app/content/blog/new/page.tsx`, `[id]/EditBlogTask.tsx`, `[id]/GenerateBlogDraft.tsx` |
+| Task 콘텐츠 설정 화면·저장 | `app/content/blog/[id]/GenerationSettingsPanel.tsx`, `app/api/blog/tasks/[id]/settings/route.ts` |
 | 사진 위치 정책 | `lib/blog-publishing/image-layout.ts` |
 | 본문 조립·사진 offset·수동 마커 | `lib/blog-publishing/preparation.ts` |
 | 실행 Block 계약 | `lib/blog-publishing/blocks.ts` |
