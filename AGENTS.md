@@ -535,3 +535,30 @@ Examples:
 Add a unique suffix only when multiple concurrent tasks could collide.
 
 Do not create unnecessarily complex branch names for normal sequential work.
+
+## Documentation Maintenance
+
+모든 작업 종료 전에 `docs/ROADMAP.md`와 `docs/ARCHITECTURE.md`의 갱신 필요 여부를 판단한다.
+
+`ROADMAP.md`는 다음 경우에만 갱신한다:
+
+- 큰 기능이 완료됨
+- 개발 우선순위가 변경됨
+- 큰 기능이 새로 추가되거나 제외됨
+
+ROADMAP에는 테스트 로그, 커밋 기록, 긴 구현 상세, 과거 개발 일지를 넣지 않는다.
+
+`ARCHITECTURE.md`는 다음이 실제로 바뀐 경우에만 갱신한다:
+
+- 주요 실행 흐름
+- 데이터 모델
+- 모듈 책임
+- 핵심 파일 역할
+
+단순 버그 수정, 내부 리팩터링, CSS/문구 변경 등 구조가 같으면 ARCHITECTURE를 수정하지 않는다.
+
+두 문서는 항상 짧게 유지한다. 새 내용을 계속 덧붙여 길게 만들지 말고,
+기존 설명을 현재 상태로 교체하거나 압축한다. 과거 변경 이력은 Git history가 담당한다.
+
+사용자가 별도로 문서 업데이트를 요청하지 않아도 위 조건에 해당하면 같은 작업에서 문서를 함께 갱신한다.
+검증된 문제 해결 지식이 필요하면 별도 사용/기술 안내 문서에 보존하고, 두 문서를 개발 일지로 사용하지 않는다.
