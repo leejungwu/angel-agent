@@ -49,7 +49,8 @@ Extension은 웹 앱이 새 Chrome을 띄우는 방식이 아니라, 사용자�
 ## Blog 생성 흐름
 
 ```text
-Task → generate API → prompts / schema / models → 공통 provider → AI
+Task + 선택적 Generation Settings → generate API → Settings 검증·기본값
+     → settings-prompts / prompts / schema / models → 공통 provider → AI
      → 응답 JSON 검사 → blog_drafts 저장 → Task 상태 갱신 → 편집 → 승인
 ```
 
@@ -59,6 +60,8 @@ Task → generate API → prompts / schema / models → 공통 provider → AI
 | 요청 UI | `[id]/GenerateBlogDraft.tsx` | taskId/provider/model을 `/api/blog/generate`에 전송 |
 | 생성·저장 | `app/api/blog/generate/route.ts` | Task·제품 조회, AI 호출, 결과 검증, draft 저장, Task를 generated로 갱신 |
 | 작성 규칙 | `lib/blog-generation/prompts.ts` | 고정 규칙 / 참고 글쓰기 가이드 / 작업별 지시 / 제품 사실 분리 |
+| 생성 설정 | `lib/blog-generation/settings.ts` | template/tone/분량/section 수/keyword/제품 노출/CTA/추가 지시의 stable key·표시명·검증·기본값 |
+| 설정 변환 | `lib/blog-generation/settings-prompts.ts` | template skeleton과 설정을 사용자 계층의 안내문으로 변환. 고정 사실성 규칙·출력 schema보다 우선하지 않음 |
 | 출력 계약 | `lib/blog-generation/schema.ts` | title/intro/sections/closing과 section imageAssetId=null |
 | 모델·분량 | `models.ts`, `body.ts` (같은 폴더) | 모델 허용 목록·기본값, 제목/줄바꿈 제외 본문 분량 안내 |
 | AI 호출 | `lib/ai/provider.ts` | OpenAI Responses / Anthropic Messages / xAI Chat Completions → outputText/provider/model |
@@ -67,6 +70,10 @@ Task → generate API → prompts / schema / models → 공통 provider → AI
 현재 purpose는 목록에서만 읽는 역사적 필드이며 생성 prompt 입력은 keyword/topic/instructions다.
 참고 Markdown 문서가 자동으로 prompt에 로딩되지는 않고 `prompts.ts`의 상수가 사용된다.
 재생성은 새 draft를 저장한다. draft 저장과 Task 상태 변경은 별도 DB 요청이다.
+generate API의 선택적 `settings`는 요청에만 적용되며 DB에 저장하지 않는다. 미전달/부분 전달은 기본값으로 보완한다.
+기본 분량은 기존 1,500자(1,200~1,800자 안내)를 유지하고, template은 informational, tone은 natural, 목표 section은 3개다.
+기존 Task 명시적 지시는 고정 규칙 범위 안에서 설정보다 우선한다. mainKeyword가 없으면 keywordUsage는 강제하지 않는다.
+template/section/keyword 수는 생성 목표이며 결과의 의미적 준수를 강제 검사하는 schema 확장은 아니다.
 현재 승인된 draft를 편집해도 자동으로 승인이 해제되지는 않는다.
 
 ## Blog 이미지 흐름
@@ -207,6 +214,7 @@ KIN의 schema·고정/스타일 지시는 `lib/kin/generate.ts`에 있으며, �
 | 변경할 것 | 먼저 볼 파일 |
 |---|---|
 | 글쓰기 규칙·문체 | `lib/blog-generation/prompts.ts` |
+| 생성 설정 모델·범위·기본값 / template·tone 안내 | `lib/blog-generation/settings.ts`, `settings-prompts.ts` |
 | AI 응답 구조 | `lib/blog-generation/schema.ts` |
 | AI provider transport | `lib/ai/provider.ts` (Blog/KIN 공통) |
 | Blog 모델·분량 | `lib/blog-generation/models.ts`, `body.ts` |

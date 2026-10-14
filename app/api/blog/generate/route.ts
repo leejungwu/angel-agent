@@ -5,6 +5,7 @@ import { DRAFT_SCHEMA, isDraft } from "@/lib/blog-generation/schema";
 import { buildBlogPrompt } from "@/lib/blog-generation/prompts";
 import { checkBlogBodyLength } from "@/lib/blog-generation/body";
 import { resolveBlogModel } from "@/lib/blog-generation/models";
+import { parseBlogGenerationSettings, BlogGenerationSettingsError } from "@/lib/blog-generation/settings";
 import { supabase } from "@/lib/supabase";
 
 function serverError(message: string) {
@@ -64,6 +65,13 @@ export async function POST(request: Request) {
   if (model === null) {
     return Response.json({ error: "선택한 provider에서 허용된 model을 지정해 주세요." }, { status: 400 });
   }
+  let settings;
+  try {
+    settings = parseBlogGenerationSettings(typeof body === "object" && body !== null && "settings" in body ? body.settings : undefined);
+  } catch (error) {
+    if (error instanceof BlogGenerationSettingsError) return Response.json({ error: error.message }, { status: 400 });
+    throw error;
+  }
   const missingKey = missingProviderKey(provider);
   if (missingKey) return serverError(`${missingKey} 환경변수가 설정되지 않았습니다.`);
 
@@ -104,7 +112,7 @@ export async function POST(request: Request) {
     stage = `${provider} generation`;
     const response = await generateStructuredWithProvider({
       provider, model, schema: DRAFT_SCHEMA, schemaName: "blog_draft",
-      ...buildBlogPrompt(product, task),
+      ...buildBlogPrompt(product, task, settings),
       ...(provider !== "openai" ? { maxOutputTokens: 12000 } : {}),
       ...(provider === "xai" ? { reasoningEffort: "low" as const } : {}),
     });
@@ -150,7 +158,7 @@ export async function POST(request: Request) {
       return serverError("초안은 저장되었지만 작업 상태를 변경하지 못했습니다.");
     }
 
-    return Response.json({ ok: true, taskId, draftId: savedDraft.id, draft, bodyLength: checkBlogBodyLength(draft), provider: response.provider, model: response.model });
+    return Response.json({ ok: true, taskId, draftId: savedDraft.id, draft, bodyLength: checkBlogBodyLength(draft, settings.targetLength), provider: response.provider, model: response.model });
   } catch (error) {
     if (error instanceof ProviderOutputError) stage = `${provider} output validation: ${error.reason}`;
     logFailure(stage, error);

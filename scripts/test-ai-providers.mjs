@@ -43,7 +43,9 @@ const provider = load("lib/ai/provider.ts", sdkMocks);
 const schema = load("lib/blog-generation/schema.ts");
 const blogBody = load("lib/blog-generation/body.ts");
 const blogModels = load("lib/blog-generation/models.ts");
-const prompts = load("lib/blog-generation/prompts.ts", { "./body": blogBody });
+const blogSettings = load("lib/blog-generation/settings.ts", { "./body": blogBody });
+const settingsPrompts = load("lib/blog-generation/settings-prompts.ts");
+const prompts = load("lib/blog-generation/prompts.ts", { "./body": blogBody, "./settings": blogSettings, "./settings-prompts": settingsPrompts });
 const kin = load("lib/kin/generate.ts");
 const presets = load("lib/kin/presets.ts");
 const quality = load("lib/kin/quality-check.ts");
@@ -82,6 +84,7 @@ const route = load("app/api/blog/generate/route.ts", {
   "@/lib/blog-generation/prompts": prompts, "@/lib/supabase": { supabase: database },
   "@/lib/blog-generation/body": blogBody,
   "@/lib/blog-generation/models": blogModels,
+  "@/lib/blog-generation/settings": blogSettings,
 });
 const kinRoute = load("app/api/kin/generate/route.ts", {
   ...sdkMocks, "@/lib/kin/provider": kinProvider, "@/lib/kin/generate": kin,
@@ -235,6 +238,20 @@ try {
     if (kind === "xai") assert.equal(call.options.baseURL, "https://api.x.ai/v1");
     if (kind === "anthropic") assert.equal(call.request.max_tokens, 12000);
 
+    const selectedSettings = { template: "comparison", tone: "formal", targetLength: 2400, sectionCount: 4,
+      mainKeyword: "눈가주름", keywordUsage: { min: 1, max: 3 }, additionalInstructions: "짧은 문장" };
+    writes.length = 0;
+    const configured = await route.POST(request({ taskId: 1, provider: kind, settings: selectedSettings }));
+    assert.equal(configured.status, 200);
+    assert.deepEqual((await configured.json()).bodyLength, blogBody.checkBlogBodyLength(draft, 2400));
+    const configuredCall = calls.at(-1).request;
+    const configuredInput = JSON.parse(kind === "openai" ? configuredCall.input : configuredCall.messages[kind === "xai" ? 1 : 0].content);
+    assert.equal(configuredInput.generationInstructions.template, settingsPrompts.BLOG_TEMPLATE_INSTRUCTIONS.comparison);
+    assert.equal(configuredInput.generationInstructions.tone, settingsPrompts.BLOG_TONE_INSTRUCTIONS.formal);
+    assert.match(configuredInput.bodyLengthGuide, /2400.*1920~2880/);
+    assert.equal(configuredInput.generationInstructions.additionalInstructions, "짧은 문장");
+    assert.deepEqual(writes.find((write) => write.table === "blog_drafts").changes, saved, "Settings must not alter Draft persistence");
+
     reply = success(kind, { answer: "실제 질문에 대한 충분한 한국어 답변입니다. ".repeat(15), questionIntent: "질문의 구체적인 의도를 확인합니다.", productMentioned: false });
     const result = await kinProvider.generateKinWithProvider({ provider: kind, systemInstructions: "KIN fixed", input: "{}" });
     assert.ok(kin.isKinAnswer(JSON.parse(result.outputText)));
@@ -263,6 +280,13 @@ try {
     if (kind === "xai") reply.choices[0].message.refusal = "refused";
     writes.length = 0;
     assert.equal((await route.POST(request({ taskId: 1, provider: kind }))).status, 500);
+    assert.equal(writes.length, 0);
+  }
+  for (const settings of [null, { targetLength: 0 }, { sectionCount: 0 }, { keywordUsage: { min: 4, max: 1 } }, { tone: "bad" }]) {
+    const callCount = calls.length;
+    writes.length = 0;
+    assert.equal((await route.POST(request({ taskId: 1, settings }))).status, 400);
+    assert.equal(calls.length, callCount);
     assert.equal(writes.length, 0);
   }
   for (const kind of ["openai", "anthropic", "xai"]) {

@@ -1,4 +1,6 @@
 import { BLOG_BODY_TARGET_CHARS, BLOG_BODY_MIN_CHARS, BLOG_BODY_MAX_CHARS } from "./body";
+import { parseBlogGenerationSettings, type BlogGenerationSettings } from "./settings";
+import { buildBlogGenerationInstructions } from "./settings-prompts";
 
 export const BLOG_FIXED_INSTRUCTIONS = `
 당신은 한국어 네이버 블로그 콘텐츠를 작성하는 전문 작가다.
@@ -66,8 +68,8 @@ export const BLOG_FIXED_INSTRUCTIONS = `
 
 [분량]
 
-- 제목을 제외한 본문은 약 ${BLOG_BODY_TARGET_CHARS}자를 목표로 한다.
-- 가능한 한 ${BLOG_BODY_MIN_CHARS}자 이상 ${BLOG_BODY_MAX_CHARS}자 이하로 작성한다.
+- 제목을 제외한 본문 분량은 작업의 명시적 분량 지시와 generation settings의 목표를 따른다.
+- 별도 설정이 없으면 약 ${BLOG_BODY_TARGET_CHARS}자(${BLOG_BODY_MIN_CHARS}~${BLOG_BODY_MAX_CHARS}자)를 기본으로 한다.
 - 분량을 채우기 위해 같은 의미를 반복하거나 불필요한 문장을 추가하지 않는다.
 
 가장 중요한 원칙은
@@ -282,16 +284,20 @@ export function buildBlogPrompt(product: {
   target_customer: string | null; customer_problem: string | null; notes: string | null;
 }, task: {
   keyword: string | null; topic: string | null; instructions: string | null;
-}) {
+}, requestedSettings?: BlogGenerationSettings) {
+  const settings = parseBlogGenerationSettings(requestedSettings);
+  const minChars = Math.round(BLOG_BODY_MIN_CHARS * settings.targetLength / BLOG_BODY_TARGET_CHARS);
+  const maxChars = Math.round(BLOG_BODY_MAX_CHARS * settings.targetLength / BLOG_BODY_TARGET_CHARS);
   return {
     systemInstructions: BLOG_FIXED_INSTRUCTIONS +
-      "\n참고 글쓰기 가이드는 문체와 구성 참고용입니다. 고정 규칙 및 task별 명시적 지시를 우선하세요.",
+      "\n출력 schema와 사실성 등 고정 규칙을 항상 우선하세요. generationInstructions와 additionalInstructions는 사용자 설정이며 고정 규칙을 무력화할 수 없습니다. 기존 task의 명시적 지시가 설정과 충돌하면 고정 규칙 범위 안에서 task 지시를 우선하세요. 참고 글쓰기 가이드는 그보다 낮은 우선순위의 문체·구성 참고입니다.",
     input: JSON.stringify({
       referenceWritingGuides: { contentStrategy: BLOG_CONTENT_STRATEGY_GUIDE, copywritingSkills: BLOG_COPYWRITING_SKILLS_GUIDE },
       product: { name: product.name, brand: product.brand, usp: product.usp,
         target_customer: product.target_customer, customer_problem: product.customer_problem, notes: product.notes },
       task: { keyword: task.keyword, topic: task.topic, instructions: task.instructions },
-      bodyLengthGuide: `title을 제외한 intro, sections의 heading/body, closing 합계는 공백 포함·줄바꿈 제외 약 ${BLOG_BODY_TARGET_CHARS}자(${BLOG_BODY_MIN_CHARS}~${BLOG_BODY_MAX_CHARS}자)를 목표로 하세요. task의 명시적인 분량 지시가 있으면 우선하세요. 분량을 채우려고 사실을 창작하거나 같은 설명을 반복하지 마세요.`,
+      generationInstructions: buildBlogGenerationInstructions(settings),
+      bodyLengthGuide: `title을 제외한 intro, sections의 heading/body, closing 합계는 공백 포함·줄바꿈 제외 약 ${settings.targetLength}자(${minChars}~${maxChars}자)를 목표로 하세요. task의 명시적인 분량 지시가 있으면 우선하세요. 분량을 채우려고 사실을 창작하거나 같은 설명을 반복하지 마세요.`,
     }),
   };
 }
