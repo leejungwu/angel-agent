@@ -580,3 +580,34 @@ README는 전체 영어로 작성한 evergreen project overview로 유지한다.
 
 검증된 문제 해결 지식이나 설치/운영 상세가 필요하면 별도 기능 안내 문서에 보존한다.
 문서를 개발 일지로 사용하지 않고 기존 설명을 현재 상태로 교체·정리한다.
+
+
+
+
+## Agent Efficiency Setup
+
+Angel Agent 작업에는 프로젝트 코드 외에 Codex 전역 효율화 설정을 사용할 수 있다.
+
+주요 도구:
+
+- JEV
+  - 작업 요청의 성격과 난이도를 보고 적절한 모델 / reasoning 설정을 선택하는 라우팅 용도.
+  - 프로젝트 코드의 일부가 아니라 PC별 Codex 전역 설정이다.
+
+- CAVEMAN
+  - 불필요하게 긴 분석, 과도한 작업 확장, 장황한 응답을 줄이기 위한 에이전트 행동 규칙.
+
+- PONYTAIL
+  - 필요 이상의 리팩터링이나 overengineering을 피하고 최소 변경을 우선하도록 하는 규칙.
+
+- RTK
+  - git, search, build, test 등 터미널 출력의 불필요한 토큰 사용을 줄이기 위한 효율화 도구.
+
+이 항목들은 Angel Agent runtime 기능이 아니며,
+PC별 Codex 환경에 설치/설정되는 전역 도구다.
+
+따라서 AGENTS.md는 "사용 여부와 목적"만 기록하고,
+실제 설치 여부나 경로는 각 PC의 Codex 환경에서 확인한다.
+
+메인 PC와 서브 노트북은 Codex 전역 설정 상태가 다를 수 있으므로,
+새 PC에서 작업할 때는 JEV / CAVEMAN / PONYTAIL / RTK 활성 여부를 확인한다.
