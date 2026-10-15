@@ -43,3 +43,6 @@ next-env.d.ts
 
 test-assets/
 extension/dist/
+
+supabase/.temp/
+remote-schema.sql
