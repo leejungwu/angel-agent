@@ -12,7 +12,7 @@
 1. `npm.cmd run build:extension` 후 `extension/dist`를 Chrome에 압축해제된 확장프로그램으로 로드합니다.
 2. 최초 1회 앱 주소와 전용 `ANGEL_EXTENSION_TOKEN`을 입력하고 연결 저장합니다. 설정은 `chrome.storage.local`의 `appUrl`, `extensionToken`에 보관하며 TRUSTED_CONTEXTS로 제한합니다. 재열기/reload 시 자동 연결합니다.
 3. 앱에서 승인 Draft를 발행 대기열에 추가합니다. 직접 로그인한 새 Naver 글쓰기 탭을 열고 Side Panel에서 해당 Job을 선택합니다. 제목은 기존 V1 CDP 입력·검증, V3 본문은 text/image block 순차 입력을 사용합니다. 사진이 이미 있는 글에는 입력하지 않습니다.
-4. 목록은 queued/failed Job을 표시하며 queued만 실행합니다. `/api/extension/publication-jobs`의 목록·상세를 조회하고, background가 실행 직전 `/[id]/claim`으로 선점합니다. 서버는 snapshot의 사진 경로로 signed URL을 새로 발급합니다. 현재 Draft/Task 사진으로 배치를 다시 만들지 않습니다. 성공/실패는 같은 attempt에 한해 inserted/failed로 기록합니다. failed 재시도는 아직 제공하지 않습니다.
+4. 목록은 queued/failed Job을 표시하며 queued만 실행합니다. `/api/extension/publication-jobs`의 목록·상세를 조회하고, background가 실행 직전 `/[id]/claim`으로 선점합니다. 서버는 snapshot의 사진 경로로 signed URL을 새로 발급합니다. 현재 Draft/Task 사진으로 배치를 다시 만들지 않습니다. 성공/실패는 같은 attempt에 한해 inserted/failed로 기록합니다. failed는 웹 Queue에서 부분 입력을 확인·정리한 뒤 같은 snapshot으로 다시 대기열에 넣습니다. 중간 재개 없이 처음부터 입력하며 다음 claim에서만 attempt가 증가합니다.
 5. /prepare는 앱의 수동 복사·검수·fallback 화면이며 Extension을 직접 실행하지 않습니다.
 
 ## Legacy V2: 최대 3장 fallback — 현재 유지

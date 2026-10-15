@@ -104,6 +104,7 @@ const frozen = JSON.stringify(job.execution_snapshot);
 const Link = ({ href, children, ...props }) => React.createElement("a", { href, ...props }, children);
 const page = load("app/content/blog/publishing/page.tsx", { ...common, "next/link": Link,
   "./RemovePublicationJob": ({ jobId }) => React.createElement("button", { "data-job": jobId }, "대기열에서 제거"),
+  "./PublicationJobTransition": ({ status }) => React.createElement("button", {}, status === "inserted" ? "발행 완료 기록" : "다시 대기열로"),
 }).default;
 rows.blog_task_assets.push({ id: 9, blog_task_id: 1, storage_path: "tasks/1/new.png", file_name: "new.png", sort_order: 1 });
 rows.blog_drafts[0].title = "나중 제목";
@@ -113,6 +114,8 @@ for (const [status, label] of [["queued", "발행 대기"], ["inserting", "입�
   assert.ok(html.includes("고정 제목") && !html.includes("나중 제목"));
   assert.ok(html.includes("사진 1장") && html.includes(label));
   assert.equal(html.includes("대기열에서 제거"), status === "queued");
+  assert.equal(html.includes("발행 완료 기록"), status === "inserted");
+  assert.equal(html.includes("다시 대기열로"), status === "failed");
   assert.equal(html.includes("/prepare"), false);
   if (status === "failed") assert.ok(html.includes("fixture failure"));
   assert.equal((await taskRoute.DELETE(request({}), context("1"))).status, 409);
@@ -122,6 +125,37 @@ for (const [status, label] of [["queued", "발행 대기"], ["inserting", "입�
   assert.equal(JSON.stringify(job.execution_snapshot), frozen);
 }
 assert.ok(orders.some(([table, key, asc]) => table === "blog_publication_jobs" && key === "created_at" && asc === false));
+const patch = input => remove.PATCH(request(input), context(job.id));
+const source = { snapshot: JSON.stringify(job.execution_snapshot), taskId: job.blog_task_id, draftId: job.blog_draft_id };
+for (const url of [undefined, "", "  ", null, "https://blog.naver.com/example/123", "http://example.test/post"]) {
+  job.status = "inserted";
+  assert.equal((await patch({ action: "publish", publishedUrl: url })).status, 200);
+  assert.equal(job.status, "published");
+  assert.ok(Number.isFinite(Date.parse(job.published_at)));
+  assert.equal(job.published_url, typeof url === "string" && url.trim() ? url : null);
+  const html = renderToStaticMarkup(await page());
+  if (typeof url === "string" && url.trim()) assert.ok(html.includes(`href="${url}"`));
+}
+for (const url of ["ftp://example.test", "javascript:alert(1)", "/relative", "example.test", "https://", "https://bad host", 123]) {
+  job.status = "inserted";
+  assert.equal((await patch({ action: "publish", publishedUrl: url })).status, 400);
+  assert.equal(job.status, "inserted");
+}
+for (const status of ["queued", "inserting", "failed", "published"]) {
+  job.status = status;
+  assert.equal((await patch({ action: "publish" })).status, 409);
+}
+job.status = "failed"; job.attempt_no = 3; job.error_message = "실패"; job.started_at = "2026-10-15T01:00:00Z"; job.inserted_at = "2026-10-15T01:00:01Z";
+assert.equal((await patch({ action: "retry" })).status, 200);
+assert.equal(job.status, "queued"); assert.equal(job.attempt_no, 3);
+assert.equal(job.error_message, null); assert.equal(job.started_at, null); assert.equal(job.inserted_at, null);
+assert.equal(JSON.stringify(job.execution_snapshot), source.snapshot);
+assert.equal(job.blog_task_id, source.taskId); assert.equal(job.blog_draft_id, source.draftId);
+for (const status of ["queued", "inserting", "inserted", "published"]) {
+  job.status = status;
+  assert.equal((await patch({ action: "retry" })).status, 409);
+}
+assert.equal((await patch({ action: "inserting", status: "published" })).status, 400);
 job.status = "queued";
 assert.equal((await remove.DELETE(request({}), context(job.id))).status, 200);
 assert.equal(rows.blog_publication_jobs.length, 0);
@@ -146,6 +180,7 @@ const hooks = {
 };
 const add = load("app/content/blog/[id]/AddPublicationJob.tsx", { react: hooks, "next/link": Link }).default;
 const removeControl = load("app/content/blog/publishing/RemovePublicationJob.tsx", { react: hooks, "next/navigation": { useRouter: () => ({ refresh: () => refreshes++ }) } }).default;
+const transitionControl = load("app/content/blog/publishing/PublicationJobTransition.tsx", { react: hooks, "next/navigation": { useRouter: () => ({ refresh: () => refreshes++ }) } }).default;
 const walk = element => !element || typeof element !== "object" ? [] : [element, ...React.Children.toArray(element.props?.children).flatMap(walk)];
 const render = (component, props) => { cursor = 0; return component(props); };
 const originalFetch = globalThis.fetch, originalConfirm = globalThis.confirm;
@@ -163,6 +198,22 @@ try {
   globalThis.fetch = async (url, options) => { assert.equal(url, "/api/blog/publication-jobs/job"); assert.equal(options.method, "DELETE"); return Response.json({ ok: true }); };
   await walk(render(removeControl, { jobId: "job" })).find(node => node.type === "button").props.onClick();
   assert.equal(refreshes, 1);
+  state = [];
+  const props = { jobId: "job", status: "inserted" };
+  walk(render(transitionControl, props)).find(node => node.type === "button").props.onClick();
+  const opened = render(transitionControl, props);
+  assert.ok(walk(opened).some(node => node.type === "p" && String(node.props.children).includes("자동 확인하지 않습니다")));
+  globalThis.fetch = async (url, options) => {
+    assert.equal(options.method, "PATCH"); assert.deepEqual(JSON.parse(options.body), { action: "publish", publishedUrl: "" });
+    return Response.json({ job: { id: "job", status: "published" } });
+  };
+  await walk(opened).find(node => node.type === "form").props.onSubmit({ preventDefault() {} });
+  assert.equal(refreshes, 2);
+  state = [];
+  globalThis.fetch = async (_url, options) => { assert.deepEqual(JSON.parse(options.body), { action: "retry" }); return Response.json({ job: { status: "queued" } }); };
+  await walk(render(transitionControl, { jobId: "job", status: "failed" })).find(node => node.type === "button").props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(refreshes, 3);
 } finally { globalThis.fetch = originalFetch; globalThis.confirm = originalConfirm; }
 const AddStub = () => null;
 const generate = load("app/content/blog/[id]/GenerateBlogDraft.tsx", {

@@ -221,7 +221,11 @@ DB snapshot을 읽을 때 version·본문·block 순서·사진 대응·metadata
 API는 현재 승인·Task 소속을 확인한 뒤 등록 함수를 호출하고, 중복이면 기존 Job을 안내한다.
 Queue 화면은 snapshot의 제목·사진 수와 Job의 상태·시간·오류를 최신 등록순으로 보여준다.
 `DELETE /api/blog/publication-jobs/[id]`는 DELETE 자체에 queued 조건을 걸며 Draft·사진을 삭제하지 않는다.
-Extension의 Job 선점·입력 결과 API는 제공하지만 published 변경 API/UI는 제공하지 않는다. `/prepare`는 기존 동작 그대로다.
+Extension의 Job 선점·입력 결과 API와 웹의 수동 완료 기록·재대기 API를 제공한다. `/prepare`는 기존 동작 그대로다.
+`PATCH /api/blog/publication-jobs/[id]`는 `transitionPublicationJob`에서 inserted→published, failed→queued만 조건부 UPDATE한다.
+발행 완료는 사용자가 네이버 발행을 직접 확인한 기록이며 자동 검증이 아니다. URL은 선택이며 입력 시 http/https만 허용한다.
+published_at은 기록 시각으로 저장한다. 재대기는 동일 snapshot·원본 연결·attempt_no를 유지하고 오류·started_at·inserted_at만 초기화한다.
+queued는 제거, inserted는 발행 완료 기록, failed는 다시 대기열로, inserting/published는 액션 없이 표시한다.
 
 snapshot에는 version=1, title, bodyText, text/image blocks, assetId/storagePath/fileName/sortOrder만 저장한다.
 signed URL·temp 파일·AI 생성 설정은 포함하지 않는다. 이미지 block의 index는 images 배열 위치다.
@@ -242,7 +246,8 @@ Job 데이터가 생긴 뒤에는 먼저 보존해야 하며 기존 Blog 테이�
 
 선점은 조건부 UPDATE로 한 요청만 성공한다. 결과는 inserting 및 attempt_no가 일치할 때만 반영하며 동일 완료 응답은 중복 수신해도 안전하다.
 입력 성공은 inserted_at 기록·오류 초기화, 실패는 failed·최근 오류 기록으로 구분한다. 사진 3장 초과 Job은 legacy 실행 전에 차단한다.
-failed는 조회만 가능하며 재시도 UI/API는 아직 없다. service worker 종료·선점 응답 유실은 inserting으로 남을 수 있고 자동 재실행하지 않는다.
+failed는 웹에서 부분 입력 확인·정리 후 같은 Job을 queued로 되돌릴 수 있다. 다음 claim에서만 attempt_no가 증가한다.
+중간 재개는 제공하지 않으며 처음부터 입력한다. service worker 종료·선점 응답 유실은 inserting으로 남을 수 있고 강제 복구·자동 재실행하지 않는다.
 입력 성공 뒤 결과 저장만 실패하면 완료 안내와 상태 기록 미확인 경고를 표시하며 failed로 덮어쓰지 않는다.
 V3 10장 입력 엔진의 기존 실검증과 새 Job 연결의 mock 검증을 구분한다. 새 연결의 Chrome/Naver 실검증은 별도로 필요하다.
 

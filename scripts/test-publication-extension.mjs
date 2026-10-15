@@ -90,8 +90,12 @@ assert.equal((await api.recordPublicationResult(id, 1, "failed", "PHOTO_UPLOAD: 
 assert.equal(row.status, "failed"); assert.equal(row.error_message, "PHOTO_UPLOAD: fixture");
 assert.equal((await api.listExtensionPublicationJobs())[0].status, "failed");
 await assert.rejects(api.claimPublicationJob(id, "blocks"), /발행 대기/);
-// Simulate a future explicit retry: stale success/failure must not finish the new attempt.
-row.status = "inserting"; row.attempt_no = 2;
+// Web retry preserves the snapshot/attempt; only the next Extension claim increments it.
+const retrySnapshot = JSON.stringify(row.execution_snapshot);
+await jobs.transitionPublicationJob(id, { action: "retry" });
+assert.equal(row.status, "queued"); assert.equal(row.attempt_no, 1);
+await api.claimPublicationJob(id, "legacy");
+assert.equal(row.attempt_no, 2); assert.equal(JSON.stringify(row.execution_snapshot), retrySnapshot);
 assert.equal((await api.recordPublicationResult(id, 1, "inserted")).applied, false);
 assert.equal((await api.recordPublicationResult(id, 1, "failed", "old")).applied, false);
 assert.equal(row.status, "inserting");
@@ -104,7 +108,7 @@ const originalDraft = { title: "고정 제목" }, originalAssets = ["tasks/1/0.p
 const beforeChanges = await api.claimPublicationJob(id, "blocks");
 await api.recordPublicationResult(id, 1, "failed", "fixture");
 originalDraft.title = "변경한 제목"; originalAssets.splice(0, 1, "tasks/1/changed.png");
-row.status = "queued"; // Only the fixture simulates a future explicit retry.
+await jobs.transitionPublicationJob(id, { action: "retry" });
 const afterChanges = await api.claimPublicationJob(id, "blocks");
 assert.equal(afterChanges.title, beforeChanges.title);
 assert.equal(afterChanges.bodyText, beforeChanges.bodyText);

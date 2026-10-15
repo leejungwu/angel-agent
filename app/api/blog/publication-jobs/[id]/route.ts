@@ -1,4 +1,19 @@
 import { supabase } from "@/lib/supabase";
+import { transitionPublicationJob, PublicationJobError } from "@/lib/blog-publishing/publication-jobs";
+
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  let input;
+  try {
+    input = await request.json();
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error();
+  } catch { return Response.json({ error: "상태 변경 요청을 확인해 주세요." }, { status: 400 }); }
+  try {
+    const job = await transitionPublicationJob((await params).id, input);
+    return Response.json({ job });
+  } catch (error) {
+    return Response.json({ error: error instanceof PublicationJobError ? error.message : "Job 상태를 저장하지 못했습니다." }, { status: error instanceof PublicationJobError ? error.status : 500 });
+  }
+}
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { parsePublicationSnapshot, type PublicationJob } from "@/lib/blog-publishing/publication-jobs";
 import RemovePublicationJob from "./RemovePublicationJob";
+import PublicationJobTransition from "./PublicationJobTransition";
 
 const STATUS_LABELS: Record<PublicationJob["status"], string> = {
   queued: "발행 대기", inserting: "입력 중", inserted: "네이버 입력 완료", published: "발행 완료", failed: "입력 실패",
@@ -13,7 +14,7 @@ function date(value: string | null) {
 
 export default async function PublishingQueuePage() {
   const { data, error } = await supabase.from("blog_publication_jobs")
-    .select("id,blog_task_id,blog_draft_id,status,execution_snapshot,created_at,inserted_at,published_at,error_message")
+    .select("id,blog_task_id,blog_draft_id,status,execution_snapshot,created_at,inserted_at,published_at,published_url,error_message")
     .order("created_at", { ascending: false }).order("id", { ascending: false });
   return <main className="p-10">
     <div className="flex items-center justify-between gap-4">
@@ -37,7 +38,13 @@ export default async function PublishingQueuePage() {
                 <div><dt className="inline">발행 완료: </dt><dd className="inline">{date(job.published_at)}</dd></div>
               </dl>
               {job.error_message && <p className="mt-3 whitespace-pre-wrap break-words text-sm text-red-600">{job.error_message}</p>}
+              {job.status === "published" && job.published_url && (
+                /^https?:\/\//i.test(job.published_url)
+                  ? <a href={job.published_url} target="_blank" rel="noopener noreferrer" className="mt-3 block break-all text-sm underline">{job.published_url}</a>
+                  : <p className="mt-3 break-all text-sm text-zinc-500">{job.published_url}</p>
+              )}
               {job.status === "queued" && <RemovePublicationJob jobId={job.id} />}
+              {(job.status === "inserted" || job.status === "failed") && <PublicationJobTransition jobId={job.id} status={job.status} />}
             </article>;
           })}
     </div>

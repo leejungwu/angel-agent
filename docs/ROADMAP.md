@@ -72,13 +72,15 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 - [x] snapshot 기반 V3 payload / legacy 3장 초과 차단 — mock 검증
 - [ ] 새 Job 실행 연결의 실제 Chrome/Naver 운영 검증
 - [ ] 실행별 상세 실패 이력 / 선점 응답 유실·비정상 종료 상태 복구
-- [ ] Queue 실행 상태 전이 / 예약
-- [ ] 중간 실패 재개 / 재시도 workflow
+- [x] 웹 수동 발행 완료 기록 / 선택 http·https URL / published_at 기록
+- [x] failed Job 동일 snapshot 재대기 / 다음 claim에서만 attempt 증가
+- [ ] 예약 발행
+- [ ] 중간 실패 재개
 - [ ] 장시간 signed URL 갱신 / 비정상 종료 cleanup
 - [ ] 최종 자동 발행 / 예약 확인 자동화
-- [ ] 발행 URL / 시간 / 결과 저장
+- [ ] Naver 실제 발행 결과 자동 확인
 
-현재 입력 완료 뒤 최종 검수·발행·예약은 사람이 직접 수행한다. Extension은 queued Job의 고정 snapshot을 실행하고 입력 결과만 기록한다. failed Job은 조회만 제공하며 재시도는 후속 단계다.
+현재 입력 완료 뒤 최종 검수·발행·예약은 사람이 직접 수행한다. Extension은 queued Job의 고정 snapshot을 실행한다. 웹에서 사용자가 발행 완료를 기록하고 failed Job을 같은 자료로 재대기할 수 있다. 실제 발행 여부는 자동 검증하지 않는다.
 
 ### 키워드 / 운영 분석
 

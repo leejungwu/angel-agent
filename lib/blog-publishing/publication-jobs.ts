@@ -31,6 +31,32 @@ export class PublicationJobError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
 
+export async function transitionPublicationJob(id: string, input: { action?: unknown; publishedUrl?: unknown }) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new PublicationJobError("Job ID가 올바르지 않습니다.");
+  if (input.action !== "publish" && input.action !== "retry") throw new PublicationJobError("허용되지 않는 상태 변경입니다.");
+  let publishedUrl: string | null = null;
+  if (input.action === "publish" && input.publishedUrl != null) {
+    if (typeof input.publishedUrl !== "string") throw new PublicationJobError("발행 URL은 http/https 주소로 입력해 주세요.");
+    const value = input.publishedUrl.trim();
+    if (value) {
+      try {
+        const url = new URL(value);
+        if (!/^https?:\/\//i.test(value) || /\s/.test(value) || !["http:", "https:"].includes(url.protocol) || !url.hostname) throw new Error();
+        publishedUrl = value;
+      } catch { throw new PublicationJobError("발행 URL은 http/https 주소로 입력해 주세요."); }
+    }
+  }
+  // Whitelist execution fields only; snapshot, ownership and attempt_no never change here.
+  const changes = input.action === "publish"
+    ? { status: "published", published_at: new Date().toISOString(), published_url: publishedUrl, error_message: null }
+    : { status: "queued", error_message: null, started_at: null, inserted_at: null };
+  const { data, error } = await supabase.from("blog_publication_jobs").update(changes)
+    .eq("id", id).eq("status", input.action === "publish" ? "inserted" : "failed").select("id,status").maybeSingle();
+  if (error) throw new Error("Publication Job 상태 저장 실패");
+  if (!data) throw new PublicationJobError(input.action === "publish" ? "네이버 입력 완료 상태의 Job만 발행 완료로 기록할 수 있습니다." : "입력 실패 상태의 Job만 다시 대기열로 보낼 수 있습니다.", 409);
+  return data;
+}
+
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
