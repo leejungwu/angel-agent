@@ -5,16 +5,17 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 
 ## Blog 개발 우선순위
 
-1. 콘텐츠 프리셋 운영 검증 / 생성 품질 개선
+1. 승인 후 편집 → 재승인 정책
 2. 사진 배치 설정
-3. 이미지 전처리 / 재사용
-4. execution snapshot + 실패 이력
-5. 키워드 관리 / 분석
-6. Publishing Queue + 예약
-7. 중간 실패 재개
-8. 최종 자동 발행
-9. 발행 이력 + 검색 순위
-10. 경쟁글 / 블로그 분석, AI 이미지, 다중 플랫폼
+3. 이미지 관리 / 전처리 / 재사용
+4. VOC → Blog 연결
+5. 키워드 관리 / 검색 의도 / 검색량
+6. 실제 운영 데이터 축적
+7. 발행 이력 / 검색 순위
+8. 예약 발행
+9. 중간 실패 재개
+10. 최종 자동 발행
+11. 경쟁글 / 블로그 분석 / AI 이미지 / 다중 플랫폼
 
 ## Blog
 
@@ -32,7 +33,7 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 - [x] Blog 프리셋 생성 / 편집 / 삭제 / 복제 / Task별 선택
 - [x] 후기형·정보형·비교형·문제 해결형·제품 소개형 초기 프리셋 seed
 - [x] Draft별 생성 snapshot / 당시 프리셋·설정·provider/model 이력 조회
-- [ ] Blog 프리셋 migration 적용 / 실제 저장·생성 운영 검증
+- [x] Blog 프리셋 migration 적용 / 실제 저장·생성 운영 검증
 - [ ] 콘텐츠 목적 선택 UI와 생성 반영 — 역사적 purpose 값은 목록 표시만 사용
 - [ ] 승인 후 편집의 재승인 정책
 - [ ] VOC / 고객 표현 / pain point / 구매 동기 / 검색 의도 반영
@@ -65,12 +66,12 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 - [x] Publication Job 기반 — 테이블 migration / 승인 Draft 등록 함수 / immutable 실행 snapshot / runtime parser / 중복 등록 방지
 - [x] 웹 Queue — 승인 Draft 등록 / Job 목록·snapshot 사진 수 / queued 제거
 - [x] 앱 사진·Task 삭제 경로의 모든 상태 Job 참조 보호
-- [ ] Publication Job migration 적용 / 실제 웹 운영 검증
+- [x] Publication Job migration 적용 / 실제 웹 운영 검증
 - [ ] 등록·사진 삭제 동시 요청의 원자성 / DB·Storage 직접 삭제 보호
 - [x] Publication Job의 Extension 입력 연결 / snapshot adapter / 실행 직전 사진 URL 발급
 - [x] queued 조건부 선점 / attempt_no / inserted·failed 결과 기록 / 늦은 결과 차단
 - [x] snapshot 기반 V3 payload / legacy 3장 초과 차단 — mock 검증
-- [ ] 새 Job 실행 연결의 실제 Chrome/Naver 운영 검증
+- [x] 새 Job 실행 연결의 실제 Chrome/Naver 운영 검증
 - [ ] 실행별 상세 실패 이력
 - [x] 10분 이상 지난 inserting 수동 복구 / 시작 시각·attempt 조건부 보호 / 자동 재실행 없음
 - [x] 웹 수동 발행 완료 기록 / 선택 http·https URL / published_at 기록
@@ -143,7 +144,7 @@ FAQ와 광고 hook은 분석 결과의 후보이며 별도 완성 FAQ·광고 �
 - [x] DB 공통 Prompt / 선택 preset snapshot / 질문별 추가 지시 분리
 - [x] 공통 시스템·스타일 prompt 조회·편집·저장 UI / 명시적 우선순위
 - [x] schema 범위 내 preset 글자 수 검증 / direct·none·실제 제품 언급 hard validation
-- [ ] KIN 공통 Prompt migration 적용 / 실제 생성·답변 이력 운영 검증
+- [x] KIN 공통 Prompt migration 적용 / 실제 생성·답변 이력 운영 검증
 - [x] preset 생성 / 편집 / 삭제 / 복제 / 기본 preset 초기 선택
 - [x] 문단 수 / 글자 수 / 키워드 / 반복 제한 / 금칙어 / 제품 언급 설정
 - [x] 재생성용 preset snapshot
