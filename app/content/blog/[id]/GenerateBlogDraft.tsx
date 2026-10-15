@@ -168,6 +168,7 @@ export default function GenerateBlogDraft({
         imageAssetId: null,
       })),
       closing: editingDraft.closing,
+      status: "draft",
     };
 
     try {
@@ -324,6 +325,9 @@ export default function GenerateBlogDraft({
 
       {editingDraft && (
         <form onSubmit={saveDraft} className="mt-6 rounded-xl border bg-white p-6">
+          {(editingDraft.status === "approved" || editingDraft.status === "rejected") && (
+            <p className="mb-4 text-sm text-amber-700">내용을 수정하면 다시 승인이 필요합니다.</p>
+          )}
           <fieldset disabled={saving} className="flex flex-col gap-5">
             <label className="text-sm font-medium">
               제목

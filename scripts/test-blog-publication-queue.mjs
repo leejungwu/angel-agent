@@ -269,11 +269,45 @@ for (const status of ["draft", "rejected", "approved"]) {
   const tree = render(generate, { taskId: 1, initialDraft: { ...rows.blog_drafts[0], status } });
   assert.equal(walk(tree).some(node => node.type === AddStub), status === "approved");
 }
+for (const status of ["draft", "approved", "rejected"]) {
+  state = [];
+  const original = { ...rows.blog_drafts[0], status, generation_snapshot: { version: 1, original: "생성 당시 기록" }, provider: "openai", model: "gpt-6.1-sol", created_at: "2026-10-15T00:00:00Z" };
+  Object.assign(rows.blog_drafts[0], structuredClone(original));
+  const preservedJob = { id: "existing-job", blog_task_id: 1, blog_draft_id: 2, status: "queued", execution_snapshot: JSON.parse(source.snapshot) };
+  rows.blog_publication_jobs.push(preservedJob);
+  const jobBeforeEdit = JSON.stringify(preservedJob);
+  const editProps = { taskId: 1, initialDraft: structuredClone(original) };
+  await walk(render(generate, editProps)).find(node => node.type === "button" && node.props.children === "편집").props.onClick();
+  const editor = render(generate, editProps);
+  assert.equal(rows.blog_drafts[0].status, status, "opening edit must not invalidate approval before saving");
+  assert.equal(walk(editor).some(node => node.type === "p" && String(node.props.children).includes("내용을 수정하면 다시 승인이 필요합니다.")), status !== "draft");
+  for (const [from, to] of [[original.title, "수정 제목"], [original.intro, "수정 도입"], [original.sections[0].heading, "수정 소제목"], [original.sections[0].body, "수정 본문"], [original.closing, "수정 마무리"]]) {
+    walk(render(generate, editProps)).find(node => ["input", "textarea"].includes(node.type) && node.props.value === from).props.onChange({ target: { value: to } });
+  }
+  const beforeSave = writes.length;
+  await walk(render(generate, editProps)).find(node => node.type === "form").props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(writes.slice(beforeSave), [["blog_drafts", "update"]], "content/status must save in one update without Job writes");
+  const saved = rows.blog_drafts[0];
+  assert.equal(saved.status, "draft");
+  assert.equal(saved.title, "수정 제목"); assert.equal(saved.intro, "수정 도입"); assert.equal(saved.closing, "수정 마무리");
+  assert.deepEqual(saved.sections, [{ heading: "수정 소제목", body: "수정 본문", imageAssetId: null }]);
+  for (const key of ["generation_snapshot", "provider", "model", "created_at"]) assert.deepEqual(saved[key], original[key]);
+  assert.equal(JSON.stringify(preservedJob), jobBeforeEdit);
+  assert.equal((await create.POST(request({ taskId: 1, draftId: 2 }))).status, 403, "edited draft cannot register without reapproval");
+  assert.ok(walk(render(generate, editProps)).some(node => node.type === "button" && node.props.children === "승인"));
+  assert.match(renderToStaticMarkup(render(generate, editProps)), /상태: draft/);
+  assert.equal(walk(render(generate, editProps)).some(node => node.type === AddStub), false);
+  rows.blog_publication_jobs.pop();
+}
 state = []; rows.blog_drafts[0].status = "draft";
 const props = { taskId: 1, initialDraft: structuredClone(rows.blog_drafts[0]) };
 await walk(render(generate, props)).find(node => node.type === "button" && node.props.children === "승인").props.onClick();
 assert.equal(rows.blog_drafts[0].status, "approved");
 assert.ok(walk(render(generate, props)).some(node => node.type === AddStub && node.props.draftId === 2));
+for (const [button, expected] of [["draft로 되돌리기", "draft"], ["거절", "rejected"], ["draft로 되돌리기", "draft"], ["승인", "approved"]]) {
+  await walk(render(generate, props)).find(node => node.type === "button" && node.props.children === button).props.onClick();
+  assert.equal(rows.blog_drafts[0].status, expected);
+}
 const generationFetch = globalThis.fetch;
 try {
   globalThis.fetch = async (url, options) => {

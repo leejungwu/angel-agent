@@ -83,6 +83,9 @@ presetId를 생략하면 Task의 preset_id, 그다음 is_default 프리셋을 �
 기존 행을 재작성하거나 컬럼을 DROP하지 않는다.
 
 새 draft의 generation_snapshot은 생성 당시 값을 저장하며 이후 프리셋 수정·삭제나 draft 내용 편집으로 갱신하지 않는다.
+Draft 편집 저장은 내용과 status=draft를 한 번에 UPDATE한다. draft 상태는 유지하고 approved/rejected는 재검수 대상으로 되돌린다.
+승인·반려된 Draft의 편집 폼에 재승인 안내를 표시한다. provider/model/created_at과 generation_snapshot은 변경하지 않는다.
+기존 Publication Job의 snapshot·상태·연결은 그대로 유지하며, 재승인 전 수정 Draft의 Queue 등록은 거부한다.
 이것은 사진·Naver 실행 snapshot과 다르며 사진 목록을 고정하지 않는다. provider와 실제 응답 model도 draft에 저장한다.
 Task 상세는 같은 blog_task_id의 draft를 최신순으로 조회한다. 과거 draft를 선택하면 해당 snapshot의 이름·모델·분량·
 소제목/키워드 수와 read-only prompt를 보여준다. snapshot 없는 기존 행은 “기존 생성본 · 생성 설정 기록 없음”으로 표시한다.
