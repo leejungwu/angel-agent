@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+
+/* eslint-disable @next/next/no-html-link-for-pages -- Sidebar links intentionally use full document navigation. */
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,18 +32,18 @@ export default function RootLayout({
       <body suppressHydrationWarning>
         <div className="flex min-h-screen bg-zinc-100 text-zinc-900">
           <aside className="w-64 border-r border-zinc-200 bg-white p-6">
-            <Link href="/">
+            <a href="/">
               <h1 className="mb-8 text-xl font-bold">ANGEL AGENT</h1>
-            </Link>
+            </a>
 
             <nav className="flex flex-col gap-4 text-sm">
-              <Link href="/">Dashboard</Link>
-              <Link href="/products">Products</Link>
+              <a href="/">Dashboard</a>
+              <a href="/products">Products</a>
               <span>Sourcing</span>
-              <Link href="/voc">VOC</Link>
+              <a href="/voc">VOC</a>
               <span>Ads</span>
-              <Link href="/content/blog">Content</Link>
-              <Link href="/content/kin">지식인</Link>
+              <a href="/content/blog">Content</a>
+              <a href="/content/kin">지식인</a>
               <span>Sales</span>
               <span>Settings</span>
             </nav>
