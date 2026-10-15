@@ -124,20 +124,24 @@ Extension에는 마커 없는 본문과 실제 image blocks가 전달되고, 마
 ## Blog 발행 흐름
 
 ```text
-approved draft + 현재 Task 사진
-  → extension-api (본문 / 정렬 사진 / signed URL / Blocks)
-  → Side Panel 작업 선택·같은 draftId 재조회
+approved draft + 현재 Task 사진 → 웹 Queue 등록 시 execution_snapshot 고정
+  → Side Panel queued/failed Job 조회·같은 Job 재조회 (queued만 실행)
+  → background가 Job 선점·attempt 증가·실행 직전 signed URL 발급 요청
+  → snapshot adapter (고정 본문 / 사진 / Blocks)
   → background: 현재 Naver tab/frame 확정·debugger attach
   → 제목 입력·검증 → text/image Blocks 순차 실행
   ↔ content: DOM 위치/문서 끝 selection/본문·이미지 검증
   → 임시 파일 정리·debugger detach
+  → 해당 attempt의 inserted 또는 failed 기록
   → Naver SmartEditor에서 사용자가 검수·최종 발행
 ```
 
-`app/api/extension/blog-tasks/route.ts`는 작업별 최신 승인 draft 목록을 반환한다.
-상세 `/api/extension/blog-tasks/[id]?draftId=...`는 `lib/blog-publishing/extension-api.ts`에서
-Task와 명시 draftId의 연결·approved 상태를 검사하고, 현재 Task 사진과 실행 자료를 만든다.
-Side Panel은 입력 직전 동일 draftId를 다시 조회하고 선택 변경/오래된 응답을 차단한다.
+`/api/extension/publication-jobs`는 queued/failed Job 목록을 반환한다.
+상세 GET은 snapshot parser와 adapter로 미리보기 데이터를 만들며 signed URL을 발급하지 않는다.
+`POST .../[id]/claim`은 queued와 현재 attempt_no를 조건으로 inserting을 선점한 뒤 고정 사진 경로를 새로 서명한다.
+`lib/blog-publishing/publication-extension.ts`가 snapshot을 기존 ExtensionTask로 변환하며 현재 Draft/Task 사진이나 배치 계획을 다시 읽지 않는다.
+Side Panel은 선택 sequence·Job ID·Draft ID를 검증한다. background는 client의 실행 payload를 신뢰하지 않고 선점 응답만 입력한다.
+구형 `/api/extension/blog-tasks` API는 호환용으로 남아 있지만 현재 Side Panel에서는 사용하지 않는다.
 
 기본 V3는 text block을 CDP `Input.insertText`, image block을 `DOM.setFileInputFiles`로 처리한다.
 현재 끝 위치에서 앞에서 뒤로 입력하고 문단·사진 사이 위치는 content script가 준비/검증한다.
@@ -148,14 +152,15 @@ Side Panel은 입력 직전 동일 draftId를 다시 조회하고 선택 변경/
 같은 머신에서 실행되는 환경이 기준이다. 임시 파일 cleanup과 debugger detach는 종료 정리 경로에 있다.
 
 `/content/blog/[id]/prepare`는 본문 복사·사진 다운로드/ZIP의 수동 fallback이며 Extension 실행 화면이 아니다.
-`/content/blog/publishing`은 승인 자료 목록이지 실제 실행 Queue가 아니다.
-Extension 입력 성공은 DB를 published로 바꾸거나 Naver 최종 발행 버튼을 클릭하지 않는다.
+`/content/blog/publishing`은 고정 snapshot을 가진 Publication Job 목록이다.
+상세에서 승인된 Draft를 등록하고 queued Job만 제거할 수 있다.
+Extension 입력 성공은 Job을 inserted로 기록한다. published 변경이나 Naver 최종 발행 버튼 클릭은 하지 않는다.
 
 ## Extension의 역할 구분
 
 | 구성 | 책임 | 경계 |
 |---|---|---|
-| `extension/sidepanel/index.ts` + HTML/CSS | 사용자 조작, 앱 연결 설정, 승인 Task/draft 선택, 진단 표시, 실행 확인 | CDP/DB를 직접 처리하지 않음 |
+| `extension/sidepanel/index.ts` + HTML/CSS | 사용자 조작, 앱 연결 설정, Publication Job 선택, 진단 표시, 실행 확인 | CDP/DB를 직접 처리하지 않음 |
 | `extension/background.ts` | 앱 API 통신, active tab/frame 선택, CDP mouse/key/text/file 입력, 실행 stage·정리 | 글 작성 규칙·사진 배치 계산을 중복 구현하지 않음 |
 | `extension/content.ts` | Naver DOM 탐색, iframe 좌표, 현재 tail Range/Selection, 텍스트·사진 위치/count 검증 | AI 호출/파일 다운로드/CDP 전송 대신 DOM 측 실행 보조 |
 | `extension/types.d.ts` | Task/Block/message/reply/diagnostic/Chrome API 타입 계약 | runtime 실행 및 검증 자체는 아님 |
@@ -192,16 +197,54 @@ kin_prompt_settings → 모든 KIN 생성의 공통 prompt
 | `blog_drafts` | 제목·intro·sections·closing·검수 상태·provider/model·generation_snapshot. Extension은 approved만 사용 |
 | `blog_prompt_presets` | 사용자 편집 prompt 4개와 분량·소제목·키워드 범위 |
 | `blog_task_assets` | Task 사진 경로·파일명·sort_order. 실제 bytes는 Storage에 저장 |
+| `blog_publication_jobs` | 승인 Draft 실행 snapshot, 웹 Queue, Extension 선점·attempt·입력 성공/실패 기록 |
 | `reviews` / `review_import_batches` | 제품 리뷰와 가져오기 결과/상태 |
 | `voc_analysis_runs` | 제품별 VOC 결과·분석 상태·오류·모델 |
 | `kin_tasks` / `kin_drafts` | 질문·제품·언급 수준·추가 지시 및 생성 답변. Task에 preset 지시/설정 snapshot 저장 |
 | `kin_prompt_presets` | 선택 스타일과 문단·분량·키워드·금칙어 설정. 글자 수는 answer schema의 200~1500 범위 |
 | `kin_prompt_settings` | singleton 공통 시스템/사실성 prompt와 공통 스타일 prompt |
 
-Blog에는 **draft별 image snapshot이 아직 없다.** 특정 draftId를 고정해도 사진은 현재 Task의 목록을 읽는다.
+현재 Extension은 Job의 고정 image snapshot을 사용한다. `/prepare`와 구형 Task API는 여전히 현재 Task 사진을 읽는다.
 AI section의 imageAssetId=null과 실제 Task 사진 배치도 구분한다.
-검수 status와 역사적 publishing_status는 별개이며 Extension은 현재 발행 상태를 DB에 기록하지 않는다.
+Draft 검수 status·역사적 publishing_status·Job 실행 status는 별개다. Extension은 Job 입력 결과만 기록한다.
 기존 migrations는 일부 테이블·정책 변경 기록이므로 실제 DB 전체 schema를 대체하지 않는다.
+
+### Publication Job 웹 Queue / Extension 실행
+
+`lib/blog-publishing/publication-jobs.ts`의 `createPublicationJob`은 특정 승인 Draft와 현재 Task 사진을 읽어
+`orderedTaskImages`, `prepareBlogPost`, `createBlogExecutionBlocks`로 실행 데이터를 한 번 만든다.
+같은 Draft 재등록은 기존 Job을 반환하며 동시 등록은 DB UNIQUE 충돌 뒤 기존 Job을 조회한다.
+이미 등록된 Job은 원본 Draft의 내용·승인 상태 또는 Task 사진이 변경돼도 다시 계산하지 않는다.
+DB snapshot을 읽을 때 version·본문·block 순서·사진 대응·metadata를 runtime parser로 검증한다.
+
+상세의 `AddPublicationJob`은 현재 선택한 승인 Draft ID를 `POST /api/blog/publication-jobs`에 전달한다.
+API는 현재 승인·Task 소속을 확인한 뒤 등록 함수를 호출하고, 중복이면 기존 Job을 안내한다.
+Queue 화면은 snapshot의 제목·사진 수와 Job의 상태·시간·오류를 최신 등록순으로 보여준다.
+`DELETE /api/blog/publication-jobs/[id]`는 DELETE 자체에 queued 조건을 걸며 Draft·사진을 삭제하지 않는다.
+Extension의 Job 선점·입력 결과 API는 제공하지만 published 변경 API/UI는 제공하지 않는다. `/prepare`는 기존 동작 그대로다.
+
+snapshot에는 version=1, title, bodyText, text/image blocks, assetId/storagePath/fileName/sortOrder만 저장한다.
+signed URL·temp 파일·AI 생성 설정은 포함하지 않는다. 이미지 block의 index는 images 배열 위치다.
+migration은 DB catalog에서 Task/Draft ID 타입을 확인해 FK를 만들고, RESTRICT로 원본 삭제를 막는다.
+UPDATE trigger는 snapshot과 원본 연결·식별자·등록 시간을 고정하며, 실행 상태 필드만 갱신한다.
+Task 삭제 API는 모든 상태의 Job을 먼저 확인해 삭제를 거부하며, FK 충돌도 안내한다.
+
+사진 전체 삭제는 `DELETE /api/blog/tasks/[id]/assets`에서 기존 삭제 helper를 호출한다.
+helper는 Storage를 건드리기 전에 모든 사진의 asset ID 또는 경로를 모든 상태의 Job과 대조한다.
+참조가 있거나 조회에 실패하면 삭제를 중단한다. 기존 백업·복구 방식은 유지한다.
+이 보호는 앱 삭제 경로에 적용되며, 기존 anon 권한으로 DB/Storage에 직접 접근하는 경우까지 막는 DB 정책 변경은 아니다.
+등록/삭제 동시 요청 사이의 경쟁 조건은 DB transaction·Storage를 아우르는 별도 보호가 필요하다.
+현재 생성 함수의 여러 조회는 하나의 DB transaction이 아니므로 등록 도중 원본이 바뀌는 경우의 원자성은 보장하지 않는다.
+V3·legacy 입력 loop·temp image·content DOM 검증은 유지하며 Job 실행 전후만 연결한다. migration은 자동 적용하지 않는다.
+웹 Queue·사진/Task 삭제 보호를 사용하려면 1단계 migration 적용이 필요하다. 미적용 시 조회·등록·삭제 확인은 오류로 중단한다.
+롤백은 먼저 웹 호출·삭제 보호 의존성을 되돌리고, Job 데이터를 보존한 뒤 새 테이블·전용 trigger function만 제거한다.
+Job 데이터가 생긴 뒤에는 먼저 보존해야 하며 기존 Blog 테이블은 롤백 대상이 아니다.
+
+선점은 조건부 UPDATE로 한 요청만 성공한다. 결과는 inserting 및 attempt_no가 일치할 때만 반영하며 동일 완료 응답은 중복 수신해도 안전하다.
+입력 성공은 inserted_at 기록·오류 초기화, 실패는 failed·최근 오류 기록으로 구분한다. 사진 3장 초과 Job은 legacy 실행 전에 차단한다.
+failed는 조회만 가능하며 재시도 UI/API는 아직 없다. service worker 종료·선점 응답 유실은 inserting으로 남을 수 있고 자동 재실행하지 않는다.
+입력 성공 뒤 결과 저장만 실패하면 완료 안내와 상태 기록 미확인 경고를 표시하며 failed로 덮어쓰지 않는다.
+V3 10장 입력 엔진의 기존 실검증과 새 Job 연결의 mock 검증을 구분한다. 새 연결의 Chrome/Naver 실검증은 별도로 필요하다.
 
 ## Product / VOC / KIN 흐름
 

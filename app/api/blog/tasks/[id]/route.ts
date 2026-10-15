@@ -10,6 +10,10 @@ export async function DELETE(
   }
 
   try {
+    const { data: jobs, error: jobError } = await supabase.from("blog_publication_jobs")
+      .select("id").eq("blog_task_id", id).limit(1);
+    if (jobError) return Response.json({ error: "발행 대기열 참조를 확인하지 못했습니다." }, { status: 500 });
+    if (jobs?.length) return Response.json({ error: "발행 대기열 또는 입력·발행 이력이 있는 작업은 삭제할 수 없습니다. 대기 중인 Job을 먼저 제거해 주세요." }, { status: 409 });
     // Check every linked draft, including older drafts, before relying on DB cascade.
     const { data: protectedDrafts, error: lookupError } = await supabase
       .from("blog_drafts")
@@ -48,6 +52,7 @@ export async function DELETE(
       .maybeSingle();
 
     if (error) {
+      if (error.code === "23503") return Response.json({ error: "연결된 발행 작업이나 데이터가 있어 삭제할 수 없습니다." }, { status: 409 });
       console.error("Blog task deletion failed", { taskId: id, code: error.code });
       return Response.json({ error: "블로그 작업을 삭제하지 못했습니다." }, { status: 500 });
     }

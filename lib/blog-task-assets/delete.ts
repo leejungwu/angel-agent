@@ -1,5 +1,6 @@
 import { BLOG_TASK_ASSET_BUCKET, isBlogTaskAssetPath, type BlogTaskAsset } from "@/lib/blog-task-assets";
 import { supabase } from "@/lib/supabase";
+import { isAssetReferencedByPublicationJob } from "@/lib/blog-publishing/publication-jobs";
 
 export async function removeAllBlogTaskAssets(taskId: string | number): Promise<number> {
   const { data: assets, error } = await supabase.from("blog_task_assets")
@@ -12,6 +13,13 @@ export async function removeAllBlogTaskAssets(taskId: string | number): Promise<
   const targets = assets ?? [];
   if (targets.some((asset) => !isBlogTaskAssetPath(taskId, asset.storage_path))) {
     throw new Error("다른 작업의 이미지 경로가 포함되어 삭제를 중단했습니다.");
+  }
+  // Check every target before touching Storage: an all-delete must not partially
+  // remove unreferenced images before discovering a protected image later.
+  for (const asset of targets) {
+    if (await isAssetReferencedByPublicationJob({ assetId: asset.id, storagePath: asset.storage_path })) {
+      throw new Error("발행 대기열 또는 입력·발행 이력이 참조하는 사진은 삭제할 수 없습니다. 대기 중인 Job을 먼저 제거해 주세요.");
+    }
   }
   const storage = supabase.storage.from(BLOG_TASK_ASSET_BUCKET);
   let deleted = 0;

@@ -1,4 +1,5 @@
 type ExtensionTask = {
+  jobId?: string; attemptNo?: number;
   id: string | number; draftId: string | number; status: string; title: string; bodyText: string;
   images: { id: string | number; index: number; insertOffset: number; insertPrefix: string; signedUrl: string; expiresIn: number }[];
   blocks?: import("../lib/blog-publishing/blocks").BlogExecutionBlock<{ index: number; signedUrl: string }>[];
@@ -12,12 +13,13 @@ type EditorDiagnostic = {
 };
 type EditorTargetPosition = { x: number; y: number; rect: { x: number; y: number; width: number; height: number } };
 type ExtensionMessage = {
-  type: string; id?: string; draftId?: string; baseUrl?: string; token?: string; task?: ExtensionTask; overwrite?: boolean;
+  type: string; id?: string; jobId?: string; draftId?: string; baseUrl?: string; token?: string; task?: ExtensionTask; overwrite?: boolean;
   field?: "title" | "body";
   publisher?: "blocks" | "legacy";
   blockNumber?: number; imageNumber?: number;
 };
 type ExtensionReply = {
+  jobs?: { id: string; taskId: string | number; draftId: string | number; title: string; imageCount: number; status: string }[];
   error?: string; tasks?: { id: string | number; draftId?: string | number; title: string; status: string }[]; task?: ExtensionTask;
   diagnostic?: EditorDiagnostic; frameId?: number; message?: string;
   diagnostics?: { frameId: number; diagnostic?: EditorDiagnostic; reason?: string }[];

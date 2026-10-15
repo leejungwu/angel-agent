@@ -15,14 +15,14 @@
     });
   }
   let selected: ExtensionTask | undefined;
-  const taskDraftIds = new Map<string, string>();
+  const jobDraftIds = new Map<string, string>();
   let busy = false;
   let selectionSequence = 0;
   let selectionLoading = false;
-  function matchesSelection(task: ExtensionTask | undefined, taskId = tasks.value, draftId = taskDraftIds.get(taskId)): task is ExtensionTask {
-    return !!task && task.status === "approved" && !!taskId && !!draftId && String(task.id) === taskId && String(task.draftId) === draftId;
+  function matchesSelection(task: ExtensionTask | undefined, jobId = tasks.value, draftId = jobDraftIds.get(jobId)): task is ExtensionTask {
+    return !!task && ["queued", "failed"].includes(task.status) && !!jobId && !!draftId && task.jobId === jobId && String(task.draftId) === draftId;
   }
-  function updateInsertState() { insert.disabled = busy || selectionLoading || !matchesSelection(selected); }
+  function updateInsertState() { insert.disabled = busy || selectionLoading || !matchesSelection(selected) || selected.status !== "queued"; }
   const request = async (message: ExtensionMessage) => {
     const reply = await chrome.runtime.sendMessage(message);
     if (reply.error) throw new Error(reply.error);
@@ -42,28 +42,28 @@
       baseUrl.disabled = false; token.disabled = false;
     }
   }
-  async function loadTasks() {
+  async function loadJobs() {
     selectionSequence++; selectionLoading = false;
-    taskDraftIds.clear();
-    selected = undefined; tasks.replaceChildren(new Option("작업을 선택하세요", ""));
+    jobDraftIds.clear();
+    selected = undefined; tasks.replaceChildren(new Option("발행 Job을 선택하세요", ""));
     tasks.value = "";
     element("title").textContent = "선택한 글 없음"; element("images").textContent = "이미지 0개";
     connection.textContent = "연결 확인 중…";
     try {
-      const reply = await request({ type: "TASKS" });
-      const approvedTasks = (reply.tasks ?? []).filter((task) => task.status === "approved");
-      for (const task of approvedTasks) {
-        tasks.add(new Option(`#${task.id} · ${task.title} (${task.status})`, String(task.id)));
-        if (task.draftId !== undefined) taskDraftIds.set(String(task.id), String(task.draftId));
+      const reply = await request({ type: "JOBS" });
+      const availableJobs = (reply.jobs ?? []).filter((task) => ["queued", "failed"].includes(task.status));
+      for (const task of availableJobs) {
+        tasks.add(new Option(`${task.title} · 사진 ${task.imageCount}장 · ${task.status === "queued" ? "발행 대기" : "입력 실패"} · Job ${task.id}`, String(task.id)));
+        if (task.draftId !== undefined) jobDraftIds.set(String(task.id), String(task.draftId));
       }
       connected = true; connection.textContent = "Angel Agent 연결됨";
-      result.textContent = approvedTasks.length ? "승인된 초안을 선택해 주세요." : "승인된 초안이 없습니다. 앱에서 승인 후 목록을 새로고침하세요."; showSettings(false);
+      result.textContent = availableJobs.length ? "발행 대기 Job을 선택해 주세요." : "발행 Job이 없습니다. 앱에서 승인된 초안을 대기열에 추가하세요."; showSettings(false);
     } catch {
       connected = false; connection.textContent = "Angel Agent 연결 실패"; showSettings(true);
       throw new Error("연결에 실패했습니다. 주소·토큰·서버 상태를 확인해 주세요.");
     }
   }
-  element("refreshTasks").addEventListener("click", () => { void run(loadTasks); });
+  element("refreshTasks").addEventListener("click", () => { void run(loadJobs); });
   element("changeSettings").addEventListener("click", () => {
     if (!busy) { baseUrl.value = savedSettings.appUrl; token.value = savedSettings.extensionToken; showSettings(true); }
   });
@@ -89,37 +89,37 @@
         savedSettings = { appUrl: address.origin, extensionToken: token.value.trim() };
         baseUrl.value = savedSettings.appUrl; token.value = savedSettings.extensionToken;
         editedSettings.clear();
-        await loadTasks();
+        await loadJobs();
       } catch { showSettings(true); throw new Error("연결 설정 저장 또는 연결에 실패했습니다. 주소·토큰·서버 상태를 확인해 주세요."); }
     });
   });
-  async function loadSelectedTask() {
+  async function loadSelectedJob() {
     const sequence = ++selectionSequence;
-    const taskId = tasks.value, draftId = taskDraftIds.get(taskId);
+    const jobId = tasks.value, draftId = jobDraftIds.get(jobId);
     selected = undefined;
     selectionLoading = false;
     updateInsertState();
     element("title").textContent = "선택한 글 없음"; element("images").textContent = "이미지 0개";
     if (busy) return;
-    if (!taskId) { result.textContent = "작업을 선택해 주세요."; return; }
-    if (!draftId) { result.textContent = "승인된 초안 목록에서 작업을 선택해 주세요."; return; }
-    selectionLoading = true; updateInsertState(); result.textContent = "초안 조회 중…";
-    const current = () => sequence === selectionSequence && tasks.value === taskId && taskDraftIds.get(taskId) === draftId;
+    if (!jobId) { result.textContent = "Job을 선택해 주세요."; return; }
+    if (!draftId) { result.textContent = "발행 Job 목록에서 선택해 주세요."; return; }
+    selectionLoading = true; updateInsertState(); result.textContent = "Job 조회 중…";
+    const current = () => sequence === selectionSequence && tasks.value === jobId && jobDraftIds.get(jobId) === draftId;
     try {
-      const reply = await request({ type: "TASK", id: taskId, draftId });
+      const reply = await request({ type: "JOB", id: jobId });
       if (!current()) return;
-      if (!matchesSelection(reply.task, taskId, draftId)) throw new Error("선택한 작업/draft와 일치하는 승인된 초안만 사용할 수 있습니다.");
+      if (!matchesSelection(reply.task, jobId, draftId)) throw new Error("선택한 Job과 상태가 변경되었습니다. 목록을 새로고침하세요.");
       selected = reply.task;
       element("title").textContent = selected.title;
       element("images").textContent = `이미지 ${selected.images.length}개`;
-      result.textContent = "네이버 글쓰기 탭에서 DOM 진단 후 입력하세요.";
+      result.textContent = selected.status === "failed" ? "입력 실패 Job입니다. 일부 입력됐을 수 있습니다. 이번 단계에서는 재시도를 제공하지 않습니다." : "네이버 글쓰기 탭에서 DOM 진단 후 입력하세요.";
     } catch (error) {
       if (current()) result.textContent = error instanceof Error ? error.message : "초안 조회 실패";
     } finally {
       if (current()) { selectionLoading = false; updateInsertState(); }
     }
   }
-  tasks.addEventListener("change", () => { void loadSelectedTask(); });
+  tasks.addEventListener("change", () => { void loadSelectedJob(); });
   async function diagnose() {
     const reply = await request({ type: "DIAGNOSE" });
     element("diagnostic").textContent = JSON.stringify(reply.diagnostics, null, 2);
@@ -132,26 +132,28 @@
   insert.addEventListener("click", () => {
     if (busy || selectionLoading) return;
     void run(async () => {
-    const taskId = tasks.value, draftId = taskDraftIds.get(taskId), sequence = selectionSequence;
-    if (!matchesSelection(selected, taskId, draftId)) throw new Error("화면에 선택한 승인된 초안을 먼저 조회해 주세요.");
-    // Approval may have been revoked after selection. Recheck the same draft before any editor action.
+    const jobId = tasks.value, draftId = jobDraftIds.get(jobId), sequence = selectionSequence;
+    if (!matchesSelection(selected, jobId, draftId) || selected.status !== "queued") throw new Error("화면에 선택한 발행 대기 Job을 먼저 조회해 주세요.");
+    // Recheck the same immutable Job; background claims it before any CDP input.
     selected = undefined;
-    const refreshed = await request({ type: "TASK", id: taskId, draftId });
-    if (sequence !== selectionSequence || tasks.value !== taskId || taskDraftIds.get(taskId) !== draftId || !matchesSelection(refreshed.task, taskId, draftId)) throw new Error("선택한 작업/draft 또는 승인 상태가 변경되었습니다. 다시 선택해 주세요.");
+    const refreshed = await request({ type: "JOB", id: jobId });
+    if (sequence !== selectionSequence || tasks.value !== jobId || jobDraftIds.get(jobId) !== draftId || !matchesSelection(refreshed.task, jobId, draftId) || refreshed.task.status !== "queued") throw new Error("선택한 Job 또는 상태가 변경되었습니다. 다시 선택해 주세요.");
     selected = refreshed.task;
     const diagnostic = await diagnose();
     if (diagnostic?.ready !== true) throw new Error(diagnostic?.reason ?? "입력 영역을 확정하지 못했습니다. 프레임별 DOM 진단을 확인해 주세요.");
     const overwrite = !!diagnostic?.existing;
     if (overwrite && !window.confirm("현재 글에 제목 또는 본문이 있습니다. 선택한 초안으로 덮어쓰시겠습니까?")) { result.textContent = "입력을 취소했습니다."; return; }
-    if (sequence !== selectionSequence || !matchesSelection(selected, taskId, draftId) || tasks.value !== taskId || taskDraftIds.get(taskId) !== draftId) throw new Error("작업 선택이 변경되어 입력을 중단했습니다.");
+    if (sequence !== selectionSequence || !matchesSelection(selected, jobId, draftId) || tasks.value !== jobId || jobDraftIds.get(jobId) !== draftId) throw new Error("작업 선택이 변경되어 입력을 중단했습니다.");
     const publisher = element<HTMLSelectElement>("publisher").value === "legacy" ? "legacy" : "blocks";
-    const reply = await request({ type: "INSERT", task: selected, overwrite, publisher }); result.textContent = reply.message ?? "입력 결과를 확인해 주세요.";
+    if (publisher === "legacy" && selected.images.length > 3) throw new Error("사진 3장 초과 Job은 V3 순차 입력을 사용하세요.");
+    selected = undefined;
+    const reply = await request({ type: "INSERT", jobId: jobId, overwrite, publisher }); result.textContent = reply.message ?? "입력 결과를 확인해 주세요.";
   }); });
   void chrome.storage.local.get(["appUrl", "extensionToken", "baseUrl"]).then((saved) => {
     savedSettings = { appUrl: saved.appUrl ?? saved.baseUrl ?? "http://localhost:3000", extensionToken: saved.extensionToken ?? "" };
     if (!editedSettings.has("appUrl")) baseUrl.value = savedSettings.appUrl;
     if (!editedSettings.has("extensionToken")) token.value = savedSettings.extensionToken;
-    if (saved.appUrl && saved.extensionToken && editedSettings.size === 0) void run(loadTasks);
+    if (saved.appUrl && saved.extensionToken && editedSettings.size === 0) void run(loadJobs);
     else showSettings(true);
   }).catch(() => { showSettings(true); result.textContent = "저장된 설정을 읽지 못했습니다. 주소와 토큰을 입력해 주세요."; });
 })();

@@ -1,24 +1,45 @@
 export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { parsePublicationSnapshot, type PublicationJob } from "@/lib/blog-publishing/publication-jobs";
+import RemovePublicationJob from "./RemovePublicationJob";
 
-export default async function PublishingPreparationPage() {
-  const { data: drafts, error } = await supabase.from("blog_drafts")
-    .select("id,blog_task_id,title,model,created_at").eq("status", "approved")
+const STATUS_LABELS: Record<PublicationJob["status"], string> = {
+  queued: "발행 대기", inserting: "입력 중", inserted: "네이버 입력 완료", published: "발행 완료", failed: "입력 실패",
+};
+function date(value: string | null) {
+  return value ? new Date(value).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }) : "-";
+}
+
+export default async function PublishingQueuePage() {
+  const { data, error } = await supabase.from("blog_publication_jobs")
+    .select("id,blog_task_id,blog_draft_id,status,execution_snapshot,created_at,inserted_at,published_at,error_message")
     .order("created_at", { ascending: false }).order("id", { ascending: false });
   return <main className="p-10">
     <div className="flex items-center justify-between gap-4">
-      <h1 className="text-3xl font-bold">네이버 발행 준비</h1>
+      <h1 className="text-3xl font-bold">발행 대기열</h1>
       <Link href="/content/blog" className="rounded-lg border bg-white px-4 py-2 text-sm">블로그 작업 목록</Link>
     </div>
-    <p className="mt-3 text-zinc-500">승인한 초안의 제목·본문을 복사하고 사진을 내려받아 네이버에서 직접 발행하세요.</p>
+    <p className="mt-3 text-zinc-500">등록 당시의 제목·본문·사진이 고정된 작업입니다. Extension에서 발행 대기 Job을 선택해 입력하세요. 최종 검수·발행은 네이버에서 직접 진행합니다.</p>
     <div className="mt-8 space-y-4">
-      {error ? <p role="alert">초안을 조회하지 못했습니다.</p> : !drafts?.length ? <p className="text-zinc-500">승인된 초안이 없습니다.</p>
-        : drafts.map((draft) => <article key={draft.id} className="rounded-xl border bg-white p-5">
-          <h2 className="text-xl font-bold">{draft.title || "제목 없음"}</h2>
-          <p className="mt-2 text-sm text-zinc-500">작업 #{draft.blog_task_id} · {draft.model || "모델 정보 없음"}</p>
-          <Link href={`/content/blog/${draft.blog_task_id}/prepare?draftId=${draft.id}`} className="mt-4 inline-block rounded-lg bg-black px-4 py-2 text-sm text-white">발행 준비 보기</Link>
-        </article>)}
+      {error ? <p role="alert">발행 대기열을 조회하지 못했습니다. DB migration 적용 상태를 확인해 주세요.</p>
+        : !data?.length ? <p className="text-zinc-500">등록된 발행 작업이 없습니다.</p>
+          : data.map(job => {
+            let snapshot;
+            try { snapshot = parsePublicationSnapshot(job.execution_snapshot); }
+            catch { return <article key={job.id} className="rounded-xl border bg-white p-5"><p role="alert">Job {job.id}: 저장된 실행 자료를 확인할 수 없습니다.</p></article>; }
+            return <article key={job.id} className="rounded-xl border bg-white p-5">
+              <h2 className="text-xl font-bold">{snapshot.title}</h2>
+              <p className="mt-2 text-sm text-zinc-500">Task #{job.blog_task_id} · Draft #{job.blog_draft_id} · {STATUS_LABELS[job.status as PublicationJob["status"]] ?? "상태 확인 필요"} · 사진 {snapshot.images.length}장</p>
+              <dl className="mt-3 space-y-1 text-sm text-zinc-500">
+                <div><dt className="inline">Queue 등록: </dt><dd className="inline">{date(job.created_at)}</dd></div>
+                <div><dt className="inline">네이버 입력 완료: </dt><dd className="inline">{date(job.inserted_at)}</dd></div>
+                <div><dt className="inline">발행 완료: </dt><dd className="inline">{date(job.published_at)}</dd></div>
+              </dl>
+              {job.error_message && <p className="mt-3 whitespace-pre-wrap break-words text-sm text-red-600">{job.error_message}</p>}
+              {job.status === "queued" && <RemovePublicationJob jobId={job.id} />}
+            </article>;
+          })}
     </div>
   </main>;
 }

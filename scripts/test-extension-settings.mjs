@@ -25,13 +25,13 @@ async function openPanel(fail = false, selectionTask, options = {}) {
   };
   vm.runInNewContext(panelCode, { URL, Option: class { constructor(text, value) { this.text = text; this.value = value; } }, document: { getElementById: element }, chrome: {
     storage, permissions: { request: async () => true },
-    runtime: { sendMessage: async (message) => { requests.push(message); if (message.type === "TASK" && options.onTask) return options.onTask(message);
-    if (message.type === "TASK" && selectionTask) {
+    runtime: { sendMessage: async (message) => { requests.push(message); if (message.type === "JOB" && options.onTask) return options.onTask(message);
+    if (message.type === "JOB" && selectionTask) {
       taskRequests++;
       return options.revoke && taskRequests > 1 ? { error: "초안 승인이 취소되었습니다." } : { task: selectionTask };
     }
       if (message.type === "DIAGNOSE") return { diagnostic: { ready: true, existing: false } };
-      return fail ? { error: "fixture failure" } : { tasks: options.tasks ?? (selectionTask ? [{ id: 1, draftId: 2, title: "제목", status: "approved" }] : []) }; } },
+      return fail ? { error: "fixture failure" } : { jobs: options.tasks ?? (selectionTask ? [{ id: 1, draftId: 2, title: "제목", status: "queued" }] : []) }; } },
   } });
   await settle();
   return { element, requests };
@@ -55,7 +55,7 @@ assert.equal(first.element("connectionActions").hidden, false);
 const reopened = await openPanel();
 assert.equal(reopened.element("baseUrl").value, saved.appUrl);
 assert.equal(reopened.element("token").value, saved.extensionToken);
-assert.equal(reopened.requests[0].type, "TASKS");
+assert.equal(reopened.requests[0].type, "JOBS");
 assert.equal(reopened.element("connectionSettings").hidden, true);
 reopened.element("changeSettings").listeners.click();
 assert.equal(reopened.element("connectionSettings").hidden, false);
@@ -89,9 +89,9 @@ vm.runInNewContext(backgroundCode, { URL, chrome: {
 }, fetch: async (url, options) => {
   fetchedPath = `${url.pathname}${url.search}`;
   authenticated = url.origin === saved.appUrl && options.headers.Authorization === `Bearer ${saved.extensionToken}`;
-  return { ok: true, json: async () => ({ tasks: [] }) };
+  return { ok: true, json: async () => ({ jobs: [] }) };
 } });
-const approvedTask = { id: 1, draftId: 2, status: "approved", title: "제목", bodyText: "본문", images: [0, 1, 2].map((index) => ({ signedUrl: `https://fixture.test/${index}.png` })) };
+const approvedTask = { jobId: "1", id: 1, draftId: 2, status: "queued", title: "제목", bodyText: "본문", images: [0, 1, 2].map((index) => ({ signedUrl: `https://fixture.test/${index}.png` })) };
 const multiPanel = await openPanel(false, approvedTask);
 multiPanel.element("tasks").value = "1";
 multiPanel.element("tasks").listeners.change(); await settle();
@@ -99,33 +99,43 @@ multiPanel.element("insert").listeners.click(); await settle();
 const inserted = multiPanel.requests.find((message) => message.type === "INSERT");
 assert.ok(inserted);
 assert.equal("clipboardReady" in inserted, false);
-assert.equal(inserted.task.images.length, 3);
-assert.equal(multiPanel.requests.find((message) => message.type === "TASK").draftId, "2");
-assert.equal(multiPanel.requests.filter((message) => message.type === "TASK").length, 2, "Approval must be rechecked on input click");
+assert.equal(inserted.jobId, "1"); assert.equal("task" in inserted, false);
+assert.equal(multiPanel.requests.find((message) => message.type === "JOB").id, "1");
+assert.equal(multiPanel.requests.filter((message) => message.type === "JOB").length, 2, "Approval must be rechecked on input click");
 for (const status of ["draft", "rejected"]) {
-  const denied = await openPanel(false, { ...approvedTask, status }, { tasks: [{ id: 1, status }, { id: 2, draftId: 4, title: "승인", status: "approved" }] });
+  const denied = await openPanel(false, { ...approvedTask, status }, { tasks: [{ id: 1, status }, { id: 2, draftId: 4, title: "승인", status: "queued" }] });
   assert.deepEqual(denied.element("tasks").options.map((option) => option.value), ["2"]);
   denied.element("tasks").value = "1";
   denied.element("tasks").listeners.change(); await settle();
   assert.equal(denied.element("insert").disabled, true);
-  assert.match(denied.element("result").textContent, /승인된 초안/);
+  assert.match(denied.element("result").textContent, /발행 Job/);
 }
 const empty = await openPanel(false);
-assert.match(empty.element("result").textContent, /승인된 초안이 없습니다/);
+assert.match(empty.element("result").textContent, /발행 Job이 없습니다/);
 assert.equal(empty.element("insert").disabled, true);
+const failedJob = await openPanel(false, { ...approvedTask, status: "failed" }, { tasks: [{ id: 1, draftId: 2, title: "제목", status: "failed" }] });
+failedJob.element("tasks").value = "1"; failedJob.element("tasks").listeners.change(); await settle();
+assert.equal(failedJob.element("insert").disabled, true);
+assert.match(failedJob.element("result").textContent, /재시도를 제공하지 않습니다/);
+const legacyLarge = await openPanel(false, { ...approvedTask, images: Array.from({ length: 4 }, () => ({})) });
+legacyLarge.element("tasks").value = "1"; legacyLarge.element("tasks").listeners.change(); await settle();
+legacyLarge.element("publisher").value = "legacy";
+legacyLarge.element("insert").listeners.click(); await settle();
+assert.equal(legacyLarge.requests.some(message => message.type === "INSERT"), false);
+assert.match(legacyLarge.element("result").textContent, /3장 초과/);
 const revoked = await openPanel(false, approvedTask, { revoke: true });
 revoked.element("tasks").value = "1"; revoked.element("tasks").listeners.change(); await settle();
 revoked.element("insert").listeners.click(); await settle();
 assert.equal(revoked.requests.some((message) => ["DIAGNOSE", "INSERT"].includes(message.type)), false);
 assert.equal(revoked.element("insert").disabled, true);
-assert.match(revoked.element("result").textContent, /승인/);
-const reply = await new Promise((resolve) => listener({ type: "TASKS" }, { id: "fixture" }, resolve));
+assert.match(revoked.element("result").textContent, /취소/);
+const reply = await new Promise((resolve) => listener({ type: "JOBS" }, { id: "fixture" }, resolve));
 assert.equal(reply.error, undefined);
 assert.equal(authenticated, true);
-await new Promise((resolve) => listener({ type: "TASK", id: "1", draftId: "2" }, { id: "fixture" }, resolve));
-assert.equal(fetchedPath, "/api/extension/blog-tasks/1?draftId=2");
-const listed = [1, 2, 3].map((id) => ({ id, draftId: id * 10, title: `task${id}`, status: "approved" }));
-const taskFor = (id) => ({ ...approvedTask, id, draftId: id * 10, title: `task${id}` });
+await new Promise((resolve) => listener({ type: "JOB", id: "00000000-0000-4000-8000-000000000001" }, { id: "fixture" }, resolve));
+assert.equal(fetchedPath, "/api/extension/publication-jobs/00000000-0000-4000-8000-000000000001");
+const listed = [1, 2, 3].map((id) => ({ id, draftId: id * 10, title: `task${id}`, status: "queued" }));
+const taskFor = (id) => ({ ...approvedTask, jobId: String(id), id, draftId: id * 10, title: `task${id}` });
 async function racePanel() {
   const pending = []; let defer = true;
   const panel = await openPanel(false, undefined, { tasks: listed, onTask: (message) => defer
@@ -142,8 +152,8 @@ for (const order of [[0, 1], [1, 0]]) {
   assert.equal(panel.element("insert").disabled, false);
   panel.immediate(); panel.element("insert").listeners.click(); await settle();
   const execution = panel.requests.find((message) => message.type === "INSERT");
-  assert.equal(execution.task.id, 2); assert.equal(execution.task.draftId, 20);
-  assert.equal(panel.requests.filter((m) => m.type === "TASK").at(-1).draftId, "20");
+  assert.equal(execution.jobId, "2"); assert.equal("task" in execution, false);
+  assert.equal(panel.requests.filter((m) => m.type === "JOB").at(-1).id, "2");
 }
 const many = await racePanel();
 for (const id of [1, 2, 3, 1, 3]) many.choose(id);
@@ -164,7 +174,7 @@ executing.pending[0].resolve({ task: taskFor(1) }); await settle();
 executing.element("insert").listeners.click();
 assert.equal(executing.element("tasks").disabled, true);
 assert.equal(executing.element("publisher").disabled, true);
-assert.equal(executing.pending[1].message.id, "1"); assert.equal(executing.pending[1].message.draftId, "10");
+assert.equal(executing.pending[1].message.id, "1");
 executing.choose(2); // Forced change despite disabled UI must also cancel execution.
 executing.pending[1].resolve({ task: taskFor(1) }); await settle();
 assert.equal(executing.requests.some((message) => ["DIAGNOSE", "INSERT"].includes(message.type)), false);

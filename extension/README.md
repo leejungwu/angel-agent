@@ -2,7 +2,7 @@
 
 ## V3 순차 입력 — 실제 draft / 사진 10장 검증 완료
 
-- Side Panel의 `V3 순차 입력`은 API의 `blocks`를 앞에서 뒤로 처리합니다. text block은 `Input.insertText`, image block은 서버 temp API와 CDP `DOM.setFileInputFiles`를 사용합니다. 사진 수 제한은 없으며 현재 task의 모든 image block을 처리합니다. 실제 운영 검증 범위는 사진 10장입니다.
+- Side Panel의 `V3 순차 입력`은 Job snapshot의 `blocks`를 앞에서 뒤로 처리합니다. text block은 `Input.insertText`, image block은 서버 temp API와 CDP `DOM.setFileInputFiles`를 사용합니다. 사진 수 제한은 없으며 snapshot의 모든 image block을 처리합니다. 입력 엔진의 기존 실제 운영 검증 범위는 사진 10장입니다. 새 Job 연결은 mock 검증 상태이며 별도 실검증이 필요합니다.
 - 기존 데이터와 최대 3장 입력 경로는 유지합니다. `기존 안정 버전 · 최대 3장`을 선택하면 해당 경로로 실행합니다. 실패한 V3를 같은 글에서 자동 재실행하지 않습니다.
 - 사용자가 최신 V3로 실제 저장 draft를 사용해 Naver SmartEditor 사진 10장 전체 입력을 확인했습니다. text → image → text 순서, 마지막 본문 입력 및 "입력 완료 - 네이버에서 직접 확인 후 발행하세요" 안내까지 실검증 완료입니다. 이번 문서 작업에서 Naver를 재실행하지 않았습니다. 최종 검수·발행·예약 버튼 클릭은 사용자가 직접 합니다.
 - V3는 사진 버튼 클릭 후 `DOM.getDocument`로 현재 file input을 조회하고 `DOM.setFileInputFiles`로 지정합니다. chooser 이벤트를 기다리지 않습니다. native dialog 차단은 전체 loop 동안 유지하며 종료 시 해제합니다. 실패 단계와 image block 번호를 표시합니다. 기존 3장 경로의 chooser 방식은 유지합니다.
@@ -11,14 +11,14 @@
 
 1. `npm.cmd run build:extension` 후 `extension/dist`를 Chrome에 압축해제된 확장프로그램으로 로드합니다.
 2. 최초 1회 앱 주소와 전용 `ANGEL_EXTENSION_TOKEN`을 입력하고 연결 저장합니다. 설정은 `chrome.storage.local`의 `appUrl`, `extensionToken`에 보관하며 TRUSTED_CONTEXTS로 제한합니다. 재열기/reload 시 자동 연결합니다.
-3. 직접 로그인한 새 Naver 글쓰기 탭을 열고 초안을 선택해 입력합니다. 제목은 기존 V1 CDP 입력·검증을 사용하고, V3 본문은 text/image block을 순차 입력합니다. 사진이 이미 있는 글에는 입력하지 않습니다.
-4. Side Panel 기본 입력 방식은 V3입니다. 목록은 작업별 최신 승인 draft만 표시합니다. 선택한 draftId를 /api/extension/blog-tasks/{taskId}?draftId={draftId}로 전달하며, 서버는 명시 draftId도 승인 여부를 검사합니다. 입력 버튼 클릭 시 같은 draftId를 다시 조회하고 승인된 응답에만 입력을 시작합니다. 승인 draft가 없는 작업은 목록에서 제외됩니다.
+3. 앱에서 승인 Draft를 발행 대기열에 추가합니다. 직접 로그인한 새 Naver 글쓰기 탭을 열고 Side Panel에서 해당 Job을 선택합니다. 제목은 기존 V1 CDP 입력·검증, V3 본문은 text/image block 순차 입력을 사용합니다. 사진이 이미 있는 글에는 입력하지 않습니다.
+4. 목록은 queued/failed Job을 표시하며 queued만 실행합니다. `/api/extension/publication-jobs`의 목록·상세를 조회하고, background가 실행 직전 `/[id]/claim`으로 선점합니다. 서버는 snapshot의 사진 경로로 signed URL을 새로 발급합니다. 현재 Draft/Task 사진으로 배치를 다시 만들지 않습니다. 성공/실패는 같은 attempt에 한해 inserted/failed로 기록합니다. failed 재시도는 아직 제공하지 않습니다.
 5. /prepare는 앱의 수동 복사·검수·fallback 화면이며 Extension을 직접 실행하지 않습니다.
 
 ## Legacy V2: 최대 3장 fallback — 현재 유지
 
 - Extension API는 깨끗한 `bodyText`와 각 이미지의 `insertOffset`, `insertPrefix = bodyText.slice(0, insertOffset)`을 반환합니다. offset은 해당 bodyText의 0-based UTF-16 문자 위치이며 index도 기존 0-based 값을 유지합니다.
-- 위치 선택은 기존 `planBlogImages()`를 그대로 사용합니다. 계획된 문단을 직렬화하고 앞 문단 끝 위치를 offset으로 계산합니다. 수동 /prepare의 사진 위치 미리보기는 별도로 유지합니다.
+- 사진 배치는 Queue 등록 당시 기존 `planBlogImages()` 결과로 고정합니다. 실행 adapter가 고정된 blocks에서 offset/prefix를 복원합니다. 사진 3장 초과 Job은 legacy 실행 전에 차단합니다. 수동 /prepare는 기존 동작을 유지합니다.
 - visible text node를 TreeWalker로 수집합니다. `normalizeForPosition()` 하나로 expected body, 실제 본문, insertPrefix, caret, 최종 본문을 비교합니다. PHOTO_POSITION은 insertPrefix 범위의 문자와 순서만 검증합니다. prefix 끝을 DOM text node/local offset에 대응시키며 raw offset을 DOM에 직접 적용하지 않습니다. 전체 본문 차이는 사진 삽입 후 PHOTO_VERIFY에서 차단합니다. 추가 suffix는 길이와 최대 40자 preview만 기록하며, 위치 실패 시 길이와 최초 불일치 index를 표시합니다.
 - collapsed Range 좌표를 trusted CDP로 클릭하고 실제 caret의 본문 위치를 확인합니다. Enter 두 번 뒤 문단·빈 문단 수 증가와 해당 offset의 빈 문단만 확인하고 그 문단을 클릭합니다. 중간 suffix/DOM identity 검증은 하지 않습니다.
 - localhost Angel Agent와 Chrome은 같은 PC에서 실행해야 합니다. background가 첫 3장을 insertOffset 내림차순으로 처리하며 기존 Bearer 인증으로 POST /api/extension/temp-image에 signedUrl을 보냅니다. 서버는 현재 Supabase 작업 이미지 URL만 fetch하고 파일 형식/10MB 제한을 확인한 뒤 OS TEMP/angel-agent/naver-upload/<uuid>.<png|jpg|webp>에 저장합니다. 반환된 absolutePath를 기존 CDP에 전달합니다. Extension에는 downloads 권한/호출이 없습니다.

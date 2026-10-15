@@ -319,15 +319,16 @@
     return { message: `입력 완료 - 네이버에서 직접 확인 후 발행하세요${cleanupWarning}` };
   }
 
+  let jobRunning = false;
+  const jobIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (sender.id !== chrome.runtime.id) return;
     void (async (): Promise<ExtensionReply> => {
       switch (message.type) {
-        case "TASKS": return { tasks: (await api("/api/extension/blog-tasks")).tasks };
-        case "TASK":
-          if (!message.id || !/^[1-9]\d*$/.test(message.id)) throw new Error("Task ID를 확인해 주세요.");
-          if (message.draftId !== undefined && !/^[1-9]\d*$/.test(message.draftId)) throw new Error("Draft ID를 확인해 주세요.");
-          return { task: await api(`/api/extension/blog-tasks/${message.id}${message.draftId ? `?draftId=${message.draftId}` : ""}`) };
+        case "JOBS": return { jobs: (await api("/api/extension/publication-jobs")).jobs };
+        case "JOB":
+          if (!message.id || !jobIdPattern.test(message.id)) throw new Error("Job ID를 확인해 주세요.");
+          return { task: await api(`/api/extension/publication-jobs/${message.id}`) };
         case "DIAGNOSE": {
           const editor = await scanEditorFrames();
           const writingFrames = editor.diagnostics.filter((frame) => frame.diagnostic?.writing);
@@ -335,12 +336,33 @@
             : editor.found.length === 0 && writingFrames.length === 1 ? writingFrames[0].diagnostic : undefined };
         }
         case "INSERT": {
-          if (!message.task) throw new Error("선택된 초안이 없습니다.");
+          if (!message.jobId || !jobIdPattern.test(message.jobId)) throw new Error("선택된 Job이 없습니다.");
+          if (jobRunning) throw new Error("Job 입력 작업이 이미 진행 중입니다.");
+          jobRunning = true;
+          try {
           const editor = await scanEditorFrames();
           if (editor.found.length !== 1) throw new Error(`SmartEditor 입력 프레임을 확정하지 못했습니다 (${editor.found.length}개). DOM 진단을 확인해 주세요.`);
           const target = editor.found[0];
           if (target.diagnostic.existing && !message.overwrite) throw new Error("기존 글이 있습니다. 덮어쓰기 확인이 필요합니다.");
-          return insertWithDebugger(editor.tabId, target.frameId, message.task, !!message.overwrite, message.publisher);
+          // Only the claimed server snapshot supplies executable data; ignore client task fields.
+          const task: ExtensionTask = await api(`/api/extension/publication-jobs/${message.jobId}/claim`, "POST", { publisher: message.publisher === "legacy" ? "legacy" : "blocks" });
+          if (task.jobId !== message.jobId || !Number.isSafeInteger(task.attemptNo) || (task.attemptNo ?? 0) < 1) throw new Error("Job 실행 응답을 확인하지 못했습니다. 재입력 전에 대기열 상태를 확인하세요.");
+          const record = async (outcome: "inserted" | "failed", errorMessage?: string) => {
+            const result = await api(`/api/extension/publication-jobs/${message.jobId}/result`, "POST", { attemptNo: task.attemptNo, outcome, errorMessage });
+            if (!result.applied && !result.alreadyApplied) throw new Error("현재 실행 번호/상태와 일치하지 않습니다.");
+          };
+          let reply: ExtensionReply;
+          try { reply = await insertWithDebugger(editor.tabId, target.frameId, task, !!message.overwrite, message.publisher === "legacy" ? "legacy" : "blocks"); }
+          catch (error) {
+            const reason = error instanceof Error ? error.message : "네이버 입력 실패";
+            try { await record("failed", reason); }
+            catch { throw new Error(`${reason} JOB_RESULT: 실패 상태 기록을 확인하지 못했습니다. 재실행 전에 대기열을 확인하세요.`); }
+            throw error;
+          }
+          try { await record("inserted"); }
+          catch { return { message: `${reply.message} JOB_RESULT: 입력은 완료됐지만 상태 기록을 확인하지 못했습니다. 재입력하지 말고 대기열과 네이버를 직접 확인하세요.` }; }
+          return reply;
+          } finally { jobRunning = false; }
         }
         default: throw new Error("지원하지 않는 요청입니다.");
       }

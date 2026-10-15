@@ -3,12 +3,13 @@ import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import ts from "typescript";
 const code = ts.transpileModule(await readFile("extension/background.ts", "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
-const task = { id: 1, title: "제목", bodyText: "abcdefghij", images: [2, 6, 8, 9].map((insertOffset, index) => ({ id: index, index, insertOffset, insertPrefix: "abcdefghij".slice(0, insertOffset), signedUrl: `https://fixture.test/${index}.png` })) };
+const task = { id: 1, title: "제목", bodyText: "abcdefghij", images: [2, 6, 8].map((insertOffset, index) => ({ id: index, index, insertOffset, insertPrefix: "abcdefghij".slice(0, insertOffset), signedUrl: `https://fixture.test/${index}.png` })) };
+const jobId = "00000000-0000-4000-8000-000000000001";
 async function scenario(input = task, failure = "", publisher = "legacy") {
   let listener, intercepted = false, sequence = 0, uploadVerified = 0;
   const deleteAttempts = new Map(), cleanupDelays = [], cleanupUploadCounts = [];
   const handlers = new Set(), commands = [], messages = [], downloads = [], removed = [], erased = [];
-  const timeline = [];
+  const timeline = [], outcomes = [];
   const expectedUploads = publisher === "blocks" ? input.images.length : Math.min(input.images.length, 3);
   const logs = [];
 
@@ -55,6 +56,16 @@ async function scenario(input = task, failure = "", publisher = "legacy") {
   vm.runInNewContext(code, { chrome, URL, AbortSignal, fetch: async (url, options) => {
     assert.equal(options.headers.Authorization, "Bearer fixture-secret");
     assert.equal(url.origin, "http://localhost:3000");
+    if (url.pathname.endsWith("/claim")) {
+      assert.equal(commands.length, 0, "claim must precede CDP input");
+      if (publisher === "legacy" && input.images.length > 3) return { ok: false, json: async () => ({ error: "사진 3장 초과 Job은 V3 순차 입력을 사용하세요." }) };
+      return { ok: true, json: async () => ({ ...input, jobId, attemptNo: 1 }) };
+    }
+    if (url.pathname.endsWith("/result")) {
+      outcomes.push(JSON.parse(options.body));
+      if (failure === "result") return { ok: false, json: async () => ({ error: "fixture result write error" }) };
+      return { ok: true, json: async () => ({ applied: true }) };
+    }
     if (options.method === "POST") {
       const body = JSON.parse(options.body); downloads.push(body);
       if (failure === "create") return { ok: false, status: 500, json: async () => ({ error: "fixture create failure" }) };
@@ -72,13 +83,20 @@ async function scenario(input = task, failure = "", publisher = "legacy") {
     return { ok: true, json: async () => ({ ok: true }) };
   }, setTimeout: (fn, ms) => { if ([500, 1500, 3000].includes(ms)) { cleanupDelays.push(ms); return setTimeout(fn, 0); } return setTimeout(fn, ms === 250 ? 0 : failure === "timeout" && ms === 15000 ? 5 : ms); }, clearTimeout, Date,
     console: { info: (...args) => logs.push(args), warn: (...args) => logs.push(args) } });
-  const reply = await new Promise((resolve) => listener({ type: "INSERT", task: input, publisher }, { id: "fixture" }, resolve));
+  const reply = await new Promise((resolve) => listener({ type: "INSERT", jobId, publisher, task: { title: "untrusted" } }, { id: "fixture" }, resolve));
   assert.equal(handlers.size, 0); assert.equal(intercepted, false);
   if (["", "cleanup", "cleanupRetry", "cleanupOne"].includes(failure)) assert.ok(cleanupUploadCounts.every((count) => count === expectedUploads));
-  return { reply, commands, messages, downloads, removed, erased, cleanupDelays, timeline, logs };
+  return { reply, commands, messages, downloads, removed, erased, cleanupDelays, timeline, logs, outcomes };
 }
 const success = await scenario();
 assert.equal(success.reply.error, undefined);
+assert.equal(success.outcomes[0].outcome, "inserted");
+assert.equal(success.outcomes[0].attemptNo, 1);
+const tooMany = await scenario({ ...task, images: [...task.images, task.images[0]] });
+assert.match(tooMany.reply.error, /3장 초과/); assert.equal(tooMany.commands.length, 0);
+const lostResult = await scenario(task, "result");
+assert.equal(lostResult.reply.error, undefined); assert.match(lostResult.reply.message, /JOB_RESULT/);
+assert.deepEqual(lostResult.outcomes.map(item => item.outcome), ["inserted"], "result write failure must never mark successful input failed");
 assert.deepEqual(success.downloads.map((d) => d.signedUrl), [task.images[2].signedUrl, task.images[1].signedUrl, task.images[0].signedUrl]);
 assert.equal(code.includes("chrome.downloads"), false);
 assert.equal(success.commands.filter((c) => c.method === "DOM.setFileInputFiles").length, 3);
@@ -91,6 +109,7 @@ assert.deepEqual(success.commands.filter((c) => c.method === "Input.insertText")
 for (const failure of ["create", "chooser", "timeout", "upload", "EDITOR_PHOTO_VERIFY", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY"]) {
   const failed = await scenario(task, failure);
   assert.ok(failed.reply.error);
+  assert.equal(failed.outcomes[0].outcome, "failed");
   assert.match(failed.reply.error, /PHOTO_(TEMP_CREATE|FILE_CHOOSER|UPLOAD|POSITION|EMPTY_PARAGRAPH)/);
   assert.equal(failed.downloads.length, 1); assert.equal(failed.erased.length, failure === "create" ? 0 : 1);
   if (failure !== "create") assert.equal(failed.removed.length, 1);

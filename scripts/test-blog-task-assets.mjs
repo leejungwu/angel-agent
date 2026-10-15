@@ -66,6 +66,7 @@ rows.push({ id: 16, blog_task_id: 8, sort_order: 0,
   const removed = [];
   const restored = [];
   let failSecondDelete = false;
+  let referencedPath = null;
   const deleteSupabase = {
     from(table) {
       assert.equal(table, "blog_task_assets");
@@ -107,11 +108,16 @@ rows.push({ id: 16, blog_task_id: 8, sort_order: 0,
   const deletion = load("lib/blog-task-assets/delete.ts", {
     "@/lib/supabase": { supabase: deleteSupabase },
     "@/lib/blog-task-assets": assets,
+    "@/lib/blog-publishing/publication-jobs": { isAssetReferencedByPublicationJob: async ({ storagePath }) => storagePath === referencedPath },
   });
   assert.equal(await deletion.removeAllBlogTaskAssets(7), 2);
   assert.deepEqual(removed, targetRows.map((row) => row.storage_path));
   assert.deepEqual(restored, []);
   removed.length = 0;
+  referencedPath = targetRows[1].storage_path;
+  await assert.rejects(() => deletion.removeAllBlogTaskAssets(7), /발행 대기열/);
+  assert.equal(removed.length, 0, "preflight must protect all images before deleting any");
+  referencedPath = null;
   failSecondDelete = true;
   await assert.rejects(() => deletion.removeAllBlogTaskAssets(7), /1\/2.*복구/);
   assert.deepEqual(restored, [targetRows[1].storage_path]);

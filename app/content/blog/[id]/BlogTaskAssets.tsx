@@ -7,7 +7,6 @@ import {
   BLOG_TASK_ASSET_BUCKET, BLOG_TASK_IMAGE_TYPES, blogTaskAssetPath,
   type BlogTaskAsset,
 } from "@/lib/blog-task-assets";
-import { removeAllBlogTaskAssets } from "@/lib/blog-task-assets/delete";
 import { compactBlogImage } from "@/lib/blog-task-assets/compact";
 
 export default function BlogTaskAssets({ taskId, assets, errorMessage }: {
@@ -106,8 +105,10 @@ export default function BlogTaskAssets({ taskId, assets, errorMessage }: {
     setError("");
     setSuccess("");
     try {
-      const count = await removeAllBlogTaskAssets(taskId);
-      setSuccess(`${count}장의 사진을 삭제했습니다.`);
+      const response = await fetch(`/api/blog/tasks/${taskId}/assets`, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "사진을 삭제하지 못했습니다.");
+      setSuccess(`${result.deleted}장의 사진을 삭제했습니다.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "사진 삭제 실패");
     } finally {

@@ -62,15 +62,23 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 - [x] Side Panel selection race 방지 / 연결 설정 저장
 - [x] 수동 발행 준비 / 본문 복사 / 사진 미리보기·번호순 다운로드·ZIP
 - [x] 서버 임시 사진 준비 / 종료 cleanup / 실패 단계 표시
-- [ ] execution snapshot — draft 내용·사진·배치 설정 고정
-- [ ] 영속 실행 / 실패 이력
-- [ ] Publishing Queue / 예약
+- [x] Publication Job 기반 — 테이블 migration / 승인 Draft 등록 함수 / immutable 실행 snapshot / runtime parser / 중복 등록 방지
+- [x] 웹 Queue — 승인 Draft 등록 / Job 목록·snapshot 사진 수 / queued 제거
+- [x] 앱 사진·Task 삭제 경로의 모든 상태 Job 참조 보호
+- [ ] Publication Job migration 적용 / 실제 웹 운영 검증
+- [ ] 등록·사진 삭제 동시 요청의 원자성 / DB·Storage 직접 삭제 보호
+- [x] Publication Job의 Extension 입력 연결 / snapshot adapter / 실행 직전 사진 URL 발급
+- [x] queued 조건부 선점 / attempt_no / inserted·failed 결과 기록 / 늦은 결과 차단
+- [x] snapshot 기반 V3 payload / legacy 3장 초과 차단 — mock 검증
+- [ ] 새 Job 실행 연결의 실제 Chrome/Naver 운영 검증
+- [ ] 실행별 상세 실패 이력 / 선점 응답 유실·비정상 종료 상태 복구
+- [ ] Queue 실행 상태 전이 / 예약
 - [ ] 중간 실패 재개 / 재시도 workflow
 - [ ] 장시간 signed URL 갱신 / 비정상 종료 cleanup
 - [ ] 최종 자동 발행 / 예약 확인 자동화
 - [ ] 발행 URL / 시간 / 결과 저장
 
-현재 입력 완료 뒤 최종 검수·발행·예약은 사람이 직접 수행한다. 승인 목록 화면은 실행 Queue가 아니다.
+현재 입력 완료 뒤 최종 검수·발행·예약은 사람이 직접 수행한다. Extension은 queued Job의 고정 snapshot을 실행하고 입력 결과만 기록한다. failed Job은 조회만 제공하며 재시도는 후속 단계다.
 
 ### 키워드 / 운영 분석
 

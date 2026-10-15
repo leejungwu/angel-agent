@@ -11,6 +11,7 @@ import type { BlogPreset } from "@/lib/blog-generation/presets";
 import { readBlogGenerationSnapshot } from "@/lib/blog-generation/snapshot";
 import BlogPresetControl from "./BlogPresetControl";
 import BlogGenerationDetails from "./BlogGenerationDetails";
+import AddPublicationJob from "./AddPublicationJob";
 
 export type Draft = {
   title: string;
@@ -308,6 +309,9 @@ export default function GenerateBlogDraft({
         </div>
       )}
       {saved && <p role="status" className="mt-3 text-sm text-zinc-600">초안을 저장했습니다.</p>}
+      {draft?.id != null && draft.status === "approved" && !editingDraft && !controlsBusy && (
+        <AddPublicationJob key={draft.id} taskId={taskId} draftId={draft.id} />
+      )}
       {bodyLength && (
         <p role="status" className={`mt-3 text-sm ${bodyLength.status === "ok" ? "text-zinc-500" : "text-amber-700"}`}>
           본문 {bodyLength.characters.toLocaleString("ko-KR")}자
