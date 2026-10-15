@@ -118,6 +118,19 @@ assert.notEqual(afterChanges.images[0].signedUrl, beforeChanges.images[0].signed
 assert.equal(afterChanges.attemptNo, 2);
 reset(); row.execution_snapshot.bodyText = "잘못된 본문";
 await assert.rejects(api.claimPublicationJob(id, "blocks")); assert.equal(row.status, "queued");
+reset(1);
+await api.claimPublicationJob(id, "blocks");
+const recoverySnapshot = JSON.stringify(row.execution_snapshot);
+row.started_at = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+await jobs.transitionPublicationJob(id, { action: "recover" });
+assert.equal(row.status, "queued"); assert.equal(row.attempt_no, 1);
+assert.equal(JSON.stringify(row.execution_snapshot), recoverySnapshot);
+assert.equal((await api.recordPublicationResult(id, 1, "inserted")).applied, false);
+await api.claimPublicationJob(id, "blocks");
+assert.equal(row.attempt_no, 2);
+assert.equal((await api.recordPublicationResult(id, 1, "failed", "late old execution")).applied, false);
+assert.equal(row.status, "inserting");
+assert.equal((await api.recordPublicationResult(id, 2, "inserted")).applied, true);
 
 const common = { "@/lib/blog-publishing/publication-extension": api, "@/lib/blog-publishing/publication-jobs": jobs,
   "@/lib/blog-publishing/extension-api": { authorizeExtension: () => denied ? Response.json({ error: "Unauthorized" }, { status: 401 }) : null } };

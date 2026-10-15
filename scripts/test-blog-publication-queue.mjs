@@ -23,7 +23,7 @@ const rows = {
   blog_publication_jobs: [],
 };
 const writes = [], orders = [];
-let nextId = 0, storageRemoves = 0, dbError = false;
+let nextId = 0, storageRemoves = 0, dbError = false, beforeUpdate;
 const db = { from(table) {
   assert.ok(table in rows);
   let operation = "read", input, max = Infinity;
@@ -44,6 +44,7 @@ const db = { from(table) {
   };
   function run(single) {
     if (dbError) return { error: { code: "fixture" }, data: null };
+    if (operation === "update" && beforeUpdate) { const change = beforeUpdate; beforeUpdate = undefined; change(); }
     if (operation === "insert") {
       if (rows[table].some(row => row.blog_draft_id === input.blog_draft_id)) return { error: { code: "23505" }, data: null };
       const row = { ...structuredClone(input), id: `${String(++nextId).padStart(8, "0")}-1234-1234-1234-123456789abc`, status: "queued", attempt_no: 0, created_at: "2026-10-15T00:00:00Z", inserted_at: null, published_at: null };
@@ -74,6 +75,12 @@ const publication = load("lib/blog-publishing/publication-jobs.ts", {
   "@/lib/supabase": { supabase: db }, "../blog-task-assets": assetsModule, "./downloads": downloads, "./preparation": preparation, "./blocks": blockUtils,
 });
 const common = { "@/lib/supabase": { supabase: db }, "@/lib/blog-publishing/publication-jobs": publication };
+const recoveryNow = Date.parse("2026-10-15T12:00:00Z");
+for (const [age, expected] of [[599999, false], [600000, true], [600001, true], [-1, false]]) {
+  assert.equal(publication.isStalePublicationInserting({ status: "inserting", started_at: new Date(recoveryNow - age).toISOString() }, recoveryNow), expected);
+}
+for (const started_at of [null, "invalid"]) assert.equal(publication.isStalePublicationInserting({ status: "inserting", started_at }, recoveryNow), false);
+assert.equal(publication.isStalePublicationInserting({ status: "queued", started_at: "2026-10-15T00:00:00Z" }, recoveryNow), false);
 const create = load("app/api/blog/publication-jobs/route.ts", common);
 const remove = load("app/api/blog/publication-jobs/[id]/route.ts", common);
 const deletion = load("lib/blog-task-assets/delete.ts", { ...common, "@/lib/blog-task-assets": assetsModule });
@@ -156,6 +163,30 @@ for (const status of ["queued", "inserting", "inserted", "published"]) {
   assert.equal((await patch({ action: "retry" })).status, 409);
 }
 assert.equal((await patch({ action: "inserting", status: "published" })).status, 400);
+job.status = "inserting"; job.started_at = new Date(Date.now() - 9 * 60 * 1000).toISOString();
+assert.equal((await patch({ action: "recover" })).status, 409);
+assert.equal((await patch({ action: "recover", started_at: "2000-01-01T00:00:00Z" })).status, 409, "client time must not override stored started_at");
+assert.equal(job.status, "inserting");
+let insertingHtml = renderToStaticMarkup(await page());
+assert.ok(insertingHtml.includes("네이버 입력 중")); assert.equal(insertingHtml.includes("다시 대기열로"), false);
+job.started_at = new Date(Date.now() - 10 * 60 * 1000).toISOString(); job.inserted_at = null; job.error_message = "기록 미확인";
+insertingHtml = renderToStaticMarkup(await page());
+assert.ok(insertingHtml.includes("입력이 중단된 것으로 보입니다")); assert.ok(insertingHtml.includes("다시 대기열로"));
+const recovered = await Promise.all([patch({ action: "recover" }), patch({ action: "recover" })]);
+assert.deepEqual(recovered.map(response => response.status).sort(), [200, 409]);
+assert.equal(job.status, "queued"); assert.equal(job.attempt_no, 3);
+assert.equal(job.started_at, null); assert.equal(job.error_message, null); assert.equal(job.inserted_at, null);
+assert.equal(JSON.stringify(job.execution_snapshot), source.snapshot);
+assert.equal(job.blog_task_id, source.taskId); assert.equal(job.blog_draft_id, source.draftId);
+for (const change of [() => { job.status = "inserted"; }, () => { job.attempt_no++; job.started_at = new Date().toISOString(); }]) {
+  job.status = "inserting"; job.started_at = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+  beforeUpdate = change;
+  assert.equal((await patch({ action: "recover" })).status, 409, "completion/new claim racing recovery must win");
+}
+for (const status of ["queued", "inserted", "published", "failed"]) {
+  job.status = status; job.started_at = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  assert.equal((await patch({ action: "recover" })).status, 409);
+}
 job.status = "queued";
 assert.equal((await remove.DELETE(request({}), context(job.id))).status, 200);
 assert.equal(rows.blog_publication_jobs.length, 0);
@@ -214,6 +245,16 @@ try {
   await walk(render(transitionControl, { jobId: "job", status: "failed" })).find(node => node.type === "button").props.onClick();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(refreshes, 3);
+  state = [];
+  globalThis.confirm = () => false;
+  let recoveryRequests = 0;
+  globalThis.fetch = async (_url, options) => { recoveryRequests++; assert.deepEqual(JSON.parse(options.body), { action: "recover" }); return Response.json({ job: { status: "queued" } }); };
+  walk(render(transitionControl, { jobId: "job", status: "inserting" })).find(node => node.type === "button").props.onClick();
+  assert.equal(recoveryRequests, 0);
+  globalThis.confirm = () => true;
+  walk(render(transitionControl, { jobId: "job", status: "inserting" })).find(node => node.type === "button").props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(recoveryRequests, 1); assert.equal(refreshes, 4);
 } finally { globalThis.fetch = originalFetch; globalThis.confirm = originalConfirm; }
 const AddStub = () => null;
 const generate = load("app/content/blog/[id]/GenerateBlogDraft.tsx", {

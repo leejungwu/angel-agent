@@ -31,9 +31,23 @@ export class PublicationJobError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
 
+export const PUBLICATION_INSERTING_STALE_MS = 10 * 60 * 1000;
+export function isStalePublicationInserting(job: Pick<PublicationJob, "status" | "started_at">, now = Date.now()): boolean {
+  if (job.status !== "inserting" || !job.started_at) return false;
+  const started = Date.parse(job.started_at);
+  return Number.isFinite(started) && Number.isFinite(now) && now - started >= PUBLICATION_INSERTING_STALE_MS;
+}
+
 export async function transitionPublicationJob(id: string, input: { action?: unknown; publishedUrl?: unknown }) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new PublicationJobError("Job ID가 올바르지 않습니다.");
-  if (input.action !== "publish" && input.action !== "retry") throw new PublicationJobError("허용되지 않는 상태 변경입니다.");
+  if (input.action !== "publish" && input.action !== "retry" && input.action !== "recover") throw new PublicationJobError("허용되지 않는 상태 변경입니다.");
+  let recovery: { started_at: string; attempt_no: number } | undefined;
+  if (input.action === "recover") {
+    const { data, error } = await supabase.from("blog_publication_jobs").select("status,started_at,attempt_no").eq("id", id).maybeSingle();
+    if (error) throw new Error("Publication Job 복구 상태 조회 실패");
+    if (!data || !isStalePublicationInserting(data)) throw new PublicationJobError("입력 시작 후 10분 이상 지난 입력 중 Job만 복구할 수 있습니다.", 409);
+    recovery = { started_at: data.started_at, attempt_no: data.attempt_no };
+  }
   let publishedUrl: string | null = null;
   if (input.action === "publish" && input.publishedUrl != null) {
     if (typeof input.publishedUrl !== "string") throw new PublicationJobError("발행 URL은 http/https 주소로 입력해 주세요.");
@@ -50,9 +64,13 @@ export async function transitionPublicationJob(id: string, input: { action?: unk
   const changes = input.action === "publish"
     ? { status: "published", published_at: new Date().toISOString(), published_url: publishedUrl, error_message: null }
     : { status: "queued", error_message: null, started_at: null, inserted_at: null };
-  const { data, error } = await supabase.from("blog_publication_jobs").update(changes)
-    .eq("id", id).eq("status", input.action === "publish" ? "inserted" : "failed").select("id,status").maybeSingle();
+  let query = supabase.from("blog_publication_jobs").update(changes)
+    .eq("id", id).eq("status", input.action === "publish" ? "inserted" : input.action === "recover" ? "inserting" : "failed");
+  // Do not recover a completed execution or a newer claim after the stale read.
+  if (recovery) query = query.eq("started_at", recovery.started_at).eq("attempt_no", recovery.attempt_no);
+  const { data, error } = await query.select("id,status").maybeSingle();
   if (error) throw new Error("Publication Job 상태 저장 실패");
+  if (!data && recovery) throw new PublicationJobError("입력 상태가 변경되어 복구하지 않았습니다. 목록을 새로고침하세요.", 409);
   if (!data) throw new PublicationJobError(input.action === "publish" ? "네이버 입력 완료 상태의 Job만 발행 완료로 기록할 수 있습니다." : "입력 실패 상태의 Job만 다시 대기열로 보낼 수 있습니다.", 409);
   return data;
 }

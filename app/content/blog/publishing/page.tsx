@@ -1,12 +1,12 @@
 export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { parsePublicationSnapshot, type PublicationJob } from "@/lib/blog-publishing/publication-jobs";
+import { isStalePublicationInserting, parsePublicationSnapshot, type PublicationJob } from "@/lib/blog-publishing/publication-jobs";
 import RemovePublicationJob from "./RemovePublicationJob";
 import PublicationJobTransition from "./PublicationJobTransition";
 
 const STATUS_LABELS: Record<PublicationJob["status"], string> = {
-  queued: "발행 대기", inserting: "입력 중", inserted: "네이버 입력 완료", published: "발행 완료", failed: "입력 실패",
+  queued: "발행 대기", inserting: "네이버 입력 중", inserted: "네이버 입력 완료", published: "발행 완료", failed: "입력 실패",
 };
 function date(value: string | null) {
   return value ? new Date(value).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }) : "-";
@@ -14,7 +14,7 @@ function date(value: string | null) {
 
 export default async function PublishingQueuePage() {
   const { data, error } = await supabase.from("blog_publication_jobs")
-    .select("id,blog_task_id,blog_draft_id,status,execution_snapshot,created_at,inserted_at,published_at,published_url,error_message")
+    .select("id,blog_task_id,blog_draft_id,status,execution_snapshot,created_at,started_at,inserted_at,published_at,published_url,error_message")
     .order("created_at", { ascending: false }).order("id", { ascending: false });
   return <main className="p-10">
     <div className="flex items-center justify-between gap-4">
@@ -26,12 +26,13 @@ export default async function PublishingQueuePage() {
       {error ? <p role="alert">발행 대기열을 조회하지 못했습니다. DB migration 적용 상태를 확인해 주세요.</p>
         : !data?.length ? <p className="text-zinc-500">등록된 발행 작업이 없습니다.</p>
           : data.map(job => {
+            const staleInserting = isStalePublicationInserting(job);
             let snapshot;
             try { snapshot = parsePublicationSnapshot(job.execution_snapshot); }
             catch { return <article key={job.id} className="rounded-xl border bg-white p-5"><p role="alert">Job {job.id}: 저장된 실행 자료를 확인할 수 없습니다.</p></article>; }
             return <article key={job.id} className="rounded-xl border bg-white p-5">
               <h2 className="text-xl font-bold">{snapshot.title}</h2>
-              <p className="mt-2 text-sm text-zinc-500">Task #{job.blog_task_id} · Draft #{job.blog_draft_id} · {STATUS_LABELS[job.status as PublicationJob["status"]] ?? "상태 확인 필요"} · 사진 {snapshot.images.length}장</p>
+              <p className="mt-2 text-sm text-zinc-500">Task #{job.blog_task_id} · Draft #{job.blog_draft_id} · {staleInserting ? "입력이 중단된 것으로 보입니다" : STATUS_LABELS[job.status as PublicationJob["status"]] ?? "상태 확인 필요"} · 사진 {snapshot.images.length}장</p>
               <dl className="mt-3 space-y-1 text-sm text-zinc-500">
                 <div><dt className="inline">Queue 등록: </dt><dd className="inline">{date(job.created_at)}</dd></div>
                 <div><dt className="inline">네이버 입력 완료: </dt><dd className="inline">{date(job.inserted_at)}</dd></div>
@@ -45,6 +46,7 @@ export default async function PublishingQueuePage() {
               )}
               {job.status === "queued" && <RemovePublicationJob jobId={job.id} />}
               {(job.status === "inserted" || job.status === "failed") && <PublicationJobTransition jobId={job.id} status={job.status} />}
+              {staleInserting && <PublicationJobTransition jobId={job.id} status="inserting" />}
             </article>;
           })}
     </div>

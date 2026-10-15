@@ -71,7 +71,8 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 - [x] queued 조건부 선점 / attempt_no / inserted·failed 결과 기록 / 늦은 결과 차단
 - [x] snapshot 기반 V3 payload / legacy 3장 초과 차단 — mock 검증
 - [ ] 새 Job 실행 연결의 실제 Chrome/Naver 운영 검증
-- [ ] 실행별 상세 실패 이력 / 선점 응답 유실·비정상 종료 상태 복구
+- [ ] 실행별 상세 실패 이력
+- [x] 10분 이상 지난 inserting 수동 복구 / 시작 시각·attempt 조건부 보호 / 자동 재실행 없음
 - [x] 웹 수동 발행 완료 기록 / 선택 http·https URL / published_at 기록
 - [x] failed Job 동일 snapshot 재대기 / 다음 claim에서만 attempt 증가
 - [ ] 예약 발행
