@@ -74,7 +74,7 @@ export default async function BlogTaskDetailPage({
     presets = presetRows ?? [];
     presetsErrorMessage = presetsError ? "프리셋 조회 실패: DB migration 적용 여부를 확인해 주세요." : undefined;
     const { data: taskAssets, error: assetError } = await supabase.from("blog_task_assets")
-      .select("id, storage_path, file_name, sort_order")
+      .select("id, storage_path, file_name, sort_order, original_storage_path, edit_metadata")
       .eq("blog_task_id", task.id)
       .order("sort_order", { ascending: true })
       .order("id", { ascending: true })

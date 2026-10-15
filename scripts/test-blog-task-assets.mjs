@@ -27,7 +27,8 @@ assert.throws(() => assets.blogTaskAssetPath("../8", "id", "a.png", "image/png")
 assert.throws(() => assets.blogTaskAssetPath(7, "id", "a.txt", "text/plain"));
 assert.deepEqual(assets.scaledBlogImageSize(3600, 2400), { width: 1800, height: 1200 });
 assert.deepEqual(assets.scaledBlogImageSize(800, 600), { width: 800, height: 600 });
-const compact = load("lib/blog-task-assets/compact.ts", { "@/lib/blog-task-assets": assets }).compactBlogImage;
+const imageEdit = load("lib/blog-task-assets/edit.ts", { "../blog-task-assets": assets });
+const compact = load("lib/blog-task-assets/compact.ts", { "@/lib/blog-task-assets": assets, "./edit": imageEdit }).compactBlogImage;
 const originalBitmap = globalThis.createImageBitmap;
 const originalDocument = globalThis.document;
 let generatedBlob = new Blob(["smaller"], { type: "image/webp" });

@@ -190,6 +190,7 @@ const reactMock = { ...React, useRef: value => { const index = hook++; if (!(ind
 const Form = load("app/content/blog/[id]/BlogTaskAssets.tsx", {
   ...mocks, react: reactMock, "next/navigation": { useRouter: () => ({ refresh: () => refreshed++ }) },
   "@/lib/blog-task-assets/compact": {}, "./ImagePlacementSettings": { default: () => null },
+  "./BlogImageEditor": { default: () => null },
   "@/lib/blog-publishing/downloads": downloads,
 }).default;
 function render() { hook = 0; return Form({ taskId: 7, assets: downloads.orderedTaskImages(7, assets) }); }
@@ -227,6 +228,19 @@ try {
   globalThis.fetch = async () => ({ ok: false, json: async () => ({ error: "전체 삭제 API 실패" }) });
   await nodes(render(), node => node.type === "button" && node.props.children === "사진 전체 삭제")[0].props.onClick();
   assert.ok(nodes(render(), node => node.props?.role === "alert").some(node => String(node.props.children).includes("전체 삭제 API 실패")));
+  states.length = 0; reset(); assets[0].id = 7; assets[0].edit_metadata = { brightness: 110 };
+  tree = render();
+  assert.ok(nodes(tree, node => node.type === "span").some(node => React.Children.toArray(node.props.children).join("").includes("상태: 편집본")));
+  nodes(tree, node => node.type === "button" && node.props.children === "편집")[0].props.onClick();
+  tree = render();
+  const editor = nodes(tree, node => !!node.props?.onSaved)[0];
+  assert.equal(editor.props.asset.id, 7);
+  const siblingKeys = tree.props.children.filter(child => React.isValidElement(child) && child.key !== null).map(child => child.key);
+  assert.equal(new Set(siblingKeys).size, siblingKeys.length, "Equal Task/asset IDs must have distinct sibling keys");
+  assert.equal(nodes(tree, node => node.type === "button" && node.props.children === "사진 전체 삭제")[0].props.disabled, true);
+  editor.props.onClose(); assert.equal(nodes(render(), node => !!node.props?.onSaved).length, 0);
+  nodes(render(), node => node.type === "button" && node.props.children === "편집")[0].props.onClick();
+  const beforeSaveRefresh = refreshed; nodes(render(), node => !!node.props?.onSaved)[0].props.onSaved(); assert.equal(refreshed, beforeSaveRefresh + 1);
 } finally { globalThis.fetch = oldFetch; globalThis.confirm = oldConfirm; }
 
 const sql = readFileSync("supabase/migrations/202610150005_blog_image_management.sql", "utf8");

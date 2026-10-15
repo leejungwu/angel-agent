@@ -122,6 +122,23 @@ Draft 저장과 Task 상태 변경은 별도 DB 요청이다. Draft 편집 저�
   Blog 사진 삭제는 Product 원본을 삭제하지 않는다. Product 선택 순서 대신 기존 Product sort_order / id 순서로 뒤에 추가한다.
   복사 후 DB 저장 실패 시 미참조 복사본만 정리하며, 저장 여부를 확인할 수 없으면 파일을 보존하고 오류를 표시한다.
 - `lib/blog-task-assets/compact.ts`, `lib/blog-task-assets.ts`: 크기 계산·WebP 압축 후보와 경로/형식 규칙.
+- `BlogImageEditor.tsx`는 같은 Task 화면 안의 편집 패널이다. 원본에서 crop을 선택하고, 잘린 결과에서 사각 Blur 영역을 지정한다.
+  crop 좌표는 원본 크기의 비율, Blur 좌표는 crop 결과 크기의 비율이다. Crop 변경 시 기존 Blur 영역을 초기화한다.
+  `lib/blog-task-assets/edit.ts`의 한 Canvas 렌더러가 crop·기본 resize·밝기·대비·채도·색온도·선명도·Blur·테두리·워터마크 순서로 결과를 만든다.
+  기존 v1 결과를 보존하기 위해 보정 전 최대 1800px 크기를 먼저 확정한다. 새 필드가 없는 metadata는 대비/채도 100,
+  색온도/선명도 0, 필터 none, 테두리 끄기로 해석하며 neutral filter를 추가 적용하지 않는다.
+  색온도는 R/B 채널을 반대 방향으로 조정하고, 선명도는 강도를 제한한 5점 convolution을 사용한다.
+  필터 6종은 보정값만 설정하며 이후 수동 조정을 허용한다. 별도의 숨은 필터 효과는 없다.
+  테두리는 캔버스 안쪽에 그려 크기를 바꾸지 않는다. 미리보기는 최대 900px이며 Blur/테두리/워터마크 크기도 비례 축소한다.
+  파일 용량은 마지막 조작 450ms 뒤 최종 해상도 WebP Blob으로 계산한다. 오래된 계산 결과는 버리고 저장 시 동일 설정 Blob을 재사용한다.
+  슬라이더 조작은 Storage/DB 요청을 하지 않는다. 결과 영역은 실제 저장 크기·WebP·예상 KB를 표시한다.
+  긴 변 최대 1800px·WebP 품질 0.82를 직접 업로드 압축과 공유한다. 재편집은 항상 Task 원본에서 시작해 반복 압축을 피한다.
+- `/api/blog/tasks/[id]/assets/[assetId]/edit`는 원본 URL 조회, 새 편집본 저장, 원본 복원을 담당한다.
+  `edit-server.ts`는 현재 경로 조건부 UPDATE로 동시 편집을 거부하며 asset ID·순서·Product 출처를 바꾸지 않는다.
+  nullable `original_storage_path`가 없으면 현재 경로가 원본이다. 첫 편집부터 원본 경로를 보존하고 `edit_metadata`를 저장한다.
+  원본 복원은 현재 경로를 원본으로 바꾸고 metadata만 null로 지운다. Storage overwrite는 사용하지 않는다.
+  원본과 이전 편집본은 기존 Job을 위해 보존하며, 별도의 버전 목록·자동 정리 시스템은 만들지 않는다.
+  `/prepare`와 새 Job은 현재 storage_path를 사용하고, 기존 Job·Extension은 고정 snapshot 경로를 계속 사용한다.
 - `lib/blog-publishing/downloads.ts`: Task 경로 검사·순서 정리·번호 파일명·수동 ZIP.
 - `lib/blog-publishing/image-layout.ts`: prose가 부족하면 문단을 나누고 사진을 넣을 경계를 계획한다.
   기존 even 선택식은 `chooseImagePositions()`에서 유지한다.
@@ -153,6 +170,9 @@ Task 설정 변경은 Draft 내용·상태와 기존 Job에 영향을 주지 않
 사진 관리에는 `202610150005_blog_image_management.sql`을 별도로 적용해야 한다.
 이 migration은 출처 컬럼·unique index·순서 저장 RPC와 기존 내부 도구 방식의 sort_order UPDATE 권한을 추가한다.
 기존 직접 업로드는 출처가 null이며 그대로 동작한다. 이전 앱으로 되돌릴 때 추가 컬럼·함수는 유지할 수 있다.
+이미지 편집에는 `202610150006_blog_image_editor.sql`을 별도로 적용해야 한다.
+이 migration은 원본 경로·편집 metadata와 필요한 컬럼 UPDATE 권한만 추가하며 기존 행을 backfill하지 않는다.
+이전 앱으로 되돌리더라도 원본/편집 파일과 nullable 컬럼은 유지한다.
 
 ## Blog 발행 흐름
 

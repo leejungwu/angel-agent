@@ -10,6 +10,7 @@ import {
 import { compactBlogImage } from "@/lib/blog-task-assets/compact";
 import ImagePlacementSettings from "./ImagePlacementSettings";
 import { orderedTaskImages } from "@/lib/blog-publishing/downloads";
+import BlogImageEditor from "./BlogImageEditor";
 
 type ProductPhoto = { id: string | number; file_name: string | null; previewUrl: string; added: boolean };
 
@@ -37,7 +38,8 @@ export default function BlogTaskAssets({ taskId, assets, errorMessage, imagePlac
   const confirmedOrder = useRef(photos);
   const savingOrder = useRef(false);
   const [reordering, setReordering] = useState(false);
-  const listBusy = busy || reordering;
+  const [editing, setEditing] = useState<BlogTaskAsset | null>(null);
+  const listBusy = busy || reordering || !!editing;
 
   useEffect(() => {
     if (savingOrder.current) return;
@@ -60,7 +62,7 @@ export default function BlogTaskAssets({ taskId, assets, errorMessage, imagePlac
   }, [assets]);
 
   async function manage(path: string, method: string, body?: unknown) {
-    if (inFlight.current || savingOrder.current || errorMessage) return;
+    if (inFlight.current || savingOrder.current || editing || errorMessage) return;
     inFlight.current = true; setBusy(true); setError(""); setSuccess("");
     try {
       const response = await fetch(`/api/blog/tasks/${taskId}/assets${path}`, {
@@ -105,7 +107,7 @@ export default function BlogTaskAssets({ taskId, assets, errorMessage, imagePlac
   }
 
   function move(assetId: string | number, delta: number) {
-    if (inFlight.current || errorMessage) return;
+    if (inFlight.current || editing || errorMessage) return;
     const next = [...desiredOrder.current];
     const index = next.findIndex(asset => String(asset.id) === String(assetId));
     if (index < 0 || index + delta < 0 || index + delta >= next.length) return;
@@ -117,7 +119,7 @@ export default function BlogTaskAssets({ taskId, assets, errorMessage, imagePlac
 
   async function upload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (inFlight.current || savingOrder.current || !files.length || errorMessage) return;
+    if (inFlight.current || savingOrder.current || editing || !files.length || errorMessage) return;
     inFlight.current = true;
     setBusy(true);
     setError("");
@@ -189,7 +191,7 @@ export default function BlogTaskAssets({ taskId, assets, errorMessage, imagePlac
   }
 
   async function removeAll() {
-    if (inFlight.current || savingOrder.current || !assets.length || errorMessage) return;
+    if (inFlight.current || savingOrder.current || editing || !assets.length || errorMessage) return;
     if (!confirm("이 블로그 작업의 사진을 모두 제거하시겠습니까? 기존 발행 작업에서 사용하는 원본 파일은 보존됩니다.")) return;
     inFlight.current = true;
     setBusy(true);
@@ -215,8 +217,11 @@ export default function BlogTaskAssets({ taskId, assets, errorMessage, imagePlac
     <section className="mt-8 max-w-2xl rounded-xl border bg-white p-6">
       <h2 className="text-xl font-semibold">블로그 사진</h2>
       <p className="mt-2 text-sm text-zinc-500">총 {assets.length}장 · 아래 순서대로 글에 삽입됩니다. 기존 대기열의 사진은 바뀌지 않습니다.</p>
-      <ImagePlacementSettings key={taskId} taskId={taskId} initialSettings={imagePlacementSettings} />
+      <ImagePlacementSettings key={`placement-${taskId}`} taskId={taskId} initialSettings={imagePlacementSettings} />
       {errorMessage && <p role="alert" className="mt-2 text-red-600">사진 목록 조회 오류: {errorMessage}</p>}
+      {editing && <BlogImageEditor key={`editor-${editing.id}`} taskId={taskId} asset={editing} onClose={() => setEditing(null)} onSaved={() => {
+        setEditing(null); setSuccess("사진을 저장했습니다. 기존 발행 작업은 유지됩니다."); router.refresh();
+      }} />}
       <ol className="mt-3 space-y-3 text-sm">
         {photos.map((asset, index) => <li key={asset.id} className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
           {previews[String(asset.id)] && <a href={previews[String(asset.id)]} target="_blank" rel="noreferrer" aria-label={`${asset.file_name} 미리보기`}>
@@ -224,10 +229,11 @@ export default function BlogTaskAssets({ taskId, assets, errorMessage, imagePlac
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={previews[String(asset.id)]} alt={asset.file_name} className="h-16 w-16 rounded object-cover" />
           </a>}
-          <span className="min-w-0 flex-1 break-words">사진 {String(index + 1).padStart(2, "0")} · {asset.file_name}</span>
+          <span className="min-w-0 flex-1 break-words">사진 {String(index + 1).padStart(2, "0")} · {asset.file_name}<span className="block text-xs text-zinc-500">상태: {asset.edit_metadata ? "편집본" : "원본"}</span></span>
           <div className="flex gap-2">
-            <button type="button" disabled={busy || !!errorMessage || index === 0} onClick={() => move(asset.id, -1)} className="rounded border px-2 py-1 disabled:opacity-40">위로</button>
-            <button type="button" disabled={busy || !!errorMessage || index === photos.length - 1} onClick={() => move(asset.id, 1)} className="rounded border px-2 py-1 disabled:opacity-40">아래로</button>
+            <button type="button" disabled={busy || !!editing || !!errorMessage || index === 0} onClick={() => move(asset.id, -1)} className="rounded border px-2 py-1 disabled:opacity-40">위로</button>
+            <button type="button" disabled={busy || !!editing || !!errorMessage || index === photos.length - 1} onClick={() => move(asset.id, 1)} className="rounded border px-2 py-1 disabled:opacity-40">아래로</button>
+            <button type="button" disabled={listBusy || !!errorMessage} onClick={() => { setEditing(asset); setError(""); }} className="rounded border px-2 py-1 disabled:opacity-40">편집</button>
             <button type="button" disabled={listBusy || !!errorMessage} onClick={() => {
               if (confirm(`${asset.file_name} 사진을 삭제하시겠습니까?`)) void manage(`/${asset.id}`, "DELETE");
             }} className="rounded border px-2 py-1 text-red-600 disabled:opacity-40">삭제</button>

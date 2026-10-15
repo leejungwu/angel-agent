@@ -6,6 +6,8 @@ export type BlogTaskAsset = {
   storage_path: string;
   file_name: string;
   sort_order: number;
+  original_storage_path?: string | null;
+  edit_metadata?: unknown;
 };
 
 export function blogTaskAssetPath(taskId: string | number, uuid: string, filename: string, contentType: string): string {

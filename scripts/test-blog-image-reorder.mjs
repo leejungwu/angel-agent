@@ -31,6 +31,7 @@ const Form = load("app/content/blog/[id]/BlogTaskAssets.tsx", {
   "@/lib/supabase": { supabase: { storage: { from: () => ({ createSignedUrl: async path => ({ data: { signedUrl: `https://example.invalid/${path}` } }) }) } } },
   "@/lib/blog-task-assets": assetsModule, "@/lib/blog-task-assets/compact": {},
   "./ImagePlacementSettings": { default: () => null }, "@/lib/blog-publishing/downloads": downloads,
+  "./BlogImageEditor": { default: () => null },
 }).default;
 function nodes(node, predicate, found = []) {
   if (!node || typeof node !== "object") return found;
