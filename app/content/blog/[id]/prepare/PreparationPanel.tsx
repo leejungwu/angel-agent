@@ -8,11 +8,11 @@ import { prepareBlogPost } from "@/lib/blog-publishing/preparation";
 import { createImageZip, numberedImageFilename, orderedTaskImages } from "@/lib/blog-publishing/downloads";
 import type { BlogBody } from "@/lib/blog-generation/body";
 
-export default function PreparationPanel({ taskId, draft, assets, assetError }: {
-  taskId: string; draft: BlogBody & { title: string }; assets: BlogTaskAsset[]; assetError?: string;
+export default function PreparationPanel({ taskId, draft, assets, assetError, imagePlacementSettings }: {
+  taskId: string; draft: BlogBody & { title: string }; assets: BlogTaskAsset[]; assetError?: string; imagePlacementSettings?: unknown;
 }) {
   const photos = orderedTaskImages(taskId, assets);
-  const prepared = prepareBlogPost(draft, photos.length);
+  const prepared = prepareBlogPost(draft, photos.length, imagePlacementSettings);
   const [includeMarkers, setIncludeMarkers] = useState(true);
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");

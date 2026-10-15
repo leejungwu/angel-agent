@@ -10,15 +10,16 @@ async function load(path, imports = {}) {
   return testModule.exports;
 }
 const assetsModule = await load("lib/blog-task-assets.ts");
-const layout = await load("lib/blog-publishing/image-layout.ts");
+const placementSettings = await load("lib/blog-publishing/image-placement-settings.ts");
+const layout = await load("lib/blog-publishing/image-layout.ts", { "./image-placement-settings": placementSettings });
 const preparation = await load("lib/blog-publishing/preparation.ts", { "./image-layout": layout });
 const blocks = await load("lib/blog-publishing/blocks.ts");
 const downloads = await load("lib/blog-publishing/downloads.ts", { "../blog-task-assets": assetsModule });
-let draft, assets, jobs, sequence;
+let draft, assets, jobs, sequence, taskSettings;
 function reset(count = 2) {
   draft = { id: 2, blog_task_id: 1, status: "approved", title: "제목", intro: "도입입니다. 이어지는 문장입니다.", sections: [{ heading: "소제목", body: "본문입니다. 다음 설명입니다. 충분한 내용을 이어 씁니다." }], closing: "마무리입니다." };
   assets = Array.from({ length: count }, (_, i) => ({ id: i + 1, storage_path: `tasks/1/${i}.png`, file_name: `${i}.png`, sort_order: i, signedUrl: "secret" })).reverse();
-  jobs = []; sequence = 0;
+  jobs = []; sequence = 0; taskSettings = null;
 }
 const supabase = { from(table) {
   const filters = [], contains = [];
@@ -32,7 +33,7 @@ const supabase = { from(table) {
         if (jobs.some(j => String(j.blog_draft_id) === String(insert.blog_draft_id))) return { error: { code: "23505" }, data: null };
         const job = { id: String(++sequence), ...structuredClone(insert) }; jobs.push(job); return { data: structuredClone(job), error: null };
       }
-      const rows = table === "blog_tasks" ? [{ id: 1 }] : table === "blog_drafts" ? [draft] : jobs;
+      const rows = table === "blog_tasks" ? [{ id: 1, image_placement_settings: taskSettings }] : table === "blog_drafts" ? [draft] : jobs;
       return { data: structuredClone(rows.find(row => filters.every(([k, v]) => String(row[k]) === v) && contains.every(([k, v]) => v.images.every(wanted => row[k].images.some(image => Object.entries(wanted).every(([key, value]) => image[key] === value))))) ?? null), error: null };
     },
     async then(resolve, reject) { return Promise.resolve({ data: structuredClone(assets), error: null }).then(resolve, reject); },
@@ -63,6 +64,18 @@ for (const count of [0, 1, 2, 8, 10]) {
   }
   assert.equal(await api.isAssetReferencedByPublicationJob({ assetId: 999 }), false);
 }
+reset(10);
+taskSettings = { pinFirstAfterIntro: true, pinLastBeforeClosing: true, allowParagraphSplit: false };
+const pinnedJob = await api.createPublicationJob({ taskId: "1", draftId: "2" });
+const pinnedSnapshot = JSON.stringify(pinnedJob.execution_snapshot);
+const planned = preparation.prepareBlogPost(draft, assets.length, taskSettings);
+const expectedBlocks = blocks.createBlogExecutionBlocks(planned.executionBodyText, assets.map((_, index) => ({ index, insertOffset: planned.imageInsertOffsets[index] })))
+  .map(block => block.type === "text" ? block : { type: "image", index: block.index });
+assert.equal(JSON.stringify(pinnedJob.execution_snapshot.blocks), JSON.stringify(expectedBlocks));
+assert.equal(pinnedJob.execution_snapshot.bodyText, planned.executionBodyText);
+assert.deepEqual(Object.keys(pinnedJob.execution_snapshot).sort(), ["blocks", "bodyText", "images", "title", "version"]);
+taskSettings = { pinFirstAfterIntro: false, pinLastBeforeClosing: false, allowParagraphSplit: true };
+assert.equal(JSON.stringify((await api.createPublicationJob({ taskId: "1", draftId: "2" })).execution_snapshot), pinnedSnapshot);
 for (const status of ["draft", "rejected"]) {
   reset(); draft.status = status;
   await assert.rejects(api.createPublicationJob({ taskId: "1", draftId: "2" }), /승인/);

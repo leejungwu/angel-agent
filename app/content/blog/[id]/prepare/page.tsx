@@ -13,7 +13,7 @@ export default async function BlogPreparationPage({ params, searchParams }: {
   const { id } = await params;
   const { draftId } = await searchParams;
   if (!/^[1-9]\d*$/.test(id) || (draftId !== undefined && !/^[1-9]\d*$/.test(draftId))) notFound();
-  const { data: task, error: taskError } = await supabase.from("blog_tasks").select("id").eq("id", id).maybeSingle();
+  const { data: task, error: taskError } = await supabase.from("blog_tasks").select("id,image_placement_settings").eq("id", id).maybeSingle();
   if (!task && !taskError) notFound();
   let query = supabase.from("blog_drafts").select("id,title,intro,sections,closing,status").eq("blog_task_id", id);
   if (draftId) query = query.eq("id", draftId);
@@ -37,6 +37,6 @@ export default async function BlogPreparationPage({ params, searchParams }: {
       : !draft ? <p className="mt-6 text-zinc-500">작업 상세에서 AI 초안을 먼저 생성해 주세요.</p>
       : !valid || !composeBlogBody({ intro: draft.intro, sections: sections as { heading?: string; body: string }[], closing: draft.closing }) ? <p role="alert" className="mt-6 text-red-600">초안의 제목·본문 형식을 확인해 주세요.</p>
       : <><p className="mt-3 text-sm text-zinc-500">초안 #{draft.id} · {draft.status === "approved" ? "승인된 초안" : "검수 전 초안"} · 네이버에서 직접 검수하고 발행하세요.</p>
-        <PreparationPanel key={draft.id} taskId={id} draft={{ title: draft.title, intro: draft.intro, sections: sections as { heading?: string; body: string }[], closing: draft.closing }} assets={assetResult.data ?? []} assetError={assetResult.error?.message} /></>}
+        <PreparationPanel key={draft.id} taskId={id} draft={{ title: draft.title, intro: draft.intro, sections: sections as { heading?: string; body: string }[], closing: draft.closing }} assets={assetResult.data ?? []} assetError={assetResult.error?.message} imagePlacementSettings={task?.image_placement_settings} /></>}
   </main>;
 }

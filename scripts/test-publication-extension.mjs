@@ -47,7 +47,8 @@ const db = {
   } }; } },
 };
 const assets = load("lib/blog-task-assets.ts");
-const layout = load("lib/blog-publishing/image-layout.ts");
+const placementSettings = load("lib/blog-publishing/image-placement-settings.ts");
+const layout = load("lib/blog-publishing/image-layout.ts", { "./image-placement-settings": placementSettings });
 const preparation = load("lib/blog-publishing/preparation.ts", { "./image-layout": layout });
 const blocks = load("lib/blog-publishing/blocks.ts");
 const downloads = load("lib/blog-publishing/downloads.ts", { "../blog-task-assets": assets });

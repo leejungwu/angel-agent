@@ -12,7 +12,8 @@ async function load(path, imports = {}) {
   } });
   return testModule.exports;
 }
-const layout = await load("lib/blog-publishing/image-layout.ts");
+const placementSettings = await load("lib/blog-publishing/image-placement-settings.ts");
+const layout = await load("lib/blog-publishing/image-layout.ts", { "./image-placement-settings": placementSettings });
 const preparation = await load("lib/blog-publishing/preparation.ts", { "./image-layout": layout });
 const blockUtils = await load("lib/blog-publishing/blocks.ts");
 const taskAssets = await load("lib/blog-task-assets.ts");
@@ -21,12 +22,13 @@ const draft = { id: 2, title: "제목", intro: "도입😀입니다.", sections:
 const assets = [{ id: 1, storage_path: "tasks/1/a.jpg", sort_order: 0 }, { id: 2, storage_path: "tasks/1/b.jpg", sort_order: 1 }];
 const drafts = [draft];
 let signedUrlCalls = 0;
+let imagePlacementSettings = null;
 const supabase = {
   from(table) {
     const filters = new Map();
     const query = { select() { return this; }, eq(key, value) { filters.set(key, String(value)); return this; }, order() { return this; }, limit() { return this; },
       maybeSingle: async () => {
-        if (table === "blog_tasks") return { data: filters.get("id") === "1" ? { id: 1 } : null };
+        if (table === "blog_tasks") return { data: filters.get("id") === "1" ? { id: 1, image_placement_settings: imagePlacementSettings } : null };
         assert.equal(filters.get("blog_task_id"), "1");
         const matching = drafts.filter((item) => (!filters.has("id") || filters.get("id") === String(item.id)) && (!filters.has("status") || filters.get("status") === item.status));
         return { data: matching.sort((a, b) => b.id - a.id)[0] ?? null };
@@ -63,8 +65,12 @@ result.images.forEach((image, index) => {
 });
 assert.ok(prepared.bodyWithMarkers.includes("[사진 01 삽입]"), "Manual preview must remain separate");
 for (const count of [0, 8, 10]) {
+  imagePlacementSettings = { pinFirstAfterIntro: true, pinLastBeforeClosing: true, allowParagraphSplit: false };
   assets.splice(0, assets.length, ...Array.from({ length: count }, (_, index) => ({ id: index + 1, storage_path: `tasks/1/${index}.jpg`, sort_order: index })).reverse());
   const all = await api.getExtensionBlogTask("1");
+  const configured = preparation.prepareBlogPost(draft, count, imagePlacementSettings);
+  assert.equal(all.bodyText, configured.executionBodyText);
+  assert.deepEqual(Array.from(all.images, image => image.insertOffset), Array.from(configured.imageInsertOffsets));
   assert.equal(all.blocks.filter((b) => b.type === "image").length, count);
   assert.equal(all.blocks.filter((b) => b.type === "text").map((b) => b.text).join(""), all.bodyText);
   assert.deepEqual(Array.from(all.images, (image) => image.id), Array.from({ length: count }, (_, index) => index + 1));
@@ -76,6 +82,7 @@ for (const count of [0, 8, 10]) {
     else assert.equal(text.length, all.images[block.index].insertOffset);
   }
 }
+imagePlacementSettings = null;
 const route = await load("app/api/extension/blog-tasks/[id]/route.ts", {
   "@/lib/blog-publishing/extension-api": { ...api, authorizeExtension: () => null },
 });

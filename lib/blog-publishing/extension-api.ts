@@ -23,7 +23,7 @@ export async function getExtensionBlogTask(id: string, draftId?: string) {
   if (draftId) draftQuery = draftQuery.eq("id", draftId);
   else draftQuery = draftQuery.eq("status", "approved");
   const [task, draftResult, assets] = await Promise.all([
-    supabase.from("blog_tasks").select("id").eq("id", id).maybeSingle(),
+    supabase.from("blog_tasks").select("id,image_placement_settings").eq("id", id).maybeSingle(),
     draftQuery
       .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("blog_task_assets").select("id,storage_path,file_name,sort_order").eq("blog_task_id", id)
@@ -45,7 +45,7 @@ export async function getExtensionBlogTask(id: string, draftId?: string) {
     throw new Error("초안의 제목·본문 형식을 확인해 주세요.");
   }
   const images = orderedTaskImages(id, assets.data ?? []);
-  const prepared = prepareBlogPost({ title: draft.title, intro: draft.intro, sections, closing: draft.closing }, images.length);
+  const prepared = prepareBlogPost({ title: draft.title, intro: draft.intro, sections, closing: draft.closing }, images.length, task.data.image_placement_settings);
   if (!prepared.body.trim()) throw new Error("초안 본문이 비어 있습니다.");
   const signedImages = await Promise.all(images.map(async (asset, index) => {
     const { data, error } = await supabase.storage.from(BLOG_TASK_ASSET_BUCKET).createSignedUrl(asset.storage_path, 600);

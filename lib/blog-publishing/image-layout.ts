@@ -1,10 +1,10 @@
 import type { BlogBody } from "../blog-generation/body";
+import { resolveBlogImagePlacementSettings } from "./image-placement-settings";
 
 // 사진 배치 설정: 균등 배치를 기본으로 하고, 부족한 본문 문단은 분할합니다.
 // 새로운 위치 규칙은 chooseImagePositions()에서만 구현하면 됩니다.
 const IMAGE_PLACEMENT_RULE = {
   strategy: "even",
-  allowParagraphSplit: true,
 };
 
 type BlogParagraph = { text: string; field: number; line: number; isProse: boolean };
@@ -26,12 +26,19 @@ function getBlogParagraphs(fields: (string | null | undefined)[], proseFields: S
 }
 
 /** 반환값은 각 사진을 삽입할 문단 앞의 index입니다. 사진 순서는 유지합니다. */
-function chooseImagePositions(paragraphs: BlogParagraph[], imageCount: number): number[] {
+function chooseImagePositions(paragraphs: BlogParagraph[], imageCount: number, pins?: { first?: number; last?: number }): number[] {
   if (!paragraphs.length) throw new Error("Image placement requires body text");
 
   // 본문 뒤에 배치하되 마지막 문단 뒤는 제외합니다. 소제목 뒤에는 배치하지 않습니다.
-  const boundaries = paragraphs.flatMap(({ isProse }, index) =>
+  let boundaries = paragraphs.flatMap(({ isProse }, index) =>
     isProse && index + 1 < paragraphs.length ? [index + 1] : []);
+  if (pins) {
+    const min = pins.first ?? 0, max = pins.last ?? paragraphs.length - 1;
+    const between = boundaries.filter(boundary => (pins.first === undefined || boundary > min) && (pins.last === undefined || boundary < max));
+    const inclusive = boundaries.filter(boundary => boundary >= min && boundary <= max);
+    // Share a valid pinned boundary when no interior prose boundary exists.
+    boundaries = between.length ? between : inclusive.length ? inclusive : [pins.first ?? pins.last ?? 0];
+  }
   // 나눌 수 없는 한 문단뿐이라면 기존처럼 그 문단 앞에 사진을 모읍니다.
   if (!boundaries.length) boundaries.push(0);
 
@@ -45,14 +52,15 @@ function chooseImagePositions(paragraphs: BlogParagraph[], imageCount: number): 
   }
 }
 
-export function planBlogImages<T extends BlogBody>(draft: T, imageCount: number): { draft: T; beforeParagraphs: number[] } {
+export function planBlogImages<T extends BlogBody>(draft: T, imageCount: number, settings?: unknown): { draft: T; beforeParagraphs: number[] } {
+  const resolved = resolveBlogImagePlacementSettings(settings);
   if (!Number.isSafeInteger(imageCount) || imageCount < 0) throw new Error("Invalid image count");
   if (!imageCount) return { draft, beforeParagraphs: [] };
   const fields = [draft.intro, ...draft.sections.flatMap((section) => [section.heading, section.body]), draft.closing];
   const prose = new Set([0, ...draft.sections.map((_, index) => 2 + index * 2), fields.length - 1]);
 
   // Add only the paragraph breaks needed for text/image alternation; never split a heading or word.
-  while (IMAGE_PLACEMENT_RULE.allowParagraphSplit && getBlogParagraphs(fields, prose).filter(({ isProse }) => isProse).length < imageCount + 1) {
+  while (resolved.allowParagraphSplit && getBlogParagraphs(fields, prose).filter(({ isProse }) => isProse).length < imageCount + 1) {
     const candidate = getBlogParagraphs(fields, prose).filter(({ isProse }) => isProse)
       .map((line) => ({ ...line, parts: splitParagraph(line.text) }))
       .filter((line) => line.parts).sort((a, b) => b.text.length - a.text.length)[0];
@@ -61,7 +69,17 @@ export function planBlogImages<T extends BlogBody>(draft: T, imageCount: number)
     value.splice(candidate.line, 1, ...candidate.parts!);
     fields[candidate.field] = value.join("\n");
   }
-  const beforeParagraphs = chooseImagePositions(getBlogParagraphs(fields, prose), imageCount);
+  const paragraphs = getBlogParagraphs(fields, prose);
+  const safeBoundary = (boundary: number) => boundary > 0 && boundary < paragraphs.length && paragraphs[boundary - 1].isProse;
+  const introEnd = paragraphs.findLastIndex(paragraph => paragraph.field === 0) + 1;
+  const closingStart = paragraphs.findIndex(paragraph => paragraph.field === fields.length - 1);
+  const first = imageCount >= 2 && resolved.pinFirstAfterIntro && safeBoundary(introEnd) ? introEnd : undefined;
+  const last = imageCount >= 2 && resolved.pinLastBeforeClosing && safeBoundary(closingStart) ? closingStart : undefined;
+  const pinned = (first !== undefined || last !== undefined) && !(first !== undefined && last !== undefined && first > last);
+  const remaining = imageCount - Number(first !== undefined) - Number(last !== undefined);
+  const beforeParagraphs = pinned
+    ? [...(first === undefined ? [] : [first]), ...(remaining ? chooseImagePositions(paragraphs, remaining, { first, last }) : []), ...(last === undefined ? [] : [last])]
+    : chooseImagePositions(paragraphs, imageCount);
   return {
     draft: {
       ...draft, intro: fields[0],

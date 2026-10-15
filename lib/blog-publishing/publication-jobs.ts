@@ -125,7 +125,7 @@ export async function createPublicationJob({ taskId, draftId }: { taskId: string
   // An existing job keeps the originally approved data, even after source edits.
   if (existing.data) return { ...parsedJob(existing.data), alreadyExists: true };
   const [task, draftResult, assets] = await Promise.all([
-    supabase.from("blog_tasks").select("id").eq("id", taskId).maybeSingle(),
+    supabase.from("blog_tasks").select("id,image_placement_settings").eq("id", taskId).maybeSingle(),
     supabase.from("blog_drafts").select("id,title,intro,sections,closing,status").eq("id", draftId).eq("blog_task_id", taskId).maybeSingle(),
     supabase.from("blog_task_assets").select("id,storage_path,file_name,sort_order").eq("blog_task_id", taskId)
       .order("sort_order", { ascending: true }).order("id", { ascending: true }),
@@ -145,7 +145,7 @@ export async function createPublicationJob({ taskId, draftId }: { taskId: string
     throw new PublicationJobError("초안 제목·본문 형식을 확인해 주세요.");
   }
   const ordered = orderedTaskImages(taskId, (assets.data ?? []) as BlogTaskAsset[]);
-  const prepared = prepareBlogPost({ title: draft.title, intro: draft.intro, sections, closing: draft.closing }, ordered.length);
+  const prepared = prepareBlogPost({ title: draft.title, intro: draft.intro, sections, closing: draft.closing }, ordered.length, task.data.image_placement_settings);
   const snapshot = parsePublicationSnapshot({
     version: 1, title: prepared.title, bodyText: prepared.executionBodyText,
     blocks: createBlogExecutionBlocks(prepared.executionBodyText, ordered.map((_, index) => ({ index, insertOffset: prepared.imageInsertOffsets[index] })))

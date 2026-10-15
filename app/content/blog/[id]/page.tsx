@@ -16,6 +16,7 @@ type BlogTask = {
   topic: string | null;
   instructions: string | null;
   preset_id: string | null;
+  image_placement_settings: unknown;
   status: string | null;
   created_at: string | null;
 };
@@ -33,7 +34,7 @@ export default async function BlogTaskDetailPage({
   const { id } = await params;
   const { data: task, error: taskError } = await supabase
     .from("blog_tasks")
-    .select("id, product_id, keyword, topic, instructions, status, created_at, preset_id")
+    .select("id, product_id, keyword, topic, instructions, status, created_at, preset_id, image_placement_settings")
     .eq("id", id)
     .maybeSingle()
     .returns<BlogTask>();
@@ -135,7 +136,7 @@ export default async function BlogTaskDetailPage({
       )}
       {presetsErrorMessage && <p role="alert" className="mt-4 text-red-600">{presetsErrorMessage}</p>}
       {task && !errorMessage && (
-        <BlogTaskAssets taskId={task.id} assets={assets} errorMessage={assetsErrorMessage} />
+        <BlogTaskAssets taskId={task.id} assets={assets} errorMessage={assetsErrorMessage} imagePlacementSettings={task.image_placement_settings} />
       )}
       {task && !errorMessage && (
         <GenerateBlogDraft

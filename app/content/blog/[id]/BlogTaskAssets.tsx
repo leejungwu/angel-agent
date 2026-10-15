@@ -8,11 +8,13 @@ import {
   type BlogTaskAsset,
 } from "@/lib/blog-task-assets";
 import { compactBlogImage } from "@/lib/blog-task-assets/compact";
+import ImagePlacementSettings from "./ImagePlacementSettings";
 
-export default function BlogTaskAssets({ taskId, assets, errorMessage }: {
+export default function BlogTaskAssets({ taskId, assets, errorMessage, imagePlacementSettings }: {
   taskId: string | number;
   assets: BlogTaskAsset[];
   errorMessage?: string;
+  imagePlacementSettings?: unknown;
 }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -122,6 +124,7 @@ export default function BlogTaskAssets({ taskId, assets, errorMessage }: {
     <section className="mt-8 max-w-2xl rounded-xl border bg-white p-6">
       <h2 className="text-xl font-semibold">블로그 사진</h2>
       <p className="mt-2 text-sm text-zinc-500">총 {assets.length}장 · 업로드 순서대로 글에 삽입됩니다.</p>
+      <ImagePlacementSettings key={taskId} taskId={taskId} initialSettings={imagePlacementSettings} />
       {errorMessage && <p role="alert" className="mt-2 text-red-600">사진 목록 조회 오류: {errorMessage}</p>}
       <ol className="mt-3 list-inside list-decimal text-sm">
         {assets.map((asset) => <li key={asset.id} className="break-words">{asset.file_name}</li>)}

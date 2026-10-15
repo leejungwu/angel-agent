@@ -94,7 +94,7 @@ Task 상세는 같은 blog_task_id의 draft를 최신순으로 조회한다. 과
 본문 분량은 제목·줄바꿈·필드 앞뒤 공백을 제외하고 내부 공백을 포함한 Unicode 문자 수다.
 프리셋 min/max를 그대로 판정하며 숨은 비율 계산은 없다. 범위를 벗어나도 초안은 저장하고 경고한다.
 소제목·키워드 수는 생성 목표이며 의미적 준수를 강제하는 schema 변경은 없다.
-Draft 저장과 Task 상태 변경은 별도 DB 요청이며, 승인된 draft를 편집해도 자동으로 승인이 해제되지는 않는다.
+Draft 저장과 Task 상태 변경은 별도 DB 요청이다. Draft 편집 저장은 승인·반려를 무효화하고 draft 상태로 되돌린다. 기존 Publication Job snapshot은 유지한다.
 
 ## Blog 이미지 흐름
 
@@ -108,7 +108,12 @@ Draft 저장과 Task 상태 변경은 별도 DB 요청이며, 승인된 draft를
 - `lib/blog-task-assets/compact.ts`, `lib/blog-task-assets.ts`: 크기 계산·WebP 압축 후보와 경로/형식 규칙.
 - `lib/blog-publishing/downloads.ts`: Task 경로 검사·순서 정리·번호 파일명·수동 ZIP.
 - `lib/blog-publishing/image-layout.ts`: prose가 부족하면 문단을 나누고 사진을 넣을 경계를 계획한다.
-  배치 규칙은 `chooseImagePositions()`, 정책 설정은 `IMAGE_PLACEMENT_RULE`에 모인다.
+  기존 even 선택식은 `chooseImagePositions()`에서 유지한다.
+- `blog_tasks.image_placement_settings`는 nullable JSONB다. Task 사진 영역에서 도입 뒤 첫 사진 고정,
+  마무리 앞 마지막 사진 고정, 문단 자동 분할을 저장한다. 기본값은 각각 false / false / true다.
+  `image-placement-settings.ts`는 누락·잘못된 필드를 기본값으로 해석하고 API 저장값을 검증한다.
+  사진 1장은 고정을 무시하며, 안전한 도입·마무리 경계가 없으면 해당 고정을 적용하지 않는다.
+  나머지 사진은 순서를 유지해 균등 배치하며, 자동 분할을 끄면 기존 경계를 공유할 수 있다.
 - `lib/blog-publishing/preparation.ts`: 계획된 문단으로 실행 본문과 사진 insertOffset을 만든다.
   수동 화면용 text/image 표시 및 `[사진 01 삽입]` 마커 본문도 별도로 만든다.
 - `lib/blog-publishing/blocks.ts`: 이미 정해진 offset으로 본문을 잘라 사진 metadata와 번갈아 배열한다.
@@ -123,6 +128,12 @@ text("AAA") → image(index=0, signedUrl=...) → text("\n\nBBB")
 모든 text block을 이어 붙이면 실행 bodyText와 같아야 한다. 같은 위치에 사진 여러 장이 배정되면 image block이 연속된다.
 Extension에는 마커 없는 본문과 실제 image blocks가 전달되고, 마커 문자열은 수동 준비 화면에 사용된다.
 사진 등록은 글 생성 전에도 가능하다.
+
+`/prepare`, 호환용 Extension Task API, Publication Job 등록은 모두 현재 Task의 같은 배치 설정을 사용한다.
+Job 등록 시 최종 bodyText와 blocks만 기존 execution_snapshot에 고정한다. 설정 자체는 snapshot에 추가하지 않는다.
+Task 설정 변경은 Draft 내용·상태와 기존 Job에 영향을 주지 않으며 새 Job에만 반영된다.
+배포 전 `202610150004_add_blog_image_placement_settings.sql`을 별도로 적용해야 한다.
+이전 코드로 되돌려도 nullable 컬럼과 기존 데이터는 유지할 수 있다.
 
 ## Blog 발행 흐름
 
