@@ -6,11 +6,11 @@ import {
   compactVoc,
   isKinAnswer,
   kinAnswerValidationErrors,
-  KIN_COMMON_STYLE_INSTRUCTIONS,
-  KIN_INSTRUCTIONS,
 } from "@/lib/kin/generate";
-import { CONFIG_FIELDS, parsePresetConfig, structuredStyleInstructions, UUID_PATTERN, type PresetConfig } from "@/lib/kin/presets";
+import { CONFIG_FIELDS, parsePresetConfig, UUID_PATTERN, type PresetConfig } from "@/lib/kin/presets";
 import { checkKinAnswer } from "@/lib/kin/quality-check";
+import { buildKinPrompt, KIN_PROMPT_FIELDS, parseKinPromptSettings } from "@/lib/kin/prompts";
+import { kinMentionValidationErrors } from "@/lib/kin/mention-validation";
 
 type TaskInput = {
   product_id: number | null;
@@ -104,11 +104,21 @@ export async function POST(request: Request) {
       if (!preset) return Response.json({ error: "선택한 프리셋이 존재하지 않습니다." }, { status: 400 });
       input.preset_name_snapshot = preset.name;
       input.preset_instructions_snapshot = preset.instructions;
-      input.preset_config_snapshot = parsePresetConfig(preset);
+      try { input.preset_config_snapshot = parsePresetConfig(preset); }
+      catch { return Response.json({ error: "프리셋 글자 수가 출력 schema 범위를 벗어납니다. 프리셋을 수정해 주세요." }, { status: 400 }); }
       if (body.productMentionLevel == null) {
         input.product_mention_level = preset.default_product_mention_level ?? "relevant";
       }
     }
+    if (taskId && input.preset_config_snapshot) {
+      try { parsePresetConfig(input.preset_config_snapshot); }
+      catch { return Response.json({ error: "과거 프리셋의 글자 수가 출력 schema 범위를 벗어납니다. 프리셋을 수정하고 새 작업으로 생성해 주세요." }, { status: 409 }); }
+    }
+    stage = "common prompt lookup";
+    const { data: commonSettings, error: commonError } = await supabase.from("kin_prompt_settings")
+      .select(KIN_PROMPT_FIELDS).eq("id", true).maybeSingle();
+    if (commonError || !commonSettings) throw commonError ?? new Error("CommonPromptMissing");
+    const commonPrompt = parseKinPromptSettings(commonSettings);
     stage = "product and VOC lookup";
     let product = null;
     let voc = null;
@@ -137,16 +147,7 @@ export async function POST(request: Request) {
     stage = `${provider} generation`;
     const response = await generateKinWithProvider({
       provider,
-      systemInstructions: `${KIN_INSTRUCTIONS}\n\n${KIN_COMMON_STYLE_INSTRUCTIONS}`,
-      input: JSON.stringify({
-        presetInstructions: input.preset_instructions_snapshot,
-        structuredStyleInstructions: structuredStyleInstructions(input.preset_config_snapshot),
-        product, voc,
-        additionalInstructions: input.instructions,
-        task: { purpose: input.purpose, product_mention_level: input.product_mention_level,
-          question_url: input.question_url, category: input.category },
-        question: input.question,
-      }),
+      ...buildKinPrompt(commonPrompt, input, product, voc),
     });
     stage = "output validation";
     // Temporary diagnostics: shape and lengths only, never answer/question text.
@@ -174,9 +175,10 @@ export async function POST(request: Request) {
       throw new Error("InvalidAnswerOutput");
     }
     // A separate policy check, not a Structured Output shape mismatch.
-    if ((!product || input.product_mention_level === "none") && draft.productMentioned) {
-      stage = "output validation: product mention policy";
-      throw new Error("UnexpectedProductMention");
+    const mentionErrors = kinMentionValidationErrors(draft, product, input.product_mention_level);
+    if (mentionErrors.length) {
+      stage = `output validation: product mention policy (${mentionErrors.join(", ")})`;
+      throw new Error("ProductMentionPolicyFailed");
     }
     stage = "quality check";
     const qualityCheck = checkKinAnswer({ answer: draft.answer, question: input.question,
@@ -185,7 +187,7 @@ export async function POST(request: Request) {
     stage = "draft insert";
     const { data: saved, error: saveError } = await supabase.from("kin_drafts").insert({
       kin_task_id: taskId, product_id: input.product_id, answer: draft.answer,
-      model: response.model, status: "draft",
+      model: response.model, provider: response.provider, question_intent: draft.questionIntent, status: "draft",
     }).select("id").single();
     if (saveError || !saved) throw saveError ?? new Error("DraftInsertFailed");
     draftSaved = true;
@@ -193,7 +195,7 @@ export async function POST(request: Request) {
     const { data: updated, error: updateError } = await supabase.from("kin_tasks")
       .update({ status: "generated", updated_at: new Date().toISOString() }).eq("id", taskId).select("id").maybeSingle();
     if (updateError || !updated) throw updateError ?? new Error("TaskUpdateFailed");
-    return Response.json({ ok: true, taskId, draftId: saved.id, draft, model: response.model, qualityCheck });
+    return Response.json({ ok: true, taskId, draftId: saved.id, draft, model: response.model, provider: response.provider, qualityCheck });
   } catch (error) {
     if (error instanceof KinProviderOutputError) stage = `${provider} output validation: ${error.reason}`;
     logFailure(stage, error);
@@ -206,6 +208,8 @@ export async function POST(request: Request) {
     }
     return Response.json({ error: draftSaved
       ? "답변은 저장되었지만 작업 상태를 변경하지 못했습니다."
-      : "지식인 답변 생성 처리 중 오류가 발생했습니다." }, { status: 500 });
+      : error instanceof Error && error.message === "ProductMentionPolicyFailed"
+        ? "답변이 제품 언급 정책 검증에 실패했습니다. 상품명·브랜드와 제품 언급 여부가 일치해야 합니다."
+        : "지식인 답변 생성 처리 중 오류가 발생했습니다." }, { status: 500 });
   }
 }

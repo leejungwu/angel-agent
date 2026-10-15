@@ -49,40 +49,49 @@ Extension은 웹 앱이 새 Chrome을 띄우는 방식이 아니라, 사용자�
 ## Blog 생성 흐름
 
 ```text
-Task + 선택적 Generation Settings → generate API → Settings 검증·기본값
-     → settings-prompts / prompts / schema / models → 공통 provider → AI
-     → 응답 JSON 검사 → blog_drafts 저장 → Task 상태 갱신 → 편집 → 승인
+Task + selected Preset + Product
+  → prompt assembly → 공통 provider → 응답 JSON 검증
+  → Draft + generation snapshot 저장 → Task 상태 갱신 → 편집 → 승인
 ```
 
 | 단계 | 핵심 코드 | 입력 / 결과 |
 |---|---|---|
 | Task 생성·수정 | `app/content/blog/new/page.tsx`, `[id]/EditBlogTask.tsx` | 제품과 keyword/topic/instructions 저장 |
-| 요청 UI | `[id]/GenerateBlogDraft.tsx`, `GenerationSettingsPanel.tsx` | DB 설정을 복원하고 taskId/provider/model/settings를 `/api/blog/generate`에 전송 |
-| 생성·저장 | `app/api/blog/generate/route.ts` | Task·제품 조회, AI 호출, 결과 검증, draft 저장, Task를 generated로 갱신 |
-| 작성 규칙 | `lib/blog-generation/prompts.ts` | 고정 규칙 / 참고 글쓰기 가이드 / 작업별 지시 / 제품 사실 분리 |
-| 생성 설정 | `lib/blog-generation/settings.ts` | template/tone/분량/section 수/keyword/제품 노출/CTA/추가 지시의 stable key·표시명·검증·기본값 |
-| 설정 변환 | `lib/blog-generation/settings-prompts.ts` | template skeleton과 설정을 사용자 계층의 안내문으로 변환. 고정 사실성 규칙·출력 schema보다 우선하지 않음 |
-| 출력 계약 | `lib/blog-generation/schema.ts` | title/intro/sections/closing과 section imageAssetId=null |
-| 모델·분량 | `models.ts`, `body.ts` (같은 폴더) | 모델 허용 목록·기본값, 제목/줄바꿈 제외 본문 분량 안내 |
+| 프리셋 UI | `[id]/BlogPresetControl.tsx` | 프리셋 선택·생성·편집·복제·삭제. 편집 시 4개 prompt와 분량·소제목·키워드 범위를 표시 |
+| 프리셋 관리 | `app/api/blog/presets/`, `lib/blog-generation/presets.ts` | KIN과 같은 CRUD 패턴, 입력 검증, updated_at 갱신 |
+| 생성 요청 | `[id]/GenerateBlogDraft.tsx` | taskId/presetId/provider/model만 전송. 제품이나 prompt는 클라이언트에서 받지 않음 |
+| 생성·저장 | `app/api/blog/generate/route.ts` | Task·제품·프리셋 조회, 선택 저장, AI 호출, draft·snapshot 저장, Task를 generated로 갱신 |
+| Prompt 조립 | `lib/blog-generation/prompts.ts` | system_prompt 원문과 preset 설정/Product/Task JSON만 전달. 숨은 자연어 안내를 덧붙이지 않음 |
+| 생성 기록 | `lib/blog-generation/snapshot.ts`, `[id]/BlogGenerationDetails.tsx` | 생성 당시 prompt 4개·숫자 설정·Task·제품·provider·요청/응답 model의 독립 복사 및 이력 표시 |
+| 출력 계약 | `lib/blog-generation/schema.ts` | title/intro/sections/closing과 section imageAssetId=null. 모든 필수 문자열은 trim 후 비어 있으면 실패 |
+| 모델·분량 | `models.ts`, `body.ts` | 모델 허용 목록·기본값, 프리셋 min/max를 그대로 사용한 본문 분량 판정 |
 | AI 호출 | `lib/ai/provider.ts` | OpenAI Responses / Anthropic Messages / xAI Chat Completions → outputText/provider/model |
 | 편집·승인 | `[id]/GenerateBlogDraft.tsx` | 기존 draft 수정, draft/approved/rejected 상태 저장 |
 
-Task 상세 page는 같은 blog_task_id의 draft를 최신순으로 조회하고 생성 화면에 이력을 전달한다.
-선택한 이전 draft를 같은 preview에서 편집·승인할 수 있으며, 생성 API는 저장된 created_at을 반환해 새 결과의 ID·시간·모델을 표시한다.
-방금 생성한 draft의 설정 요약은 해당 요청의 세션 내 설정이다. draft별 설정 DB snapshot은 없으므로 재진입/과거 draft에는 생성 당시 설정 기록이 없음을 표시하고 현재 화면 설정을 참고값으로 구분한다.
+presetId를 생략하면 Task의 preset_id, 그다음 is_default 프리셋을 사용한다. 기본 프리셋도 없으면
+409로 중단하고 사용자가 프리셋을 선택·생성하도록 안내한다. 지정한 프리셋이 없으면 400이다.
+선택한 프리셋은 AI 호출 전에 Task에 저장하며, 프리셋 관리와 초안 생성은 별도 동작이다.
 
-현재 purpose는 목록에서만 읽는 역사적 필드이며 생성 prompt 입력은 keyword/topic/instructions다.
-참고 Markdown 문서가 자동으로 prompt에 로딩되지는 않고 `prompts.ts`의 상수가 사용된다.
-재생성은 새 draft를 저장한다. draft 저장과 Task 상태 변경은 별도 DB 요청이다.
-Generation Settings는 `blog_tasks.generation_settings` JSONB에 저장한다. `GenerationSettingsPanel.tsx`는 접이식 설정 화면이며 명시적 저장은 `/api/blog/tasks/[id]/settings` PATCH를 사용한다.
-생성 버튼은 화면의 최신 settings를 전달하고 generate API가 AI 호출 전에 Task에 저장한다. settings를 생략한 재생성은 현재 DB 설정을 사용하며 null/누락은 기본값으로 보완한다.
-새 draft는 해당 Task의 현재 설정으로 생성한다. 기존 draft 내용은 변경하지 않으며 draft별 설정 snapshot은 저장하지 않는다.
-잘못된 DB 설정은 화면/설정 GET에서 기본값과 경고를 제공한다. settings 없는 생성은 409로 중단하고, 유효한 화면 설정을 저장/전달하면 복구한다.
-설정 조회·저장에는 `202610140001_blog_task_generation_settings.sql`의 nullable JSONB 컬럼이 필요하다. 기존 행을 일괄 재작성하지 않는다.
-기본 분량은 기존 1,500자(1,200~1,800자 안내)를 유지하고, template은 informational, tone은 natural, 목표 section은 3개다.
-고정 사실성·안전·schema 규칙은 우선한다. 명시적인 스타일 additionalInstructions는 기본 문체·tone·참고 가이드보다 우선하며, 그 외 Task 명시적 지시는 일반 설정보다 우선한다. mainKeyword가 없으면 keywordUsage는 강제하지 않는다.
-template/section/keyword 수는 생성 목표이며 결과의 의미적 준수를 강제 검사하는 schema 확장은 아니다.
-현재 승인된 draft를 편집해도 자동으로 승인이 해제되지는 않는다.
+`blog_prompt_presets`에는 후기형·정보형·비교형·문제 해결형·제품 소개형 초기 데이터가 있다.
+기존 공통 규칙·전략·카피라이팅·natural tone·각 template·medium 제품 노출·CTA none 원문을 옮긴 값이다.
+정보형만 기본값이다. 이후 글쓰기 규칙은 DB 프리셋에서 편집하며 Markdown이나 코드 상수를 추가 로딩하지 않는다.
+키워드는 Task의 keyword, 이번 글 지시는 Task의 instructions 한 곳만 사용한다. 역사적 purpose는 생성에 사용하지 않는다.
+
+새 생성에는 `202610150001_create_blog_prompt_presets.sql` 적용이 필요하다. migration은 자동 실행하지 않는다.
+기존 `blog_tasks.generation_settings` 컬럼과 값은 호환성·롤백을 위해 보존하지만 앱에서는 읽거나 쓰지 않는다.
+구형 Settings UI와 전용 API는 제거했다. 롤백 시 코드를 이전 버전으로 되돌리고 새 테이블/컬럼은 보존한다.
+기존 행을 재작성하거나 컬럼을 DROP하지 않는다.
+
+새 draft의 generation_snapshot은 생성 당시 값을 저장하며 이후 프리셋 수정·삭제나 draft 내용 편집으로 갱신하지 않는다.
+이것은 사진·Naver 실행 snapshot과 다르며 사진 목록을 고정하지 않는다. provider와 실제 응답 model도 draft에 저장한다.
+Task 상세는 같은 blog_task_id의 draft를 최신순으로 조회한다. 과거 draft를 선택하면 해당 snapshot의 이름·모델·분량·
+소제목/키워드 수와 read-only prompt를 보여준다. snapshot 없는 기존 행은 “기존 생성본 · 생성 설정 기록 없음”으로 표시한다.
+재생성은 현재 선택한 프리셋과 현재 Task/Product로 새 draft를 추가하며 과거 기록을 바꾸지 않는다.
+
+본문 분량은 제목·줄바꿈·필드 앞뒤 공백을 제외하고 내부 공백을 포함한 Unicode 문자 수다.
+프리셋 min/max를 그대로 판정하며 숨은 비율 계산은 없다. 범위를 벗어나도 초안은 저장하고 경고한다.
+소제목·키워드 수는 생성 목표이며 의미적 준수를 강제하는 schema 변경은 없다.
+Draft 저장과 Task 상태 변경은 별도 DB 요청이며, 승인된 draft를 편집해도 자동으로 승인이 해제되지는 않는다.
 
 ## Blog 이미지 흐름
 
@@ -163,13 +172,15 @@ Extension API는 `ANGEL_EXTENSION_TOKEN` Bearer 인증을 사용한다.
 products
 ├─ product_assets → Storage: product-assets
 ├─ blog_tasks
-│  ├─ blog_drafts
+│  ├─ blog_drafts (generation_snapshot)
 │  └─ blog_task_assets → Storage: blog-task-assets
 ├─ reviews ← review_import_batches
 ├─ voc_analysis_runs
-└─ kin_tasks (preset 지시·설정 snapshot) → kin_drafts
+└─ kin_tasks (preset 지시·설정 snapshot) → kin_drafts (provider / question_intent)
 
+blog_prompt_presets → blog_tasks.preset_id → 새 Blog Draft의 generation_snapshot
 kin_prompt_presets → 새 KIN Task 생성 시 snapshot으로 복사
+kin_prompt_settings → 모든 KIN 생성의 공통 prompt
 ```
 
 그림은 코드의 조회/연결 관계이며 모든 실제 DB constraint를 표현한 ERD는 아니다.
@@ -177,13 +188,15 @@ kin_prompt_presets → 새 KIN Task 생성 시 snapshot으로 복사
 | 데이터 | 역할 |
 |---|---|
 | `products` / `product_assets` | 상품 사실과 제품 사진. Blog Task 사진과 별개 |
-| `blog_tasks` | 제품에 연결된 생성 조건과 generation_settings JSONB. 같은 Task에서 여러 draft 생성 가능 |
-| `blog_drafts` | 제목·intro·sections·closing·검수 상태·model. Extension은 approved만 사용 |
+| `blog_tasks` | 제품·keyword/topic/instructions·preset_id. 같은 Task에서 여러 draft 생성 가능 |
+| `blog_drafts` | 제목·intro·sections·closing·검수 상태·provider/model·generation_snapshot. Extension은 approved만 사용 |
+| `blog_prompt_presets` | 사용자 편집 prompt 4개와 분량·소제목·키워드 범위 |
 | `blog_task_assets` | Task 사진 경로·파일명·sort_order. 실제 bytes는 Storage에 저장 |
 | `reviews` / `review_import_batches` | 제품 리뷰와 가져오기 결과/상태 |
 | `voc_analysis_runs` | 제품별 VOC 결과·분석 상태·오류·모델 |
 | `kin_tasks` / `kin_drafts` | 질문·제품·언급 수준·추가 지시 및 생성 답변. Task에 preset 지시/설정 snapshot 저장 |
-| `kin_prompt_presets` | 지식인 작성 지시와 문단·분량·키워드·금칙어 설정 |
+| `kin_prompt_presets` | 선택 스타일과 문단·분량·키워드·금칙어 설정. 글자 수는 answer schema의 200~1500 범위 |
+| `kin_prompt_settings` | singleton 공통 시스템/사실성 prompt와 공통 스타일 prompt |
 
 Blog에는 **draft별 image snapshot이 아직 없다.** 특정 draftId를 고정해도 사진은 현재 Task의 목록을 읽는다.
 AI section의 imageAssetId=null과 실제 Task 사진 배치도 구분한다.
@@ -210,25 +223,50 @@ VOC는 자체 OpenAI 호출을 사용한다. 현재 Blog generate는 VOC를 직�
 ### KIN
 
 `app/content/kin/KinAnswerForm.tsx → /api/kin/generate`
-→ 질문·preset snapshot·선택 제품·최신 완료 VOC → `lib/kin/provider.ts → lib/ai/provider.ts`
-→ 구조화 답변 → `lib/kin/quality-check.ts` 경고 → kin_drafts/Task 상태 저장·결과 UI.
+→ DB 공통 Prompt + 선택 preset snapshot + 이번 질문/추가 지시 + 제품·최신 완료 VOC
+→ `lib/kin/prompts.ts → lib/kin/provider.ts → lib/ai/provider.ts`
+→ 구조화 답변 검증 → 제품 언급 hard validation → quality-check 경고 → kin_drafts/Task 상태 저장.
 
-`KinPresetControl.tsx → /api/kin/presets/ → lib/kin/presets.ts`는 preset 관리/설정 검증 경로다.
-KIN의 schema·고정/스타일 지시는 `lib/kin/generate.ts`에 있으며, 품질 경고는 사람이 검수한다.
+`KinPromptSettings.tsx → /api/kin/prompt-settings`는 기본 접힘 상태의 공통 prompt 편집기다.
+`kin_prompt_settings`는 단일 행이며 기존 시스템/공통 스타일 문구를 원문 그대로 seed한다.
+공통 문구가 없으면 생성은 중단하며 코드 기본 prompt로 조용히 대체하지 않는다.
+`KinPresetControl.tsx → /api/kin/presets/ → lib/kin/presets.ts`는 선택 스타일 CRUD를 유지한다.
+이번 질문의 추가 지시는 기존 textarea를 사용하며 프리셋과 별개다.
+
+우선순위는 출력 schema/프로그램 계약, 이번 질문 추가 지시, 선택 preset, 공통 Prompt 순이다.
+이 순서와 none/relevant/direct 정책을 system 역할의 JSON 계약으로 전달하고, 모든 글쓰기 자연어는
+공통 Prompt·preset·추가 지시 데이터에 둔다. 코드에서 자연어 안내를 append하지 않는다.
+구조화된 preset 설정도 자연어 template로 변환하지 않고 JSON 그대로 전달한다.
+초기 공통 prompt의 문구도 사용자가 편집할 수 있으며 프로그램 계약을 무효화하지 않는다.
+
+`lib/kin/generate.ts`는 answer schema·모델 기본값·응답 검증·VOC 압축을 담당한다.
+answer 허용 범위 200~1500자를 preset UI/parser/API에서도 그대로 사용한다.
+범위를 벗어난 기존 preset/Task snapshot을 자동 수정하지 않으며 새 생성 또는 재생성 시 명확히 중단한다.
+`lib/kin/mention-validation.ts`는 direct의 상품명 최소 1회, none의 상품명·브랜드 금지,
+productMentioned와 실제 문자열 등장 여부의 일치를 강제한다. 실패 답변은 저장하지 않는다.
+이 검사는 이름/브랜드 문자열 등장 검사이며 관련성·사실성의 의미 분석은 아니다.
+`lib/kin/quality-check.ts`의 기존 경고 검사는 별도로 유지한다.
+
+최근 작업 영역은 기본 접힘을 유지한다. `KinTaskHistory.tsx → /api/kin/tasks/[id]/drafts`는
+선택한 Task의 Draft만 최신순으로 조회하고 선택·질문 의도·provider/model·생성 시간·답변·복사를 제공한다.
+새 Draft는 provider/question_intent를 저장한다. 기존 행의 누락 정보는 “기록 없음”으로 표시한다.
+`202610150002_kin_common_prompts.sql`은 공통 prompt 테이블과 nullable Draft 컬럼 두 개만 추가한다.
+기존 Task/preset snapshot·답변은 보존하며 migration은 자동 적용하지 않는다.
+KIN은 생성·확인·복사 도구다. Draft 편집, 승인/반려, Queue, 자동 등록은 제공하지 않는다.
 현재 네이버 지식인 답변의 최종 자동 등록 경로는 없다. 매출·주문·재고 분석도 현재 실행 모듈이 아니다.
 
 ## 어디를 수정해야 하나
 
 | 변경할 것 | 먼저 볼 파일 |
 |---|---|
-| 글쓰기 규칙·문체 | `lib/blog-generation/prompts.ts` |
-| 생성 설정 모델·범위·기본값 / template·tone 안내 | `lib/blog-generation/settings.ts`, `settings-prompts.ts` |
+| 글쓰기 규칙·문체 | BlogPresetControl과 DB blog_prompt_presets (코드는 문구를 추가하지 않음) |
+| 프리셋 검증·prompt 조립·생성 기록 | `lib/blog-generation/presets.ts`, `prompts.ts`, `snapshot.ts` |
 | AI 응답 구조 | `lib/blog-generation/schema.ts` |
 | AI provider transport | `lib/ai/provider.ts` (Blog/KIN 공통) |
 | Blog 모델·분량 | `lib/blog-generation/models.ts`, `body.ts` |
 | Blog 생성·저장 | `app/api/blog/generate/route.ts` |
 | Task 조건·draft 편집/승인 | `app/content/blog/new/page.tsx`, `[id]/EditBlogTask.tsx`, `[id]/GenerateBlogDraft.tsx` |
-| Task 콘텐츠 설정 화면·저장 | `app/content/blog/[id]/GenerationSettingsPanel.tsx`, `app/api/blog/tasks/[id]/settings/route.ts` |
+| Blog 프리셋 화면·저장 | `app/content/blog/[id]/BlogPresetControl.tsx`, `app/api/blog/presets/` |
 | 사진 위치 정책 | `lib/blog-publishing/image-layout.ts` |
 | 본문 조립·사진 offset·수동 마커 | `lib/blog-publishing/preparation.ts` |
 | 실행 Block 계약 | `lib/blog-publishing/blocks.ts` |
@@ -241,7 +279,9 @@ KIN의 schema·고정/스타일 지시는 `lib/kin/generate.ts`에 있으며, �
 | 제품 UI·사진 | `app/products/`, `[id]/UploadProductAssets.tsx` |
 | 리뷰 import | `lib/reviews/import.ts`, `app/api/products/[id]/reviews/import/route.ts` |
 | VOC 분석·결과 화면 | `lib/voc/analyze.ts`, 관련 analyze route, `app/voc/page.tsx` |
-| KIN 규칙·preset·품질 | `lib/kin/`, `app/api/kin/`, `app/content/kin/` |
+| KIN 공통 prompt·선택 스타일 | `KinPromptSettings.tsx`, `KinPresetControl.tsx`, `lib/kin/prompts.ts`, `presets.ts` |
+| KIN 출력·제품 언급·품질 검사 | `lib/kin/generate.ts`, `mention-validation.ts`, `quality-check.ts` |
+| KIN 과거 답변 조회·복사 | `KinTaskHistory.tsx`, `app/api/kin/tasks/[id]/drafts/route.ts` |
 | DB 연결·권한 | `lib/supabase.ts`, `supabase/migrations/` |
 | 메뉴·공통 화면 | `app/layout.tsx`, `app/globals.css` |
 | Extension 빌드·권한 | `scripts/build-extension.mjs`, `extension/manifest.json` |

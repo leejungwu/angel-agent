@@ -7,6 +7,7 @@ import type { KinPreset, MentionLevel } from "@/lib/kin/presets";
 import KinPresetControl from "./KinPresetControl";
 import type { QualityCheck } from "@/lib/kin/quality-check";
 import type { KinProvider } from "@/lib/kin/provider";
+import KinPromptSettings from "./KinPromptSettings";
 
 export type KinProduct = { id: number; name: string; brand: string | null };
 type Result = { taskId: string; draftId: string; draft: KinAnswer; model: string; inputKey: string; qualityCheck: QualityCheck };
@@ -74,6 +75,7 @@ export default function KinAnswerForm({ products, presets }: { products: KinProd
   const secondaryClass = "rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm disabled:opacity-50";
   return (
     <div className="mt-8 space-y-6">
+      <KinPromptSettings disabled={generating || presetBusy} />
       <KinPresetControl initialPresets={presets} selectedId={presetId} disabled={generating} onBusy={setPresetBusy}
         onSelect={(preset) => {
           setPresetId(preset?.id ?? ""); setPresetRevision(preset?.updated_at ?? "");

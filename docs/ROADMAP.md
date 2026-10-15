@@ -5,7 +5,7 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 
 ## Blog 개발 우선순위
 
-1. 콘텐츠 설정 + 템플릿
+1. 콘텐츠 프리셋 운영 검증 / 생성 품질 개선
 2. 사진 배치 설정
 3. 이미지 전처리 / 재사용
 4. execution snapshot + 실패 이력
@@ -25,11 +25,14 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 - [x] 제품 정보 기반 AI draft 생성 / 재생성 / 저장
 - [x] OpenAI / Claude / Grok 제공자 및 모델 선택
 - [x] 구조화된 제목 / 도입 / 섹션 / 마무리 생성
-- [x] 고정 규칙 / 참고 글쓰기 가이드 / 작업별 지시 분리
-- [x] 허위 경험·후기·효능 방지 규칙 / 분량 안내
+- [x] 사용자 편집 Blog Prompt Preset 4영역 / Task별 keyword·instructions 분리
+- [x] 기존 사실성·문체 규칙을 초기 프리셋으로 보존 / 명시적인 최소·목표·최대 분량
 - [x] Draft 편집 / 승인 / 반려
 - [x] 최신 생성 결과 식별 / 같은 Task의 생성 이력·이전 draft 선택
-- [ ] 콘텐츠 설정 + 템플릿 — 부분 구현: Settings 모델·검증·초기 skeleton·Task 설정 패널·JSONB 저장/복원·생성 연결 구현. migration 적용 및 실제 저장 흐름 확인 필요; 프리셋·템플릿 고도화 미구현
+- [x] Blog 프리셋 생성 / 편집 / 삭제 / 복제 / Task별 선택
+- [x] 후기형·정보형·비교형·문제 해결형·제품 소개형 초기 프리셋 seed
+- [x] Draft별 생성 snapshot / 당시 프리셋·설정·provider/model 이력 조회
+- [ ] Blog 프리셋 migration 적용 / 실제 저장·생성 운영 검증
 - [ ] 콘텐츠 목적 선택 UI와 생성 반영 — 역사적 purpose 값은 목록 표시만 사용
 - [ ] 승인 후 편집의 재승인 정책
 - [ ] VOC / 고객 표현 / pain point / 구매 동기 / 검색 의도 반영
@@ -118,14 +121,18 @@ FAQ와 광고 hook은 분석 결과의 후보이며 별도 완성 FAQ·광고 �
 - [x] 질문 / URL / 카테고리 / 추가 지시 / 선택적 제품 연결
 - [x] 제품 언급 수준 none / relevant / direct
 - [x] OpenAI / Claude / Grok 선택 / 구조화된 답변 저장
-- [x] 최근 작업 / 답변 재생성 / 복사
+- [x] 최근 작업 / 과거 Task별 Draft 조회·선택 / 답변 재생성 / 복사
+- [x] 신규 답변의 질문 의도·provider/model 기록 / 기존 답변의 기록 없음 표시
 - [x] 제품 정보 / 최신 완료 VOC 참고
 - [ ] purpose 선택 UI — API/DB는 지원하지만 현재 UI는 helpful 고정
 - [ ] 운영 답변 품질의 지속 검수 / 네이버 답변 등록 지원
 
 ### 프롬프트 / 품질
 
-- [x] 고정 규칙 / 공통 스타일 / preset / 질문별 지시 분리
+- [x] DB 공통 Prompt / 선택 preset snapshot / 질문별 추가 지시 분리
+- [x] 공통 시스템·스타일 prompt 조회·편집·저장 UI / 명시적 우선순위
+- [x] schema 범위 내 preset 글자 수 검증 / direct·none·실제 제품 언급 hard validation
+- [ ] KIN 공통 Prompt migration 적용 / 실제 생성·답변 이력 운영 검증
 - [x] preset 생성 / 편집 / 삭제 / 복제 / 기본 preset 초기 선택
 - [x] 문단 수 / 글자 수 / 키워드 / 반복 제한 / 금칙어 / 제품 언급 설정
 - [x] 재생성용 preset snapshot
@@ -178,7 +185,7 @@ FAQ와 광고 hook은 분석 결과의 후보이며 별도 완성 FAQ·광고 �
 
 - [x] Blog/KIN/VOC 구조화 출력 schema
 - [x] Blog/KIN 공통 AI provider transport
-- [x] Blog 작성 규칙 및 KIN preset 규칙
+- [x] Blog/KIN 사용자 편집 프리셋 및 생성 조건 기록
 - [ ] 제품 문서·공급사 견적 / 브랜드·문체 규칙 / SOP·인수인계·의사결정 자료 관리
 - [ ] 기존 광고·콘텐츠 / 매출·광고 보고서 / 계약 데이터 수집·추출
 - [ ] 전사 문서 검색 / RAG / 회사 지식 조회
@@ -219,6 +226,9 @@ FAQ와 광고 hook은 분석 결과의 후보이며 별도 완성 FAQ·광고 �
 - [ ] Slack / 이메일 / 중요 변경·발행 실패 알림
 - [ ] 범용 사람 승인 큐 / 광고 변경 승인 / 채널별 발행 전 승인
 - [ ] 사용자 인증 / 내부 역할·권한 / 감사 로그 / credential 관리
+- [ ] Blog/KIN 관리용 설정 API의 anon write 제거
+- [ ] 관리용 설정 API를 위한 서버 전용 Supabase client 도입
+- [ ] Blog/KIN 관리용 설정 API의 관리자 인증 경계 추가
 - [ ] Agent·자동화 실행 이력 / 전사 발행 이력
 
 Blog의 사용자 시작형 Extension과 승인 목록은 구현되어 있지만 범용 Agent 실행·스케줄 플랫폼은 아니다.

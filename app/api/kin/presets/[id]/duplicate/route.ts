@@ -11,7 +11,9 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     return Response.json({ error: "원본 프리셋을 조회하지 못했습니다." }, { status: 500 });
   }
   if (!original) return Response.json({ error: "프리셋을 찾을 수 없습니다." }, { status: 404 });
-  const input = parsePreset({ ...original, name: `${original.name.slice(0, 96)} 복사본`, is_default: false });
+  let input;
+  try { input = parsePreset({ ...original, name: `${original.name.slice(0, 96)} 복사본`, is_default: false }); }
+  catch { return Response.json({ error: "원본 프리셋 설정이 유효하지 않습니다. 글자 수 등 설정을 수정한 뒤 복제해 주세요." }, { status: 400 }); }
   const { data, error } = await supabase.from("kin_prompt_presets").insert(input).select(PRESET_FIELDS).single();
   if (error || !data) {
     console.error("Kin preset duplicate failed", { code: error?.code });

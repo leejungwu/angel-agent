@@ -43,11 +43,14 @@ const provider = load("lib/ai/provider.ts", sdkMocks);
 const schema = load("lib/blog-generation/schema.ts");
 const blogBody = load("lib/blog-generation/body.ts");
 const blogModels = load("lib/blog-generation/models.ts");
-const blogSettings = load("lib/blog-generation/settings.ts", { "./body": blogBody });
-const settingsPrompts = load("lib/blog-generation/settings-prompts.ts");
-const prompts = load("lib/blog-generation/prompts.ts", { "./body": blogBody, "./settings": blogSettings, "./settings-prompts": settingsPrompts });
+const blogPresets = load("lib/blog-generation/presets.ts");
+const snapshots = load("lib/blog-generation/snapshot.ts", { "./presets": blogPresets });
+const prompts = load("lib/blog-generation/prompts.ts");
+const blogPreset = { ...blogPresets.parseBlogPreset({ name: "프리셋", system_prompt: "편집한 시스템", strategy_prompt: "전략", style_prompt: "문체", article_prompt: "전개", target_chars: 1600, min_chars: 1400, max_chars: 1900, section_count: 3, keyword_min: 0, keyword_max: 3, is_default: true }), id: "12345678-1234-1234-1234-123456789abc", created_at: "", updated_at: "" };
 const kin = load("lib/kin/generate.ts");
-const presets = load("lib/kin/presets.ts");
+const presets = load("lib/kin/presets.ts", { "./generate": kin });
+const kinPrompts = load("lib/kin/prompts.ts");
+const kinMention = load("lib/kin/mention-validation.ts");
 const quality = load("lib/kin/quality-check.ts");
 const kinProvider = load("lib/kin/provider.ts", { "@/lib/ai/provider": provider, "./generate": kin });
 const draft = { title: "제목", intro: "도입", sections: [{ heading: "소제목", body: "본문", imageAssetId: null }], closing: "마무리" };
@@ -60,7 +63,8 @@ function success(kind, value) {
 const task = { id: 1, product_id: 2, keyword: "키워드", topic: "주제", purpose: "목적", instructions: "추가 지시" };
 const product = { id: 2, name: "윗잠베개", brand: "브랜드", usp: "USP", target_customer: "대상", customer_problem: "문제", notes: "메모" };
 const writes = [];
-let failSettingsSave = false;
+let availablePresets = [blogPreset];
+let failPresetSave = false;
 const database = {
   from(table) {
     let operation = "read";
@@ -72,12 +76,14 @@ const database = {
       update(value) { operation = "update"; changes = value; return this; },
       async maybeSingle() {
         if (operation === "update") {
-          if (table === "blog_tasks" && "generation_settings" in changes && failSettingsSave) return { data: null, error: { code: "MOCK_SAVE_FAILED" } };
+          if (table === "blog_tasks" && "preset_id" in changes && failPresetSave) return { data: null, error: { code: "MOCK_SAVE_FAILED" } };
           writes.push({ table, changes, filters });
-          if (table === "blog_tasks" && "generation_settings" in changes) task.generation_settings = JSON.parse(JSON.stringify(changes.generation_settings));
+          if (table === "blog_tasks" && "preset_id" in changes) task.preset_id = changes.preset_id;
           return { data: { id: 1, status: changes.status }, error: null };
         }
-        return { data: table === "products" ? product : task, error: null };
+        if (table === "kin_prompt_settings") return { data: { system_prompt: "공통 시스템", common_style_prompt: "공통 스타일" }, error: null };
+        return { data: table === "products" ? product : table === "blog_prompt_presets"
+          ? availablePresets.find((preset) => Object.entries(filters).every(([key, value]) => preset[key] === value)) ?? null : task, error: null };
       },
       async single() {
         writes.push({ table, changes, filters });
@@ -91,11 +97,12 @@ const route = load("app/api/blog/generate/route.ts", {
   "@/lib/blog-generation/prompts": prompts, "@/lib/supabase": { supabase: database },
   "@/lib/blog-generation/body": blogBody,
   "@/lib/blog-generation/models": blogModels,
-  "@/lib/blog-generation/settings": blogSettings,
+  "@/lib/blog-generation/presets": blogPresets, "@/lib/blog-generation/snapshot": snapshots,
 });
 const kinRoute = load("app/api/kin/generate/route.ts", {
   ...sdkMocks, "@/lib/kin/provider": kinProvider, "@/lib/kin/generate": kin,
   "@/lib/kin/presets": presets, "@/lib/kin/quality-check": quality,
+  "@/lib/kin/prompts": kinPrompts, "@/lib/kin/mention-validation": kinMention,
   "@/lib/supabase": { supabase: database },
 });
 const request = (body) => new Request("http://localhost/api/blog/generate", {
@@ -107,12 +114,8 @@ const previousKeys = keyNames.map((name) => process.env[name]);
 const hookValues = [];
 let hookIndex = 0;
 const jsx = (type, props) => ({ type, props });
-const SettingsPanel = load("app/content/blog/[id]/GenerationSettingsPanel.tsx", {
-  "react/jsx-runtime": { jsx, jsxs: jsx }, "@/lib/blog-generation/settings": blogSettings,
-}).default;
-const settingsRoute = load("app/api/blog/tasks/[id]/settings/route.ts", {
-  "@/lib/supabase": { supabase: database }, "@/lib/blog-generation/settings": blogSettings,
-});
+const PresetControl = "PresetControl";
+const Details = load("app/content/blog/[id]/BlogGenerationDetails.tsx", { "react/jsx-runtime": { jsx, jsxs: jsx }, "@/lib/blog-generation/snapshot": snapshots }).default;
 const GenerateBlogDraft = load("app/content/blog/[id]/GenerateBlogDraft.tsx", {
   react: {
     useState(initial) {
@@ -128,12 +131,14 @@ const GenerateBlogDraft = load("app/content/blog/[id]/GenerateBlogDraft.tsx", {
   "@/lib/supabase": { supabase: database },
   "@/lib/blog-generation/body": blogBody,
   "@/lib/blog-generation/models": blogModels,
-  "@/lib/blog-generation/settings": blogSettings,
-  "./GenerationSettingsPanel": { __esModule: true, default: SettingsPanel },
+  "@/lib/blog-generation/presets": blogPresets,
+  "@/lib/blog-generation/snapshot": snapshots,
+  "./BlogPresetControl": { __esModule: true, default: PresetControl },
+  "./BlogGenerationDetails": { __esModule: true, default: Details },
 }).default;
-function renderBlog(initialDraft = null, initialSettings = undefined, initialDrafts = []) {
+function renderBlog(initialDraft = null, initialPresetId = blogPreset.id, initialDrafts = []) {
   hookIndex = 0;
-  return GenerateBlogDraft({ taskId: 1, initialDraft, initialSettings, initialDrafts });
+  return GenerateBlogDraft({ taskId: 1, initialDraft, initialPresetId, initialPresets: [blogPreset], initialDrafts });
 }
 function nodes(tree) {
   if (!tree || typeof tree !== "object") return [];
@@ -175,7 +180,7 @@ try {
       return Response.json({ ok: true, draftId: 3, draft, provider: "openai", model: "gpt-6-astra" });
     };
     await nodes(tree).find((node) => node.type === "button" && node.props.children === "AI 초안 생성").props.onClick();
-    assert.deepEqual(generationRequest, { taskId: 1, provider: "openai", model: "gpt-6-astra", settings: JSON.parse(JSON.stringify(blogSettings.parseBlogGenerationSettings())) });
+    assert.deepEqual(generationRequest, { taskId: 1, provider: "openai", model: "gpt-6-astra", presetId: blogPreset.id });
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -207,7 +212,7 @@ try {
   assert.equal(blogModels.resolveBlogModel("openai", "claude-sonnet-5-5"), null);
   assert.equal(blogModels.resolveBlogModel("anthropic", "gpt-6.1-sol"), null);
   assert.equal(blogModels.resolveBlogModel("xai", "gpt-6.1-sol"), null);
-  const prompt = prompts.buildBlogPrompt(product, task);
+  const prompt = prompts.buildBlogPrompt(product, task, blogPreset);
   assert.deepEqual(JSON.parse(prompt.input).task, {
     keyword: task.keyword, topic: task.topic, instructions: task.instructions,
   });
@@ -215,15 +220,9 @@ try {
   for (const file of ["app/content/blog/new/page.tsx", "app/content/blog/[id]/page.tsx", "app/content/blog/[id]/EditBlogTask.tsx", "app/api/blog/generate/route.ts"]) {
     assert.doesNotMatch(readFileSync(resolve(file), "utf8"), /\bpurpose\b/, `${file} must not read or write legacy purpose`);
   }
-  assert.match(JSON.parse(prompt.input).bodyLengthGuide, /1500.*1200~1800/);
-  assert.deepEqual(JSON.parse(prompt.input).referenceWritingGuides, {
-    contentStrategy: prompts.BLOG_CONTENT_STRATEGY_GUIDE,
-    copywritingSkills: prompts.BLOG_COPYWRITING_SKILLS_GUIDE,
-  });
-  assert.ok(prompts.BLOG_CONTENT_STRATEGY_GUIDE.trim());
-  assert.ok(prompts.BLOG_COPYWRITING_SKILLS_GUIDE.trim());
+  assert.equal(prompt.systemInstructions, blogPreset.system_prompt);
+  assert.equal(JSON.parse(prompt.input).preset.stylePrompt, blogPreset.style_prompt);
   for (const kind of ["openai", "anthropic", "xai"]) {
-    delete task.generation_settings;
     writes.length = 0;
     reply = success(kind, draft);
     const response = await route.POST(request({ taskId: 1, provider: kind }));
@@ -231,10 +230,12 @@ try {
     const body = await response.json();
     assert.equal(body.provider, kind);
     assert.deepEqual(body.draft, draft);
-    assert.deepEqual(body.bodyLength, blogBody.checkBlogBodyLength(draft));
+    assert.deepEqual(body.bodyLength, blogBody.checkBlogBodyLength(draft, blogPreset));
     const saved = writes.find((write) => write.table === "blog_drafts").changes;
-    assert.deepEqual(saved, { blog_task_id: 1, product_id: 2, ...draft, status: "draft", model: "returned-model" });
-    assert.deepEqual(writes.find((write) => write.table === "blog_tasks").changes, { status: "generated" });
+    assert.deepEqual(saved, { blog_task_id: 1, product_id: 2, ...draft, status: "draft", model: "returned-model", provider: kind,
+      generation_snapshot: { ...snapshots.createBlogGenerationSnapshot(blogPreset, task, product, kind, blogModels.BLOG_DEFAULT_MODELS[kind]), responseModel: "returned-model" } });
+    assert.equal(body.generationSnapshot.preset.system_prompt, blogPreset.system_prompt);
+    assert.deepEqual(writes.find((write) => write.table === "blog_tasks" && write.changes.status).changes, { status: "generated" });
     const call = calls.at(-1);
     assert.equal(call.request.model, blogModels.BLOG_DEFAULT_MODELS[kind]);
     if (kind === "openai") {
@@ -253,35 +254,6 @@ try {
     if (kind !== "anthropic") assert.equal(format.name, "blog_draft");
     if (kind === "xai") assert.equal(call.options.baseURL, "https://api.x.ai/v1");
     if (kind === "anthropic") assert.equal(call.request.max_tokens, 12000);
-
-    const selectedSettings = { template: "comparison", tone: "formal", targetLength: 2400, sectionCount: 4,
-      mainKeyword: "눈가주름", keywordUsage: { min: 1, max: 3 }, additionalInstructions: "느낌표를 사용해라" };
-    writes.length = 0;
-    const configured = await route.POST(request({ taskId: 1, provider: kind, settings: selectedSettings }));
-    assert.equal(configured.status, 200);
-    const configuredResult = await configured.json();
-    assert.deepEqual(configuredResult.bodyLength, blogBody.checkBlogBodyLength(draft, 2400));
-    assert.equal(configuredResult.createdAt, "2026-10-14T01:02:03.000Z");
-    const configuredCall = calls.at(-1).request;
-    const configuredInput = JSON.parse(kind === "openai" ? configuredCall.input : configuredCall.messages[kind === "xai" ? 1 : 0].content);
-    assert.equal(configuredInput.generationInstructions.template, settingsPrompts.BLOG_TEMPLATE_INSTRUCTIONS.comparison);
-    assert.equal(configuredInput.generationInstructions.tone, settingsPrompts.BLOG_TONE_INSTRUCTIONS.formal);
-    assert.match(configuredInput.bodyLengthGuide, /2400.*1920~2880/);
-    assert.equal(configuredInput.generationInstructions.additionalInstructions, "느낌표를 사용해라");
-    const system = kind === "openai" ? configuredCall.instructions : kind === "anthropic" ? configuredCall.system : configuredCall.messages[0].content;
-    assert.match(system, /구두점.*additionalInstructions.*우선/);
-    assert.deepEqual(writes.find((write) => write.table === "blog_drafts").changes, saved, "Settings must not alter Draft persistence");
-    assert.equal(task.generation_settings.targetLength, 2400);
-    assert.equal(task.generation_settings.additionalInstructions, "느낌표를 사용해라");
-    const restored = await settingsRoute.GET(request({}), { params: Promise.resolve({ id: "1" }) });
-    assert.equal((await restored.json()).settings.targetLength, 2400);
-    reply = success(kind, draft);
-    const regenerated = await route.POST(request({ taskId: 1, provider: kind }));
-    assert.equal(regenerated.status, 200);
-    const regenerateCall = calls.at(-1).request;
-    const regenerateInput = JSON.parse(kind === "openai" ? regenerateCall.input : regenerateCall.messages[kind === "xai" ? 1 : 0].content);
-    assert.equal(regenerateInput.generationInstructions.template, settingsPrompts.BLOG_TEMPLATE_INSTRUCTIONS.comparison);
-    assert.equal(regenerateInput.generationInstructions.additionalInstructions, "느낌표를 사용해라");
 
     reply = success(kind, { answer: "실제 질문에 대한 충분한 한국어 답변입니다. ".repeat(15), questionIntent: "질문의 구체적인 의도를 확인합니다.", productMentioned: false });
     const result = await kinProvider.generateKinWithProvider({ provider: kind, systemInstructions: "KIN fixed", input: "{}" });
@@ -311,63 +283,25 @@ try {
     if (kind === "xai") reply.choices[0].message.refusal = "refused";
     writes.length = 0;
     assert.equal((await route.POST(request({ taskId: 1, provider: kind }))).status, 500);
-    assert.equal(writes.length, 0);
+    assert.equal(writes.filter(write => write.table === "blog_drafts").length, 0);
   }
   reply = success("openai", draft);
-  failSettingsSave = true;
+  failPresetSave = true;
   const beforeSaveFailure = calls.length;
-  assert.equal((await route.POST(request({ taskId: 1, settings: { tone: "polite" } }))).status, 500);
-  assert.equal(calls.length, beforeSaveFailure, "Settings save failure must prevent AI generation");
-  failSettingsSave = false;
-  task.generation_settings = { tone: "bad" };
-  const invalidStored = await settingsRoute.GET(request({}), { params: Promise.resolve({ id: "1" }) });
-  assert.ok((await invalidStored.json()).warning);
-  assert.equal((await route.POST(request({ taskId: 1 }))).status, 409);
-  const patch = await settingsRoute.PATCH(request({ settings: { tone: "formal" } }), { params: Promise.resolve({ id: "1" }) });
-  assert.equal(patch.status, 200);
-  assert.equal(task.generation_settings.tone, "formal");
-  assert.equal((await (await settingsRoute.GET(request({}), { params: Promise.resolve({ id: "1" }) })).json()).settings.tone, "formal");
-  const badPatch = await settingsRoute.PATCH(request({ settings: { targetLength: 0 } }), { params: Promise.resolve({ id: "1" }) });
-  assert.equal(badPatch.status, 400);
-  assert.equal(task.generation_settings.tone, "formal");
-  hookValues.length = 0;
-  tree = renderBlog(null, task.generation_settings);
-  let panel = nodes(tree).find((node) => node.type === SettingsPanel);
-  assert.equal(panel.props.value.tone, "formal");
-  const panelTree = SettingsPanel(panel.props);
-  nodes(panelTree).find((node) => node.type === "input" && node.props.type === "number" && node.props.value === 1500).props.onChange({ target: { valueAsNumber: 2200 } });
-  tree = renderBlog();
-  panel = nodes(tree).find((node) => node.type === SettingsPanel);
-  assert.equal(panel.props.value.targetLength, 2200);
-  nodes(SettingsPanel(panel.props)).find((node) => node.type === "textarea").props.onChange({ target: { value: "느낌표를 사용해라" } });
-  tree = renderBlog();
-  panel = nodes(tree).find((node) => node.type === SettingsPanel);
-  const uiFetch = globalThis.fetch;
-  let sent;
-  try {
-    globalThis.fetch = async (url, options) => {
-      sent = JSON.parse(options.body);
-      return url.includes("/settings") ? Response.json({ settings: sent.settings }) : Response.json({ ok: true, draftId: 3, draft, createdAt: "2026-10-14T02:00:00.000Z", model: "returned-model" });
-    };
-    await panel.props.onSave();
-    assert.equal(sent.settings.targetLength, 2200);
-    assert.equal(sent.settings.additionalInstructions, "느낌표를 사용해라");
-    await nodes(tree).find((node) => node.type === "button" && node.props.children === "AI 초안 생성").props.onClick();
-    assert.equal(sent.settings.targetLength, 2200);
-    assert.equal(sent.settings.additionalInstructions, "느낌표를 사용해라");
-    tree = renderBlog();
-    assert.ok(nodes(tree).some((node) => node.type === "article"));
-    const generatedPreview = nodes(tree).find((node) => node.type === "article");
-    assert.match(JSON.stringify(generatedPreview), /Draft #.*3/);
-    assert.match(JSON.stringify(generatedPreview), /최신 생성/);
-    assert.match(JSON.stringify(generatedPreview), /이번 세션 생성에 사용한 설정/);
-    assert.match(JSON.stringify(generatedPreview), /returned-model/);
-  } finally { globalThis.fetch = uiFetch; }
+  assert.equal((await route.POST(request({ taskId: 1 }))).status, 500);
+  assert.equal(calls.length, beforeSaveFailure, "Preset selection save failure must prevent generation");
+  failPresetSave = false;
+  assert.match(JSON.stringify(Details({ snapshot: null })), /기존 생성본 · 생성 설정 기록 없음/);
+  const snapshot = snapshots.createBlogGenerationSnapshot(blogPreset, task, product, "openai", "requested");
+  snapshot.responseModel = "returned-model";
+  const details = JSON.stringify(Details({ snapshot }));
+  assert.match(details, /당시 프리셋 전체 보기/);
+  assert.match(details, /편집한 시스템/);
   hookValues.length = 0;
   const older = { ...draft, id: 1, title: "이전 제목", status: "draft", model: "old-model", created_at: "2026-10-13T00:00:00Z" };
   const newer = { ...draft, id: 2, title: "새 제목", status: "approved", model: "new-model", created_at: "2026-10-14T00:00:00Z" };
   tree = renderBlog(newer, undefined, [newer, older]);
-  assert.match(JSON.stringify(nodes(tree).find((node) => node.type === "article")), /생성 당시 설정은 기록되지/);
+  assert.match(JSON.stringify(Details({ snapshot: null })), /생성 설정 기록 없음/);
   const oldItem = nodes(tree).find((node) => node.type === "li" && JSON.stringify(node).includes("이전 제목"));
   nodes(oldItem).find((node) => node.type === "button").props.onClick();
   tree = renderBlog(newer, undefined, [newer, older]);
@@ -386,14 +320,6 @@ try {
   assert.equal(approval.filters.blog_task_id, 1);
   assert.equal(approval.changes.status, "approved");
   hookValues.length = 0;
-  delete task.generation_settings;
-  for (const settings of [null, { targetLength: 0 }, { sectionCount: 0 }, { keywordUsage: { min: 4, max: 1 } }, { tone: "bad" }]) {
-    const callCount = calls.length;
-    writes.length = 0;
-    assert.equal((await route.POST(request({ taskId: 1, settings }))).status, 400);
-    assert.equal(calls.length, callCount);
-    assert.equal(writes.length, 0);
-  }
   for (const kind of ["openai", "anthropic", "xai"]) {
     for (const { value: model } of blogModels.BLOG_MODEL_OPTIONS[kind]) {
       writes.length = 0;
@@ -413,6 +339,26 @@ try {
   }
   reply = success("openai", draft);
   assert.equal((await route.POST(request({ taskId: 1 }))).status, 200);
+  const secondPreset = { ...blogPreset, id: "22345678-1234-1234-1234-123456789abc", name: "두 번째", is_default: false, system_prompt: "다른 시스템" };
+  availablePresets = [blogPreset, secondPreset];
+  assert.equal((await route.POST(request({ taskId: 1, presetId: secondPreset.id }))).status, 200);
+  assert.equal(task.preset_id, secondPreset.id);
+  assert.equal(calls.at(-1).request.instructions, secondPreset.system_prompt);
+  assert.equal((await route.POST(request({ taskId: 1 }))).status, 200);
+  assert.equal(calls.at(-1).request.instructions, secondPreset.system_prompt, "Task preset precedes default");
+  task.preset_id = null;
+  assert.equal((await route.POST(request({ taskId: 1 }))).status, 200);
+  assert.equal(task.preset_id, blogPreset.id);
+  availablePresets = [];
+  const beforeMissingPreset = calls.length;
+  assert.equal((await route.POST(request({ taskId: 1, presetId: secondPreset.id }))).status, 400);
+  task.preset_id = null;
+  assert.equal((await route.POST(request({ taskId: 1 }))).status, 409);
+  assert.equal(calls.length, beforeMissingPreset);
+  availablePresets = [blogPreset];
+  for (const invalid of [{ taskId: 1, presetId: "invalid" }, { taskId: 1, settings: {} }, { taskId: 1, product: {} }]) {
+    assert.equal((await route.POST(request(invalid))).status, 400);
+  }
   assert.equal((await route.POST(request({ taskId: 1, provider: "invalid" }))).status, 400);
   delete process.env.ANTHROPIC_API_KEY;
   assert.equal((await route.POST(request({ taskId: 1, provider: "anthropic" }))).status, 500);
@@ -421,7 +367,7 @@ try {
     writes.length = 0;
     reply = success("openai", invalid);
     assert.equal((await route.POST(request({ taskId: 1 }))).status, 500);
-    assert.equal(writes.length, 0);
+    assert.equal(writes.filter(write => write.table === "blog_drafts").length, 0);
   }
   console.log("PASS: model options/defaults, UI provider reset/request, model allowlist, three provider dialects, Blog save contract, KIN compatibility, prompt separation and invalid output rejection");
 } finally {

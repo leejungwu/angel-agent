@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import type { AIProvider } from "@/lib/ai/provider";
-import { BLOG_BODY_TARGET_CHARS, BLOG_BODY_MIN_CHARS, BLOG_BODY_MAX_CHARS, checkBlogBodyLength } from "@/lib/blog-generation/body";
+import { checkBlogBodyLength } from "@/lib/blog-generation/body";
 import { BLOG_MODEL_OPTIONS, BLOG_DEFAULT_MODELS, resolveBlogModel } from "@/lib/blog-generation/models";
-import { parseBlogGenerationSettings, readStoredBlogGenerationSettings, BLOG_TEMPLATE_OPTIONS, BLOG_TONE_OPTIONS, type BlogGenerationSettings } from "@/lib/blog-generation/settings";
-import GenerationSettingsPanel from "./GenerationSettingsPanel";
+import type { BlogPreset } from "@/lib/blog-generation/presets";
+import { readBlogGenerationSnapshot } from "@/lib/blog-generation/snapshot";
+import BlogPresetControl from "./BlogPresetControl";
+import BlogGenerationDetails from "./BlogGenerationDetails";
 
 export type Draft = {
   title: string;
@@ -20,14 +22,14 @@ export type Draft = {
   model?: string | null;
   provider?: AIProvider;
   created_at?: string | null;
-  generationSettings?: BlogGenerationSettings; // This session only; not a persisted Draft snapshot.
+  generation_snapshot?: unknown;
 };
 
 const PROVIDER_LABELS: Record<AIProvider, string> = {
   openai: "OpenAI", anthropic: "Claude", xai: "Grok",
 };
 
-// Existing drafts store the model only; resolve known model families on reload.
+// Older drafts have no provider field; resolve known model families on reload.
 function providerFromModel(model?: string | null): AIProvider | undefined {
   if (model?.startsWith("claude-")) return "anthropic";
   if (model?.startsWith("grok-")) return "xai";
@@ -57,18 +59,19 @@ function formatCreatedAt(value?: string | null) {
 export default function GenerateBlogDraft({
   taskId,
   initialDraft = null,
-  initialSettings,
+  initialPresetId = "",
+  initialPresets = [],
   initialDrafts = [],
 }: {
   taskId: number;
   initialDraft?: Draft | null;
-  initialSettings?: unknown;
+  initialPresetId?: string;
+  initialPresets?: BlogPreset[];
   initialDrafts?: Draft[];
 }) {
   const router = useRouter();
-  const [settings, setSettings] = useState(() => readStoredBlogGenerationSettings(initialSettings).settings);
-  const [settingsMessage, setSettingsMessage] = useState(() => readStoredBlogGenerationSettings(initialSettings).warning ?? "");
-  const [savingSettings, setSavingSettings] = useState(false);
+  const [presetId, setPresetId] = useState(initialPresetId || initialPresets.find((item) => item.is_default)?.id || "");
+  const [presetBusy, setPresetBusy] = useState(false);
   const [provider, setProvider] = useState<AIProvider>(initialDraft?.provider ?? providerFromModel(initialDraft?.model) ?? "openai");
   const [model, setModel] = useState(() => resolveBlogModel(provider, initialDraft?.model) ?? BLOG_DEFAULT_MODELS[provider]);
   const [generating, setGenerating] = useState(false);
@@ -81,48 +84,31 @@ export default function GenerateBlogDraft({
   const inFlight = useRef(false);
   const actualProvider = draft?.provider ?? providerFromModel(draft?.model);
   const visibleDraft = editingDraft ?? draft;
-  const bodyLength = visibleDraft ? checkBlogBodyLength(visibleDraft, Number.isFinite(settings.targetLength) ? settings.targetLength : undefined) : null;
+  const snapshot = readBlogGenerationSnapshot(visibleDraft?.generation_snapshot);
+  const bodyLength = visibleDraft ? checkBlogBodyLength(visibleDraft, snapshot?.preset) : null;
   const historyMap = new Map<string, Draft>();
   for (const item of [...initialDrafts, ...(initialDraft ? [initialDraft] : []), ...sessionDrafts]) {
     if (item.id != null) historyMap.set(String(item.id), item);
   }
   const history = [...historyMap.values()].sort((a, b) =>
     (Date.parse(b.created_at ?? "") || 0) - (Date.parse(a.created_at ?? "") || 0) || String(b.id).localeCompare(String(a.id), "en", { numeric: true }));
-  const summarySettings = draft?.generationSettings ?? settings;
-  const controlsBusy = generating || saving || savingSettings || changingStatus || !!editingDraft;
+  const controlsBusy = generating || saving || presetBusy || changingStatus || !!editingDraft;
   function rememberDraft(value: Draft) {
     setDraft(value);
     setSessionDrafts((current) => [...current.filter((item) => String(item.id) !== String(value.id)), value]);
   }
 
-  async function saveSettings() {
-    if (inFlight.current || editingDraft) return;
-    inFlight.current = true; setSavingSettings(true);
-    try {
-      const validated = parseBlogGenerationSettings(settings);
-      const response = await fetch(`/api/blog/tasks/${taskId}/settings`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: validated }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "콘텐츠 설정 저장 실패");
-      setSettings(parseBlogGenerationSettings(result.settings));
-      setSettingsMessage("콘텐츠 설정을 저장했습니다."); router.refresh();
-    } catch (error) { setSettingsMessage(error instanceof Error ? error.message : "콘텐츠 설정 저장 실패"); }
-    finally { inFlight.current = false; setSavingSettings(false); }
-  }
-
   async function generateDraft() {
-    if (inFlight.current || editingDraft) return;
+    if (inFlight.current || editingDraft || presetBusy) return;
     inFlight.current = true;
     setGenerating(true);
     setSaved(false);
 
     try {
-      const validated = parseBlogGenerationSettings(settings);
       const response = await fetch("/api/blog/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskId, provider, model, settings: validated }),
+        body: JSON.stringify({ taskId, presetId: presetId || null, provider, model }),
       });
       const result: unknown = await response.json();
 
@@ -145,13 +131,12 @@ export default function GenerateBlogDraft({
         ...data.draft,
         id: typeof data.draftId === "number" || typeof data.draftId === "string" ? data.draftId : undefined,
         created_at: typeof data.createdAt === "string" ? data.createdAt : null,
-        generationSettings: validated,
+        generation_snapshot: data.generationSnapshot,
         status: "draft",
         model: typeof data.model === "string" ? data.model : undefined,
         provider: data.provider === "openai" || data.provider === "anthropic" || data.provider === "xai"
           ? data.provider : undefined,
       });
-      setSettingsMessage("콘텐츠 설정을 저장하고 초안을 생성했습니다.");
       router.refresh();
     } catch (error) {
       alert(error instanceof Error ? error.message : "AI 초안 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.");
@@ -242,9 +227,10 @@ export default function GenerateBlogDraft({
 
   return (
     <div className="mt-8 max-w-2xl">
-      <GenerationSettingsPanel value={settings} onChange={(value) => { setSettings(value); setSettingsMessage("변경된 설정은 저장하거나 생성할 때 적용됩니다."); }} onSave={saveSettings}
-        disabled={generating || saving || savingSettings || changingStatus || !!editingDraft} message={settingsMessage} />
-      <fieldset disabled={generating || saving || savingSettings || changingStatus || !!editingDraft} className="mb-4 flex gap-4">
+      <BlogPresetControl initialPresets={initialPresets} selectedId={presetId}
+        onSelect={(preset) => setPresetId(preset?.id ?? "")} onBusy={setPresetBusy}
+        disabled={generating || saving || presetBusy || changingStatus || !!editingDraft} />
+      <fieldset disabled={generating || saving || presetBusy || changingStatus || !!editingDraft} className="mb-4 flex gap-4">
         <legend className="mb-2 text-sm font-medium">생성에 사용할 AI 제공자</legend>
         {([{ value: "openai", label: "OpenAI" }, { value: "anthropic", label: "Claude" }, { value: "xai", label: "Grok" }] as const).map((option) => (
           <label key={option.value} className="flex items-center gap-2 text-sm">
@@ -260,7 +246,7 @@ export default function GenerateBlogDraft({
       <label className="mb-3 block text-sm font-medium">
         모델
         <select value={model} onChange={(event) => setModel(event.target.value)}
-          disabled={generating || saving || savingSettings || changingStatus || !!editingDraft}
+          disabled={generating || saving || presetBusy || changingStatus || !!editingDraft}
           className="mt-2 block rounded-lg border px-4 py-3">
           {BLOG_MODEL_OPTIONS[provider].map((option) => (
             <option key={option.value} value={option.value}>{option.label}</option>
@@ -271,7 +257,7 @@ export default function GenerateBlogDraft({
       <button
         type="button"
         onClick={generateDraft}
-        disabled={generating || saving || savingSettings || changingStatus || !!editingDraft}
+        disabled={generating || saving || presetBusy || changingStatus || !!editingDraft}
         className="rounded-lg bg-black px-4 py-2 text-white disabled:opacity-50"
       >
         {generating ? "생성 중..." : draft ? "AI 초안 재생성" : "AI 초안 생성"}
@@ -280,7 +266,7 @@ export default function GenerateBlogDraft({
         <button
           type="button"
           onClick={startEditing}
-          disabled={generating || saving || savingSettings || changingStatus}
+          disabled={generating || saving || presetBusy || changingStatus}
           className="ml-2 rounded-lg border bg-white px-4 py-2 disabled:opacity-50"
         >
           편집
@@ -293,7 +279,7 @@ export default function GenerateBlogDraft({
               <button
                 type="button"
                 onClick={() => changeStatus("approved")}
-                disabled={generating || saving || savingSettings || changingStatus}
+                disabled={generating || saving || presetBusy || changingStatus}
                 className="rounded-lg border bg-white px-4 py-2 disabled:opacity-50"
               >
                 승인
@@ -301,7 +287,7 @@ export default function GenerateBlogDraft({
               <button
                 type="button"
                 onClick={() => changeStatus("rejected")}
-                disabled={generating || saving || savingSettings || changingStatus}
+                disabled={generating || saving || presetBusy || changingStatus}
                 className="rounded-lg border bg-white px-4 py-2 disabled:opacity-50"
               >
                 거절
@@ -312,7 +298,7 @@ export default function GenerateBlogDraft({
             <button
               type="button"
               onClick={() => changeStatus("draft")}
-              disabled={generating || saving || savingSettings || changingStatus}
+              disabled={generating || saving || presetBusy || changingStatus}
               className="rounded-lg border bg-white px-4 py-2 disabled:opacity-50"
             >
               draft로 되돌리기
@@ -324,7 +310,8 @@ export default function GenerateBlogDraft({
       {saved && <p role="status" className="mt-3 text-sm text-zinc-600">초안을 저장했습니다.</p>}
       {bodyLength && (
         <p role="status" className={`mt-3 text-sm ${bodyLength.status === "ok" ? "text-zinc-500" : "text-amber-700"}`}>
-          본문 {bodyLength.characters.toLocaleString("ko-KR")}자 · 목표 {Number.isFinite(settings.targetLength) ? settings.targetLength.toLocaleString("ko-KR") : "미입력"}자 · 권장 {Math.round(BLOG_BODY_MIN_CHARS * settings.targetLength / BLOG_BODY_TARGET_CHARS).toLocaleString("ko-KR")}~{Math.round(BLOG_BODY_MAX_CHARS * settings.targetLength / BLOG_BODY_TARGET_CHARS).toLocaleString("ko-KR")}자
+          본문 {bodyLength.characters.toLocaleString("ko-KR")}자
+          {snapshot && <> · 목표 {snapshot.preset.target_chars}자 · 권장 {snapshot.preset.min_chars}~{snapshot.preset.max_chars}자</>}
           {bodyLength.status === "too_short" && " · 권장 분량보다 짧습니다."}
           {bodyLength.status === "too_long" && " · 권장 분량보다 깁니다."}
           <span className="block">제목 제외 · 공백 포함 · 줄바꿈 제외</span>
@@ -402,7 +389,7 @@ export default function GenerateBlogDraft({
         </form>
       )}
 
-      <div aria-live="polite" aria-busy={generating || saving || savingSettings || changingStatus}>
+      <div aria-live="polite" aria-busy={generating || saving || presetBusy || changingStatus}>
         {draft?.id && !editingDraft && <Link href={`/content/blog/${taskId}/prepare?draftId=${draft.id}`} className="mt-4 inline-block rounded-lg border px-4 py-2 text-sm">네이버 발행 준비</Link>}
         {draft && !editingDraft && (
           <article className="mt-6 rounded-xl border bg-white p-6">
@@ -411,9 +398,7 @@ export default function GenerateBlogDraft({
             <p className="mt-2 text-sm text-zinc-500">
               상태: {draft.status || "-"} · 제공자: {actualProvider ? PROVIDER_LABELS[actualProvider] : "확인 불가"} · 모델: {draft.model || "-"} · 생성일시: {formatCreatedAt(draft.created_at)}
             </p>
-            <p className="mt-2 text-sm text-zinc-600">
-              {draft.generationSettings ? "이번 세션 생성에 사용한 설정" : "현재 화면 설정 참고 · 이 생성본의 생성 당시 설정은 기록되지 않았습니다"}: {BLOG_TEMPLATE_OPTIONS.find((item) => item.value === summarySettings.template)?.label} · {BLOG_TONE_OPTIONS.find((item) => item.value === summarySettings.tone)?.label} · 목표 {summarySettings.targetLength}자 · 소제목 {summarySettings.sectionCount}개
-            </p>
+            <BlogGenerationDetails snapshot={draft.generation_snapshot} />
             <section className="mt-6">
               <h3 className="font-semibold">도입</h3>
               <p className="mt-2 whitespace-pre-wrap break-words">{draft.intro}</p>
@@ -433,7 +418,7 @@ export default function GenerateBlogDraft({
       </div>
       {history.length > 0 && <section className="mt-6 rounded-xl border bg-white p-5">
         <h2 className="font-semibold">생성 이력 · 최신순</h2>
-        <p className="mt-2 text-sm text-zinc-500">선택한 생성본을 위에서 미리보고 편집·승인할 수 있습니다. 재생성은 현재 Task의 콘텐츠 설정을 사용합니다.</p>
+        <p className="mt-2 text-sm text-zinc-500">선택한 생성본을 위에서 미리보고 편집·승인할 수 있습니다. 재생성은 현재 선택한 프리셋과 Task 정보를 사용합니다.</p>
         <ol className="mt-4 space-y-3">{history.map((item) => <li key={item.id} className="rounded-lg border p-3">
           <p className="font-medium">Draft #{item.id} · {item.title} {String(item.id) === String(history[0]?.id) && <span className="text-xs text-blue-700">최신 생성</span>}</p>
           <p className="mt-1 text-xs text-zinc-500">{formatCreatedAt(item.created_at)} · {item.model || "모델 확인 불가"} · {item.status || "-"}</p>

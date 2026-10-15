@@ -21,27 +21,39 @@ The actual response model is still saved in `blog_drafts.model`. No Auto/Jev
 routing is used. KIN defaults remain in `lib/kin/provider.ts` and are unchanged.
 Actual model availability depends on the provider account.
 
-## Blog prompts
+## Blog prompts and snapshots
 
-Edit `lib/blog-generation/prompts.ts`:
+Blog writing instructions live in editable `blog_prompt_presets`, not runtime constants.
+The task screen exposes system, strategy, style and article prompts, plus explicit
+min/target/max characters, section count and keyword usage bounds. The five seed
+presets preserve the former common/template/natural-tone/medium-exposure/no-CTA
+text verbatim. Informational is the initial default.
 
-- `BLOG_FIXED_INSTRUCTIONS`: mandatory factuality and output rules.
-- `BLOG_CONTENT_STRATEGY_GUIDE`: in-code content strategy guidance.
-- `BLOG_COPYWRITING_SKILLS_GUIDE`: in-code writing guidance.
+The generation request contains only taskId, presetId, provider and model. The server
+loads Task, Product and Preset. Omitted presetId resolves to Task preset_id, then a
+default preset. Missing selection/default is an explicit error. Prompt assembly uses
+preset.system_prompt verbatim, and serializes the remaining preset settings, product
+facts and Task keyword/topic/instructions without appending hidden writing prose.
+No Markdown prompt files are loaded. The output schema remains a program contract.
 
-The Markdown files are not read automatically. Reference guides are serialized
-separately from product facts and task-specific instructions. Fixed rules take
-priority, followed by explicit task instructions, then reference style guidance.
-Blog tasks pass `keyword`, `topic`, `instructions`, not the legacy `purpose`
-column. Draft storage fields are unchanged. Provider omission still means OpenAI. All responses are validated
-before saving; providers are not silently switched on failure.
+Apply `202610150001_create_blog_prompt_presets.sql` before using this path; it is not
+automatically applied. The old generation_settings column and data remain untouched,
+but the application no longer reads or writes them. The old settings UI/API are removed.
+Rollback means reverting application code while retaining additive tables/columns.
 
-Blog body length targets 1,500 characters, with an inclusive 1,200–1,800 range.
-`lib/blog-generation/body.ts` counts intro, section headings/bodies and closing;
-it excludes the title, line breaks and field-edge whitespace, includes internal
-spaces, and counts Unicode code points. Out-of-range output is saved with a
-warning, not rejected. The API returns `bodyLength`; the editor recalculates it
-for saved and edited drafts. Explicit task length instructions take priority.
+Each new Draft saves provider, actual response model and a versioned generation_snapshot:
+all four prompts and numeric settings, preset identity, Task fields, product facts,
+provider, requested model and response model. Preset edits/deletion never rewrite past
+snapshots. History shows the selected Draft's original settings and read-only prompts;
+old Drafts without snapshots explicitly show that no generation settings were recorded.
+Regeneration uses current Task/Product and the current selected preset, adding a Draft.
+This generation snapshot does not freeze publishing images or execution state.
+
+Body length counts intro, section headings/bodies and closing, excluding title, line
+breaks and field-edge whitespace, including internal spaces and Unicode code points.
+New Drafts use the preset's exact min/max values, without a percentage adjustment.
+Out-of-range text is saved with a warning. Blank required Draft strings are rejected.
+Provider failure never silently switches providers.
 
 ## Blog generation and Naver input responsibilities
 
@@ -118,6 +130,33 @@ object. If restoration fails, keep the reported path for manual repair.
 Rollback: revert the photo UI/preparation code and retain the new table and bucket
 until their files and metadata are separately audited; do not drop them blindly.
 
+## KIN prompts and answer history
+
+Apply `202610150002_kin_common_prompts.sql` before using the common prompt editor or
+new answer history fields. It seeds the former fixed/common-style text verbatim in
+a singleton table and adds nullable provider/question_intent to kin_drafts. No old
+Task, preset snapshot or answer is rewritten. The migration is not auto-applied.
+
+`lib/kin/prompts.ts` assembles editable DB common prompts, the selected preset
+snapshot, question instructions and Product/VOC context. It sends only JSON priority
+and product-mention contracts in the system role; no hidden writing prose is added.
+Priority is output schema/program contract, question instructions, preset, common
+prompt. Structured preset configuration is passed as data, without prose templates.
+The common editor is collapsed by default; preset CRUD and provider transport remain
+separate. Missing common settings fail explicitly instead of using code defaults.
+
+Preset character bounds follow the 200–1500 answer schema range. Out-of-range old
+settings are preserved and rejected with guidance when used, never silently clamped.
+Direct requires the selected product name in the actual answer. None forbids both
+name and brand. productMentioned must match actual name/brand presence and is false
+without a selected product. These hard checks precede draft saving; existing quality
+checks remain warnings. They do not prove semantic relevance or medical accuracy.
+
+Recent Task items load their saved Drafts on demand through
+`/api/kin/tasks/[id]/drafts`, with answer intent/provider/model/date and copy. Older
+missing metadata is shown as unrecorded. No answer editing, approval, queue or
+automated Naver registration is introduced.
+
 ## KIN integration
 
 The KIN API, UI, presets and quality checks were brought from
@@ -133,8 +172,7 @@ dependency. They are **not executed automatically**:
 3. `202610060003_create_kin_prompt_presets.sql`
 
 Use the existing Supabase migration history to apply only migrations not already
-applied. The imported SQL assumes the existing `products` table. Blog requires
-no new table or column for provider selection.
+applied. The imported SQL assumes the existing `products` table. Blog provider and generation snapshots use the additive Blog preset migration described above.
 
 ## Checks
 

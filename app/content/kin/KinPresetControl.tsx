@@ -2,6 +2,7 @@
 
 import { useId, useRef, useState } from "react";
 import type { KinPreset, MentionLevel } from "@/lib/kin/presets";
+import { ANSWER_SCHEMA } from "@/lib/kin/generate";
 
 type Props = {
   initialPresets: KinPreset[];
@@ -96,11 +97,11 @@ export default function KinPresetControl({ initialPresets, selectedId, disabled,
         <label className="block text-sm">이름<input required maxLength={100} className={field} value={name} onChange={(event) => setName(event.target.value)} /></label>
         <label className="block text-sm">설명<input maxLength={500} className={field} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
         <label className="block text-sm">프롬프트 지침<textarea required rows={21} maxLength={6000} className={field} value={instructions} onChange={(event) => setInstructions(event.target.value)} /></label>
-        <p className="text-xs text-zinc-500">반복 사용할 문체·구조·키워드 배치 지침입니다. 안전·사실성 규칙은 항상 우선합니다.</p>
+        <p className="text-xs text-zinc-500">선택한 답변 스타일입니다. 출력 계약·제품 언급 정책을 지키며 이번 질문 추가 지시, 프리셋, 공통 프롬프트 순으로 적용합니다.</p>
         <div className="grid gap-4 md:grid-cols-3">
           <label className="block text-sm">문단 수<input type="number" min={2} max={5} step={1} className={field} value={paragraphCount} onChange={(event) => setParagraphCount(event.target.value)} /></label>
-          <label className="block text-sm">최소 글자 수<input type="number" min={1} max={2147483647} step={1} className={field} value={minChars} onChange={(event) => setMinChars(event.target.value)} /></label>
-          <label className="block text-sm">최대 글자 수<input type="number" min={Number(minChars) || 1} max={2147483647} step={1} className={field} value={maxChars} onChange={(event) => setMaxChars(event.target.value)} /></label>
+          <label className="block text-sm">최소 글자 수<input type="number" min={ANSWER_SCHEMA.properties.answer.minLength} max={ANSWER_SCHEMA.properties.answer.maxLength} step={1} className={field} value={minChars} onChange={(event) => setMinChars(event.target.value)} /></label>
+          <label className="block text-sm">최대 글자 수<input type="number" min={Math.max(Number(minChars) || 0, ANSWER_SCHEMA.properties.answer.minLength)} max={ANSWER_SCHEMA.properties.answer.maxLength} step={1} className={field} value={maxChars} onChange={(event) => setMaxChars(event.target.value)} /></label>
         </div>
         <label className="block text-sm">추천 키워드<textarea rows={3} className={field} value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="쉼표 또는 줄바꿈으로 구분" /></label>
         <label className="block text-sm">문단별 키워드 최대 사용 횟수<input type="number" min={1} max={3} step={1} className={field} value={maxMentions} onChange={(event) => setMaxMentions(event.target.value)} /></label>

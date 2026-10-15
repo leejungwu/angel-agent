@@ -7,6 +7,7 @@ import DeleteBlogTaskButton from "../DeleteBlogTaskButton";
 import EditBlogTask from "./EditBlogTask";
 import BlogTaskAssets from "./BlogTaskAssets";
 import type { BlogTaskAsset } from "@/lib/blog-task-assets";
+import { BLOG_PRESET_FIELDS, type BlogPreset } from "@/lib/blog-generation/presets";
 
 type BlogTask = {
   id: string | number;
@@ -14,7 +15,7 @@ type BlogTask = {
   keyword: string | null;
   topic: string | null;
   instructions: string | null;
-  generation_settings?: unknown;
+  preset_id: string | null;
   status: string | null;
   created_at: string | null;
 };
@@ -32,7 +33,7 @@ export default async function BlogTaskDetailPage({
   const { id } = await params;
   const { data: task, error: taskError } = await supabase
     .from("blog_tasks")
-    .select("id, product_id, keyword, topic, instructions, status, created_at, generation_settings")
+    .select("id, product_id, keyword, topic, instructions, status, created_at, preset_id")
     .eq("id", id)
     .maybeSingle()
     .returns<BlogTask>();
@@ -62,8 +63,15 @@ export default async function BlogTaskDetailPage({
   let draftErrorMessage: string | undefined;
   let assets: BlogTaskAsset[] = [];
   let assetsErrorMessage: string | undefined;
+  let presets: BlogPreset[] = [];
+  let presetsErrorMessage: string | undefined;
 
   if (task && !errorMessage) {
+    const { data: presetRows, error: presetsError } = await supabase.from("blog_prompt_presets")
+      .select(BLOG_PRESET_FIELDS).order("is_default", { ascending: false }).order("created_at").order("id")
+      .returns<BlogPreset[]>();
+    presets = presetRows ?? [];
+    presetsErrorMessage = presetsError ? "프리셋 조회 실패: DB migration 적용 여부를 확인해 주세요." : undefined;
     const { data: taskAssets, error: assetError } = await supabase.from("blog_task_assets")
       .select("id, storage_path, file_name, sort_order")
       .eq("blog_task_id", task.id)
@@ -75,7 +83,7 @@ export default async function BlogTaskDetailPage({
 
     const { data, error } = await supabase
       .from("blog_drafts")
-      .select("id, title, intro, sections, closing, status, model, created_at")
+      .select("id, title, intro, sections, closing, status, model, provider, generation_snapshot, created_at")
       .eq("blog_task_id", task.id)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
@@ -125,6 +133,7 @@ export default async function BlogTaskDetailPage({
           초안 조회 오류: {draftErrorMessage}
         </p>
       )}
+      {presetsErrorMessage && <p role="alert" className="mt-4 text-red-600">{presetsErrorMessage}</p>}
       {task && !errorMessage && (
         <BlogTaskAssets taskId={task.id} assets={assets} errorMessage={assetsErrorMessage} />
       )}
@@ -134,7 +143,8 @@ export default async function BlogTaskDetailPage({
           taskId={Number(task.id)}
           initialDraft={initialDraft}
           initialDrafts={draftHistory}
-          initialSettings={task.generation_settings}
+          initialPresetId={task.preset_id ?? ""}
+          initialPresets={presets}
         />
       )}
     </main>

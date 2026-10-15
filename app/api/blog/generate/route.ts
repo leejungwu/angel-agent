@@ -5,7 +5,8 @@ import { DRAFT_SCHEMA, isDraft } from "@/lib/blog-generation/schema";
 import { buildBlogPrompt } from "@/lib/blog-generation/prompts";
 import { checkBlogBodyLength } from "@/lib/blog-generation/body";
 import { resolveBlogModel } from "@/lib/blog-generation/models";
-import { parseBlogGenerationSettings, readStoredBlogGenerationSettings, BlogGenerationSettingsError } from "@/lib/blog-generation/settings";
+import { BLOG_PRESET_FIELDS, BLOG_PRESET_UUID, parseBlogPreset, type BlogPreset } from "@/lib/blog-generation/presets";
+import { createBlogGenerationSnapshot } from "@/lib/blog-generation/snapshot";
 import { supabase } from "@/lib/supabase";
 
 function serverError(message: string) {
@@ -65,13 +66,12 @@ export async function POST(request: Request) {
   if (model === null) {
     return Response.json({ error: "선택한 provider에서 허용된 model을 지정해 주세요." }, { status: 400 });
   }
-  const hasSettings = typeof body === "object" && body !== null && "settings" in body;
-  let settings;
-  try {
-    settings = parseBlogGenerationSettings(typeof body === "object" && body !== null && "settings" in body ? body.settings : undefined);
-  } catch (error) {
-    if (error instanceof BlogGenerationSettingsError) return Response.json({ error: error.message }, { status: 400 });
-    throw error;
+  const requestedPresetId = typeof body === "object" && body !== null && "presetId" in body ? body.presetId : undefined;
+  if (requestedPresetId != null && (typeof requestedPresetId !== "string" || !BLOG_PRESET_UUID.test(requestedPresetId))) {
+    return Response.json({ error: "유효한 presetId가 필요합니다." }, { status: 400 });
+  }
+  if (typeof body === "object" && body !== null && Object.keys(body).some((key) => !["taskId", "presetId", "provider", "model"].includes(key))) {
+    return Response.json({ error: "taskId, presetId, provider, model만 전달해 주세요." }, { status: 400 });
   }
   const missingKey = missingProviderKey(provider);
   if (missingKey) return serverError(`${missingKey} 환경변수가 설정되지 않았습니다.`);
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
   try {
     const { data: task, error: taskError } = await supabase
       .from("blog_tasks")
-      .select("id, product_id, keyword, topic, instructions, generation_settings")
+      .select("id, product_id, keyword, topic, instructions, preset_id")
       .eq("id", taskId)
       .maybeSingle();
 
@@ -90,11 +90,6 @@ export async function POST(request: Request) {
     }
     if (!task) {
       return Response.json({ error: "블로그 작업을 찾을 수 없습니다." }, { status: 404 });
-    }
-    if (!hasSettings) {
-      const stored = readStoredBlogGenerationSettings(task.generation_settings);
-      if (stored.warning) return Response.json({ error: stored.warning }, { status: 409 });
-      settings = stored.settings;
     }
     if (task.product_id == null) {
       return Response.json({ error: "연결된 상품을 찾을 수 없습니다." }, { status: 404 });
@@ -115,15 +110,27 @@ export async function POST(request: Request) {
       return Response.json({ error: "연결된 상품을 찾을 수 없습니다." }, { status: 404 });
     }
 
-    if (hasSettings) {
-      stage = "generation settings save";
-      const { data, error } = await supabase.from("blog_tasks").update({ generation_settings: settings }).eq("id", task.id).select("id").maybeSingle();
-      if (error || !data) return serverError("생성 설정을 저장하지 못했습니다. DB migration 적용 여부를 확인해 주세요.");
+    stage = "preset lookup";
+    const presetId = requestedPresetId ?? task.preset_id;
+    let presetQuery = supabase.from("blog_prompt_presets").select(BLOG_PRESET_FIELDS);
+    if (presetId) presetQuery = presetQuery.eq("id", presetId);
+    else presetQuery = presetQuery.eq("is_default", true).order("created_at").order("id").limit(1);
+    const { data: storedPreset, error: presetError } = await presetQuery.maybeSingle();
+    if (presetError) {
+      logFailure(stage, presetError);
+      return serverError("프리셋을 조회하지 못했습니다. DB migration 적용 여부를 확인해 주세요.");
     }
+    if (!storedPreset) return Response.json({ error: presetId ? "선택한 프리셋을 찾을 수 없습니다." : "기본 프리셋이 없습니다. 프리셋을 선택하거나 생성해 주세요." }, { status: presetId ? 400 : 409 });
+    const preset: BlogPreset = { ...storedPreset, ...parseBlogPreset(storedPreset) };
+    stage = "preset selection save";
+    const { data: selectedTask, error: selectionError } = await supabase.from("blog_tasks")
+      .update({ preset_id: preset.id }).eq("id", task.id).select("id").maybeSingle();
+    if (selectionError || !selectedTask) return serverError("선택한 프리셋을 저장하지 못했습니다.");
+    const generationSnapshot = createBlogGenerationSnapshot(preset, task, product, provider, model);
     stage = `${provider} generation`;
     const response = await generateStructuredWithProvider({
       provider, model, schema: DRAFT_SCHEMA, schemaName: "blog_draft",
-      ...buildBlogPrompt(product, task, settings),
+      ...buildBlogPrompt(product, task, preset),
       ...(provider !== "openai" ? { maxOutputTokens: 12000 } : {}),
       ...(provider === "xai" ? { reasoningEffort: "low" as const } : {}),
     });
@@ -134,6 +141,7 @@ export async function POST(request: Request) {
       logFailure(stage, new Error("InvalidDraftOutput"));
       return serverError("AI 초안의 형식이 올바르지 않습니다.");
     }
+    generationSnapshot.responseModel = response.model;
 
     stage = "draft insert";
     const { data: savedDraft, error: draftError } = await supabase
@@ -147,6 +155,8 @@ export async function POST(request: Request) {
         closing: draft.closing,
         status: "draft",
         model: response.model,
+        provider: response.provider,
+        generation_snapshot: generationSnapshot,
       })
       .select("id,created_at")
       .single();
@@ -169,7 +179,8 @@ export async function POST(request: Request) {
       return serverError("초안은 저장되었지만 작업 상태를 변경하지 못했습니다.");
     }
 
-    return Response.json({ ok: true, taskId, draftId: savedDraft.id, createdAt: savedDraft.created_at, draft, bodyLength: checkBlogBodyLength(draft, settings.targetLength), provider: response.provider, model: response.model });
+    return Response.json({ ok: true, taskId, draftId: savedDraft.id, createdAt: savedDraft.created_at, draft, generationSnapshot,
+      bodyLength: checkBlogBodyLength(draft, preset), provider: response.provider, model: response.model });
   } catch (error) {
     if (error instanceof ProviderOutputError) stage = `${provider} output validation: ${error.reason}`;
     logFailure(stage, error);

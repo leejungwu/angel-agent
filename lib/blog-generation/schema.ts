@@ -35,17 +35,17 @@ export function isDraft(value: unknown): value is Draft {
   const draft = value as Record<string, unknown>;
   return (
     Object.keys(draft).every((key) => DRAFT_SCHEMA.required.includes(key)) &&
-    typeof draft.title === "string" &&
-    typeof draft.intro === "string" &&
-    typeof draft.closing === "string" &&
+    typeof draft.title === "string" && !!draft.title.trim() &&
+    typeof draft.intro === "string" && !!draft.intro.trim() &&
+    typeof draft.closing === "string" && !!draft.closing.trim() &&
     Array.isArray(draft.sections) &&
     draft.sections.length > 0 &&
     draft.sections.every((section: unknown) => {
       if (typeof section !== "object" || section === null || Array.isArray(section)) return false;
       const item = section as Record<string, unknown>;
       return Object.keys(item).every((key) => DRAFT_SCHEMA.properties.sections.items.required.includes(key)) &&
-        typeof item.heading === "string" &&
-        typeof item.body === "string" && item.imageAssetId === null;
+        typeof item.heading === "string" && !!item.heading.trim() &&
+        typeof item.body === "string" && !!item.body.trim() && item.imageAssetId === null;
     })
   );
 }
