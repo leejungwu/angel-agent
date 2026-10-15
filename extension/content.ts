@@ -3,6 +3,26 @@
   const visible = (element: HTMLElement) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden";
   const describe = (element: HTMLElement | undefined) => element ? { tag: element.tagName, class: element.getAttribute("class") ?? "" } : null;
 
+  // Presence checks only; leave insertion/verification normalization unchanged.
+  const normalizeEditorText = (value: string) => value.replace(/[\s\u00a0\u200b-\u200d\u2060\ufeff]/g, "");
+  const helperSelector = '.se-placeholder, .se-blind, .se-toolbar, [hidden], [aria-hidden="true"], script, style';
+  function editorText(root: HTMLElement | undefined) {
+    if (!root) return "";
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const fragments: string[] = [];
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      if (node.parentElement && !node.parentElement.closest(helperSelector)) fragments.push(node.textContent ?? "");
+    }
+    return normalizeEditorText(fragments.join(""));
+  }
+  function existingImageCount() {
+    // Same image-component scope as upload verification; pending real images also count.
+    return [...document.querySelectorAll<HTMLElement>(".se-component.se-image")].filter(component =>
+      [...component.querySelectorAll<HTMLImageElement>("img")].some(img =>
+        !img.closest(helperSelector) && /^(https?:\/\/|blob:|data:image\/)/i.test(img.currentSrc || img.getAttribute("src") || ""))).length;
+  }
+
   function inspect() {
     const writing = /PostWriteForm\.naver|\/postwrite(?:\?|$|\/)/i.test(location.href);
     const titles = [...document.querySelectorAll<HTMLElement>(".se-title-text")].filter(visible);
@@ -10,23 +30,26 @@
     const title = titles.length === 1 ? titles[0] : undefined;
     const body = paragraphs[0];
     const frameReady = writing && !!title && !!body;
+    const existingTitle = editorText(title).length > 0;
+    const existingBody = paragraphs.some(paragraph => editorText(paragraph).length > 0);
+    const imageCount = existingImageCount();
     const diagnostic: EditorDiagnostic = {
       url: `${location.origin}${location.pathname}`, writing, ready: frameReady, frameReady,
       titleFound: !!title, bodyFound: !!body,
-      existing: !!normalize(title?.innerText ?? "") || paragraphs.some((p) => !!normalize(p.innerText)) || !!document.querySelector(".se-component.se-image"),
+      existing: existingTitle || existingBody || imageCount > 0,
       iframeCount: document.querySelectorAll("iframe").length, paragraphs: paragraphs.length,
       titleTag: title?.tagName, bodyTag: body?.tagName,
       title: { matchedSelector: ".se-title-text", target: describe(title) },
       body: { matchedSelector: ".se-component.se-text .se-text-paragraph", target: describe(body) },
       reason: frameReady ? "SmartEditor 글쓰기 화면 확인 완료" : `글쓰기=${writing}, 제목=${titles.length}, 본문 문단=${paragraphs.length}`,
     };
-    return { title, body, paragraphs, diagnostic };
+    return { title, body, paragraphs, diagnostic, existingTitle, existingBody, imageCount };
   }
 
   function assertSafeEditor(allowImages = false) {
     const current = inspect();
     if (current.diagnostic.ready !== true) throw new Error(current.diagnostic.reason);
-    if (!allowImages && document.querySelector(".se-component.se-image")) throw new Error("이미 사진이 있는 글에는 입력하지 않습니다. 새 글을 열어 주세요.");
+    if (!allowImages && current.imageCount > 0) throw new Error("이미 사진이 있는 글에는 입력하지 않습니다. 새 글을 열어 주세요.");
     if ([...document.querySelectorAll<HTMLElement>('[role="dialog"]')].some(visible)) throw new Error("열린 모달을 직접 처리한 뒤 다시 시도해 주세요.");
     return current;
   }
@@ -392,8 +415,12 @@
   }
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
-    if (sender.id !== chrome.runtime.id || !["EDITOR_DIAGNOSE", "EDITOR_TARGET", "EDITOR_VERIFY", "EDITOR_PHOTO_TARGET", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY", "EDITOR_PHOTO_UPLOAD_CARET", "EDITOR_PHOTO_BUTTON", "EDITOR_PHOTO_VERIFY", "EDITOR_PHOTO_BODY_VERIFY", "EDITOR_BLOCK_START", "EDITOR_BLOCK_CARET", "EDITOR_BLOCK_TEXT_VERIFY", "EDITOR_BLOCK_VERIFY", "EDITOR_BLOCK_NEXT_TEXT", "EDITOR_BLOCK_IMAGE_TARGET", "EDITOR_BLOCK_TEXT_END"].includes(message.type)) return;
+    if (sender.id !== chrome.runtime.id || !["EDITOR_SCHEDULE", "EDITOR_DIAGNOSE", "EDITOR_TARGET", "EDITOR_VERIFY", "EDITOR_PHOTO_TARGET", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY", "EDITOR_PHOTO_UPLOAD_CARET", "EDITOR_PHOTO_BUTTON", "EDITOR_PHOTO_VERIFY", "EDITOR_PHOTO_BODY_VERIFY", "EDITOR_BLOCK_START", "EDITOR_BLOCK_CARET", "EDITOR_BLOCK_TEXT_VERIFY", "EDITOR_BLOCK_VERIFY", "EDITOR_BLOCK_NEXT_TEXT", "EDITOR_BLOCK_IMAGE_TARGET", "EDITOR_BLOCK_TEXT_END"].includes(message.type)) return;
     void (async (): Promise<ExtensionReply> => {
+      if (message.type === "EDITOR_SCHEDULE") {
+        if (!message.task) throw new Error("예약 Job이 없습니다.");
+        return NaverSchedule.configure(message.task);
+      }
       if (message.type.startsWith("EDITOR_PHOTO_")) return photoRequest(message);
       if (message.type.startsWith("EDITOR_BLOCK_")) return blockRequest(message);
       if (message.type === "EDITOR_DIAGNOSE") return { diagnostic: inspect().diagnostic };
@@ -405,7 +432,7 @@
       const current = assertSafeEditor();
       const target = message.field === "title" ? current.title : current.body;
       if (!target) throw new Error("입력 대상이 없습니다.");
-      const existing = message.field === "title" ? !!normalize(current.title?.innerText ?? "") : current.paragraphs.some((p) => !!normalize(p.innerText));
+      const existing = message.field === "title" ? current.existingTitle : current.existingBody;
       if (existing && !message.overwrite) throw new Error("기존 글 덮어쓰기 확인이 필요합니다.");
       return { position: targetPosition(target), existing };
     })().then(respond, (error: unknown) => respond({ error: error instanceof Error ? error.message : "DOM 조회 실패" }));

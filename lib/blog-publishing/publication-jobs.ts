@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { parsePublicationSchedule, type PublishMode } from "./schedule";
 import { isBlogTaskAssetPath, type BlogTaskAsset } from "../blog-task-assets";
 import { orderedTaskImages } from "./downloads";
 import { prepareBlogPost } from "./preparation";
@@ -19,6 +20,8 @@ export type PublicationJob = {
   status: "queued" | "inserting" | "inserted" | "published" | "failed";
   execution_snapshot: PublicationSnapshot;
   attempt_no: number;
+  publish_mode: PublishMode;
+  scheduled_at: string | null;
   created_at: string;
   started_at: string | null;
   inserted_at: string | null;
@@ -115,15 +118,19 @@ export function parsePublicationSnapshot(value: unknown): PublicationSnapshot {
 }
 
 function parsedJob(row: PublicationJob): PublicationJob {
-  return { ...row, execution_snapshot: parsePublicationSnapshot(row.execution_snapshot) };
+  const schedule = parsePublicationSchedule({ publishMode: row.publish_mode, scheduledAt: row.scheduled_at });
+  return { ...row, publish_mode: schedule.publishMode, scheduled_at: schedule.scheduledAt, execution_snapshot: parsePublicationSnapshot(row.execution_snapshot) };
 }
 
-export async function createPublicationJob({ taskId, draftId }: { taskId: string | number; draftId: string | number }): Promise<PublicationJob & { alreadyExists: boolean }> {
+export async function createPublicationJob({ taskId, draftId, publishMode, scheduledAt }: { taskId: string | number; draftId: string | number; publishMode?: unknown; scheduledAt?: unknown }): Promise<PublicationJob & { alreadyExists: boolean }> {
   if (!isPublicationSourceId(taskId) || !isPublicationSourceId(draftId)) throw new PublicationJobError("작업/초안 ID가 유효하지 않습니다.");
   const existing = await supabase.from("blog_publication_jobs").select("*").eq("blog_task_id", taskId).eq("blog_draft_id", draftId).maybeSingle();
   if (existing.error) throw new Error("기존 Publication Job을 조회하지 못했습니다.");
   // An existing job keeps the originally approved data, even after source edits.
   if (existing.data) return { ...parsedJob(existing.data), alreadyExists: true };
+  let schedule;
+  try { schedule = parsePublicationSchedule({ publishMode, scheduledAt }, true); }
+  catch (error) { throw new PublicationJobError(error instanceof Error ? error.message : "예약 시간을 확인해 주세요."); }
   const [task, draftResult, assets] = await Promise.all([
     supabase.from("blog_tasks").select("id,image_placement_settings").eq("id", taskId).maybeSingle(),
     supabase.from("blog_drafts").select("id,title,intro,sections,closing,status").eq("id", draftId).eq("blog_task_id", taskId).maybeSingle(),
@@ -152,7 +159,7 @@ export async function createPublicationJob({ taskId, draftId }: { taskId: string
       .map(block => block.type === "text" ? block : { type: "image", index: block.index }),
     images: ordered.map(asset => ({ assetId: asset.id, storagePath: asset.storage_path, fileName: asset.file_name, sortOrder: asset.sort_order })),
   });
-  const result = await supabase.from("blog_publication_jobs").insert({ blog_task_id: taskId, blog_draft_id: draftId, execution_snapshot: snapshot }).select("*").maybeSingle();
+  const result = await supabase.from("blog_publication_jobs").insert({ blog_task_id: taskId, blog_draft_id: draftId, execution_snapshot: snapshot, publish_mode: schedule.publishMode, scheduled_at: schedule.scheduledAt }).select("*").maybeSingle();
   if (result.error?.code === "23505") {
     const winner = await supabase.from("blog_publication_jobs").select("*").eq("blog_task_id", taskId).eq("blog_draft_id", draftId).maybeSingle();
     if (!winner.error && winner.data) return { ...parsedJob(winner.data), alreadyExists: true };

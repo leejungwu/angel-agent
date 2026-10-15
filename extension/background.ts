@@ -48,6 +48,7 @@
   }
 
   async function insertWithDebugger(tabId: number, frameId: number, task: ExtensionTask, overwrite: boolean, publisher: "blocks" | "legacy" = "legacy") {
+    if (task.publishMode === "scheduled") NaverSchedule.target(task);
     if (inputRunning) throw new Error("입력 작업이 이미 진행 중입니다.");
     if (!task.title?.trim() || !task.bodyText?.trim()) throw new Error("제목 또는 본문이 비어 있습니다.");
     inputRunning = true;
@@ -290,6 +291,11 @@
         stage = "PHOTO_VERIFY";
         await frameRequest({ type: "EDITOR_PHOTO_BODY_VERIFY", task });
       }
+      if (task.publishMode === "scheduled") {
+        stage = "SCHEDULE_SETUP";
+        const scheduled = await frameRequest({ type: "EDITOR_SCHEDULE", task });
+        if (!scheduled.scheduleReady) throw new Error("예약 설정 검증 결과가 없습니다.");
+      }
     } catch (error) {
       failure = error;
       if (publisher === "blocks") console.warn("V3 input failed", { stage, blockNumber, imageBlockNumber, totalImages: task.images.length,
@@ -316,7 +322,9 @@
       const blockDiagnostic = publisher === "blocks" && imageBlockNumber ? ` (image block ${imageBlockNumber}/${task.images.length})` : "";
       throw new Error(`${stage}${blockDiagnostic}: ${reason}${detachReason}${cleanupWarning} 일부 입력되었을 수 있으니 직접 확인하세요.`);
     }
-    return { message: `입력 완료 - 네이버에서 직접 확인 후 발행하세요${cleanupWarning}` };
+    return { message: task.publishMode === "scheduled"
+      ? `네이버 입력 및 예약 설정이 완료되었습니다. 최종 발행 버튼을 확인 후 눌러주세요.${cleanupWarning}`
+      : `입력 완료 - 네이버에서 직접 확인 후 발행하세요${cleanupWarning}` };
   }
 
   let jobRunning = false;

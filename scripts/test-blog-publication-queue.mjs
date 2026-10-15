@@ -71,6 +71,7 @@ const db = { from(table) {
   download: async () => ({ data: new Blob(["image"], { type: "image/png" }) }),
   remove: async () => { storageRemoves++; return {}; }, upload: async () => ({}),
 }) } };
+const schedule = load("lib/blog-publishing/schedule.ts");
 const assetsModule = load("lib/blog-task-assets.ts");
 const placementSettings = load("lib/blog-publishing/image-placement-settings.ts");
 const layout = load("lib/blog-publishing/image-layout.ts", { "./image-placement-settings": placementSettings });
@@ -78,9 +79,9 @@ const preparation = load("lib/blog-publishing/preparation.ts", { "./image-layout
 const blockUtils = load("lib/blog-publishing/blocks.ts");
 const downloads = load("lib/blog-publishing/downloads.ts", { "../blog-task-assets": assetsModule });
 const publication = load("lib/blog-publishing/publication-jobs.ts", {
-  "@/lib/supabase": { supabase: db }, "../blog-task-assets": assetsModule, "./downloads": downloads, "./preparation": preparation, "./blocks": blockUtils,
+  "@/lib/supabase": { supabase: db }, "../blog-task-assets": assetsModule, "./schedule": schedule, "./downloads": downloads, "./preparation": preparation, "./blocks": blockUtils,
 });
-const common = { "@/lib/supabase": { supabase: db }, "@/lib/blog-publishing/publication-jobs": publication };
+const common = { "@/lib/blog-publishing/schedule": schedule, "@/lib/supabase": { supabase: db }, "@/lib/blog-publishing/publication-jobs": publication };
 const recoveryNow = Date.parse("2026-10-15T12:00:00Z");
 for (const [age, expected] of [[599999, false], [600000, true], [600001, true], [-1, false]]) {
   assert.equal(publication.isStalePublicationInserting({ status: "inserting", started_at: new Date(recoveryNow - age).toISOString() }, recoveryNow), expected);
@@ -222,7 +223,7 @@ const hooks = {
   useState(initial) { const i = cursor++; if (!(i in state)) state[i] = typeof initial === "function" ? initial() : initial; return [state[i], value => state[i] = typeof value === "function" ? value(state[i]) : value]; },
   useRef(initial) { return { current: initial }; },
 };
-const add = load("app/content/blog/[id]/AddPublicationJob.tsx", { react: hooks, "next/link": Link }).default;
+const add = load("app/content/blog/[id]/AddPublicationJob.tsx", { "@/lib/blog-publishing/schedule": schedule, react: hooks, "next/link": Link }).default;
 const removeControl = load("app/content/blog/publishing/RemovePublicationJob.tsx", { react: hooks, "next/navigation": { useRouter: () => ({ refresh: () => refreshes++ }) } }).default;
 const transitionControl = load("app/content/blog/publishing/PublicationJobTransition.tsx", { react: hooks, "next/navigation": { useRouter: () => ({ refresh: () => refreshes++ }) } }).default;
 const walk = element => !element || typeof element !== "object" ? [] : [element, ...React.Children.toArray(element.props?.children).flatMap(walk)];
@@ -339,3 +340,58 @@ assert.match(form, /draft\.status === "approved" && !editingDraft && !controlsBu
 assert.match(form, /<AddPublicationJob key=\{draft.id\} taskId=\{taskId\} draftId=\{draft.id\}/);
 assert.match(form, /async function generateDraft/); assert.match(form, /async function saveDraft/); assert.match(form, /async function changeStatus/);
 console.log("PASS: Publication Queue API/UI, approval/idempotency, snapshot photo count, queued-only removal, all-state photo/Task protection, client request/refresh.");
+
+// Actual create API, repeated Queue renders and client scheduled request wiring.
+rows.blog_publication_jobs.length = 0;
+rows.blog_drafts[0].status = "approved";
+const scheduledResponse = await create.POST(request({ taskId: 1, draftId: 2, publishMode: "scheduled", scheduledAt: "2099-10-20T14:30:00+09:00" }));
+assert.equal(scheduledResponse.status, 201);
+const scheduledResult = await scheduledResponse.json();
+assert.equal(scheduledResult.job.publishMode, "scheduled");
+assert.equal(scheduledResult.job.scheduledAt, "2099-10-20T05:30:00.000Z");
+for (let reload = 0; reload < 2; reload++) {
+  const html = renderToStaticMarkup(await page());
+  assert.ok(html.includes("예약 발행")); assert.ok(html.includes("2099.10.20 14:30"));
+}
+rows.blog_publication_jobs.length = 0;
+assert.equal((await create.POST(request({ taskId: 1, draftId: 2, publishMode: "scheduled", scheduledAt: "2000-01-01T00:00:00Z" }))).status, 400);
+assert.equal(rows.blog_publication_jobs.length, 0);
+try {
+  state = [];
+  const props = { taskId: 1, draftId: 2 };
+  walk(render(add, props)).filter(node => node.type === "input" && node.props.type === "radio")[1].props.onChange();
+  let ui = walk(render(add, props));
+  ui.find(node => node.props?.type === "date").props.onChange({ target: { value: "2099-10-20" } });
+  ui.find(node => node.props?.["aria-label"] === "예약 시").props.onChange({ target: { value: "14" } });
+  ui = walk(render(add, props));
+  ui.find(node => node.props?.["aria-label"] === "예약 분").props.onChange({ target: { value: "30" } });
+  let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls++;
+    assert.deepEqual(JSON.parse(options.body), { taskId: 1, draftId: 2, publishMode: "scheduled", scheduledAt: "2099-10-20T05:30:00.000Z" });
+    return Response.json({ job: { id: "scheduled" } });
+  };
+  await walk(render(add, props)).find(node => node.type === "button").props.onClick();
+  assert.equal(calls, 1);
+  ui = walk(render(add, props));
+  ui.find(node => node.props?.type === "date").props.onChange({ target: { value: "2000-01-01" } });
+  await walk(render(add, props)).find(node => node.type === "button").props.onClick();
+  assert.equal(calls, 1);
+  assert.ok(walk(render(add, props)).some(node => node.props?.role === "alert"));
+} finally { globalThis.fetch = originalFetch; }
+console.log("PASS: scheduled create API, persisted Queue display, UI KST request, past-time rejection.");
+
+rows.blog_publication_jobs.length = 0;
+assert.equal((await create.POST(request({ taskId: 1, draftId: 2, publishMode: "scheduled", scheduledAt: "2099-10-20T05:43:00Z" }))).status, 400);
+assert.equal(rows.blog_publication_jobs.length, 0);
+state = [];
+const scheduleProps = { taskId: 1, draftId: 2 };
+walk(render(add, scheduleProps)).filter(node => node.type === "input" && node.props.type === "radio")[1].props.onChange();
+const defaultUi = walk(render(add, scheduleProps));
+const dateInput = defaultUi.find(node => node.props?.type === "date");
+const hourInput = defaultUi.find(node => node.props?.["aria-label"] === "예약 시");
+const minuteInput = defaultUi.find(node => node.props?.["aria-label"] === "예약 분");
+assert.deepEqual(React.Children.toArray(minuteInput.props.children).map(option => option.props.value), ["00", "10", "20", "30", "40", "50"]);
+const defaultTime = Date.parse(schedule.seoulScheduleToIso(dateInput.props.value, hourInput.props.value + ":" + minuteInput.props.value));
+assert.ok(defaultTime > Date.now() + 19.9 * 60000 && defaultTime <= Date.now() + 30 * 60000);
+console.log("PASS: create API rejects 43 minutes; UI defaults >=20 minutes ahead and only exposes 10-minute options.");

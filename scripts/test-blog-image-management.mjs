@@ -164,8 +164,9 @@ const snapshotDb = { from() { assert.fail("Snapshot adapter must not read Task r
   assert.equal(bucket, "blog-task-assets");
   return { createSignedUrl: async path => { assert.equal(path, "tasks/7/id-2.png"); return { data: { signedUrl: `https://example.invalid/${path}` } }; } };
 } } };
-const jobs = load("lib/blog-publishing/publication-jobs.ts", { "@/lib/supabase": { supabase: snapshotDb }, "../blog-task-assets": paths, "./downloads": downloads, "./preparation": preparation, "./blocks": blockUtils });
-const extension = load("lib/blog-publishing/publication-extension.ts", { "@/lib/supabase": { supabase: snapshotDb }, "../blog-task-assets": paths, "./publication-jobs": jobs });
+const schedule = load("lib/blog-publishing/schedule.ts");
+const jobs = load("lib/blog-publishing/publication-jobs.ts", { "@/lib/supabase": { supabase: snapshotDb }, "../blog-task-assets": paths, "./schedule": schedule, "./downloads": downloads, "./preparation": preparation, "./blocks": blockUtils });
+const extension = load("lib/blog-publishing/publication-extension.ts", { "@/lib/supabase": { supabase: snapshotDb }, "../blog-task-assets": paths, "./schedule": schedule, "./publication-jobs": jobs });
 for (const status of ["queued", "failed"]) {
   reset(); protectedId = 2;
   const job = { blog_task_id: 7, status, execution_snapshot: {

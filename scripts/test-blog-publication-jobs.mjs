@@ -9,6 +9,7 @@ async function load(path, imports = {}) {
   vm.runInNewContext(code, { module: testModule, exports: testModule.exports, require(name) { assert.ok(name in imports, name); return imports[name]; } });
   return testModule.exports;
 }
+const schedule = await load("lib/blog-publishing/schedule.ts");
 const assetsModule = await load("lib/blog-task-assets.ts");
 const placementSettings = await load("lib/blog-publishing/image-placement-settings.ts");
 const layout = await load("lib/blog-publishing/image-layout.ts", { "./image-placement-settings": placementSettings });
@@ -41,7 +42,7 @@ const supabase = { from(table) {
   return query;
 } };
 const api = await load("lib/blog-publishing/publication-jobs.ts", {
-  "@/lib/supabase": { supabase }, "../blog-task-assets": assetsModule, "./downloads": downloads, "./preparation": preparation, "./blocks": blocks,
+  "@/lib/supabase": { supabase }, "../blog-task-assets": assetsModule, "./schedule": schedule, "./downloads": downloads, "./preparation": preparation, "./blocks": blocks,
 });
 for (const count of [0, 1, 2, 8, 10]) {
   reset(count);
@@ -153,3 +154,55 @@ assert.match(sql, /BEFORE UPDATE ON public\.blog_publication_jobs/);
 assert.match(sql, /ENABLE ROW LEVEL SECURITY/);
 assert.doesNotMatch(sql, /ALTER TABLE public\.blog_(?:tasks|drafts|task_assets)\b|DROP TABLE|DELETE FROM/i);
 console.log("Publication Job tests passed: approval, ownership, idempotency/race, 0/1/2/8/10 images, immutable data, parser, references.");
+
+// Scheduling is execution metadata, not part of the content snapshot.
+assert.equal(schedule.seoulScheduleToIso("2026-10-20", "14:30"), "2026-10-20T05:30:00.000Z");
+assert.equal(schedule.formatScheduledAt("2026-10-20T05:30:00.000Z"), "2026.10.20 14:30");
+assert.equal(schedule.formatScheduledAt("2026-10-19T15:00:00.000Z"), "2026.10.20 00:00");
+assert.throws(() => schedule.seoulScheduleToIso("2026-02-30", "14:30"));
+assert.throws(() => schedule.seoulScheduleToIso("2026-10-20", "24:30"));
+assert.throws(() => schedule.parsePublicationSchedule({ publishMode: "scheduled", scheduledAt: "2099-10-20T14:30:00" }));
+for (const input of [{ publishMode: "invalid" }, { publishMode: "scheduled" }, { publishMode: "scheduled", scheduledAt: "2000-01-01T00:00:00Z" }, { publishMode: "manual", scheduledAt: "2099-01-01T00:00:00Z" }]) {
+  reset();
+  await assert.rejects(api.createPublicationJob({ taskId: 1, draftId: 2, ...input }));
+  assert.equal(jobs.length, 0);
+}
+reset();
+const manualJob = await api.createPublicationJob({ taskId: 1, draftId: 2 });
+assert.equal(manualJob.publish_mode, "manual"); assert.equal(manualJob.scheduled_at, null);
+reset();
+const scheduledJob = await api.createPublicationJob({ taskId: 1, draftId: 2, publishMode: "scheduled", scheduledAt: "2099-10-20T14:30:00+09:00" });
+assert.equal(scheduledJob.scheduled_at, "2099-10-20T05:30:00.000Z");
+assert.equal(scheduledJob.publish_mode, "scheduled");
+const scheduleSnapshot = JSON.stringify(scheduledJob.execution_snapshot);
+draft.title = "changed"; assets = [];
+const scheduledAgain = await api.createPublicationJob({ taskId: 1, draftId: 2, publishMode: "manual" });
+assert.equal(scheduledAgain.scheduled_at, scheduledJob.scheduled_at);
+assert.equal(scheduledAgain.publish_mode, "scheduled");
+assert.equal(JSON.stringify(scheduledAgain.execution_snapshot), scheduleSnapshot);
+assert.deepEqual(Object.keys(scheduledAgain.execution_snapshot).sort(), ["blocks", "bodyText", "images", "title", "version"]);
+const migration = await readFile("supabase/migrations/202610150007_blog_scheduled_publishing.sql", "utf8");
+assert.match(migration, /DEFAULT 'manual'/);
+assert.match(migration, /publish_mode = 'scheduled' AND scheduled_at IS NOT NULL/);
+assert.match(migration, /NEW.publish_mode IS DISTINCT FROM OLD.publish_mode/);
+assert.match(migration, /NEW.scheduled_at IS DISTINCT FROM OLD.scheduled_at/);
+console.log("PASS: schedule defaults, creation validation, KST, immutable metadata/snapshot and migration contract.");
+
+const originalTimezone = process.env.TZ;
+try {
+  for (const timezone of ["UTC", "America/New_York", "Asia/Seoul"]) {
+    process.env.TZ = timezone;
+    assert.equal(schedule.seoulScheduleToIso("2026-10-20", "14:30"), "2026-10-20T05:30:00.000Z");
+    assert.equal(schedule.formatScheduledAt("2026-10-20T05:30:00.000Z"), "2026.10.20 14:30");
+  }
+} finally { if (originalTimezone === undefined) delete process.env.TZ; else process.env.TZ = originalTimezone; }
+assert.throws(() => schedule.parsePublicationSchedule({ publishMode: "scheduled", scheduledAt: "2026-10-20T05:30:00.000Z" }, true, Date.parse("2026-10-20T05:30:00.000Z")));
+console.log("PASS: timezone-independent KST input/display and exact present-time rejection.");
+
+assert.throws(() => schedule.parsePublicationSchedule({ publishMode: "scheduled", scheduledAt: "2099-10-20T05:43:00Z" }, true), /10분/);
+assert.equal(schedule.parsePublicationSchedule({ publishMode: "scheduled", scheduledAt: "2099-10-20T05:40:59.999Z" }, true).scheduledAt, "2099-10-20T05:40:00.000Z");
+for (const [now, expected] of [["2026-10-20T05:03:00Z", "14:30"], ["2026-10-20T05:41:00Z", "15:10"], ["2026-12-31T14:45:00Z", "00:10"]]) {
+  assert.equal(schedule.defaultPublicationSchedule(Date.parse(now)).time, expected);
+}
+assert.equal(schedule.defaultPublicationSchedule(Date.parse("2026-12-31T14:45:00Z")).date, "2027-01-01");
+console.log("PASS: 10-minute validation/second normalization and now+20 default rounding.");

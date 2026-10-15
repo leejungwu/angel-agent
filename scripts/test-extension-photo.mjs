@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import ts from "typescript";
-const code = ts.transpileModule(await readFile("extension/background.ts", "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+const code = ts.transpileModule((await readFile("extension/schedule.ts", "utf8")) + "\n" + (await readFile("extension/background.ts", "utf8")), { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
 const task = { id: 1, title: "제목", bodyText: "abcdefghij", images: [2, 6, 8].map((insertOffset, index) => ({ id: index, index, insertOffset, insertPrefix: "abcdefghij".slice(0, insertOffset), signedUrl: `https://fixture.test/${index}.png` })) };
 const jobId = "00000000-0000-4000-8000-000000000001";
 async function scenario(input = task, failure = "", publisher = "legacy") {
@@ -21,6 +21,7 @@ async function scenario(input = task, failure = "", publisher = "legacy") {
       if (failure === "nextParagraph" && message.type === "EDITOR_BLOCK_NEXT_TEXT" && !messages.some((m) => m.type === "EDITOR_BLOCK_NEXT_TEXT" && m !== message)) return { needsParagraph: true, position: { x: 10, y: 20 } };
       if (message.type === failure) return { error: "fixture failure" };
       if (message.type === "EDITOR_DIAGNOSE") return { diagnostic: { frameReady: true, ready: true, titleFound: true, bodyFound: true } };
+      if (message.type === "EDITOR_SCHEDULE") return { scheduleReady: true };
       if (message.type === "EDITOR_PHOTO_VERIFY") uploadVerified++;
       if (message.type === "EDITOR_VERIFY") return { verification: { titleMatches: true, bodyMatches: true } };
       return { position: { x: message.type === "EDITOR_PHOTO_BUTTON" ? 99 : 10, y: 20 }, imageReady: true };
@@ -182,3 +183,21 @@ for (const count of [0, 1, 2, 8, 10]) {
   }
 }
 console.log("Block loop checks passed: 0/1/2/8/10 images, forward text/image order, next paragraph recovery, failure gating, cleanup, no position remapping.");
+
+const scheduledInput = { ...task, images: [], blocks: [{ type: "text", text: task.bodyText }], publishMode: "scheduled", scheduledAt: "2099-10-20T05:30:00.000Z" };
+const scheduledSuccess = await scenario(scheduledInput, "", "blocks");
+assert.equal(scheduledSuccess.reply.error, undefined);
+assert.match(scheduledSuccess.reply.message, /예약 설정이 완료/);
+assert.equal(scheduledSuccess.outcomes[0].outcome, "inserted");
+assert.ok(scheduledSuccess.timeline.indexOf("EDITOR_BLOCK_VERIFY") < scheduledSuccess.timeline.indexOf("EDITOR_SCHEDULE"));
+const scheduledFailure = await scenario(scheduledInput, "EDITOR_SCHEDULE", "blocks");
+assert.match(scheduledFailure.reply.error, /SCHEDULE_SETUP/);
+assert.equal(scheduledFailure.outcomes[0].outcome, "failed");
+for (const scheduledAt of [null, "2000-01-01T00:00:00Z", "2099-10-20T05:43:00Z"]) {
+  const invalid = await scenario({ ...scheduledInput, scheduledAt }, "", "blocks");
+  assert.ok(invalid.reply.error); assert.equal(invalid.commands.length, 0);
+  assert.equal(invalid.messages.some(message => message.type === "EDITOR_TARGET" || message.type === "EDITOR_SCHEDULE"), false);
+  assert.equal(invalid.outcomes[0].outcome, "failed");
+}
+assert.equal(success.messages.some(message => message.type === "EDITOR_SCHEDULE"), false);
+console.log("PASS: scheduled preflight before Naver writes, setup after V3 verification, inserted/failed results, unchanged manual path.");

@@ -6,7 +6,7 @@ import ts from "typescript";
 const compile = async (path) => ts.transpileModule(await readFile(path, "utf8"), {
   compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None },
 }).outputText;
-const panelCode = await compile("extension/sidepanel/index.ts");
+const panelCode = (await compile("extension/schedule.ts")) + "\n" + (await compile("extension/sidepanel/index.ts"));
 const backgroundCode = await compile("extension/background.ts");
 const saved = {};
 const storage = {
@@ -188,3 +188,13 @@ assert.equal(loading.element("title").textContent, "선택한 글 없음");
 assert.equal(loading.element("insert").disabled, true);
 console.log("Selection race checks passed: overlapping requests, reverse responses, rapid changes, stale errors, clear/refresh, task/draft identity, execution lock/cancellation.");
 console.log("Settings checks passed: first setup, automatic reconnect, collapse, edit/cancel/save, refresh without save, failure opens form, authentication.");
+
+const scheduledPanel = await openPanel(false, { ...approvedTask, publishMode: "scheduled", scheduledAt: "2099-10-20T05:30:00Z" });
+scheduledPanel.element("tasks").value = "1"; scheduledPanel.element("tasks").listeners.change(); await settle();
+assert.match(scheduledPanel.element("schedule").textContent, /예약 발행.*2099.10.20 14:30/);
+const invalidSchedulePanel = await openPanel(false, { ...approvedTask, publishMode: "scheduled", scheduledAt: "2099-10-20T05:43:00Z" });
+invalidSchedulePanel.element("tasks").value = "1"; invalidSchedulePanel.element("tasks").listeners.change(); await settle();
+invalidSchedulePanel.element("insert").listeners.click(); await settle();
+assert.match(invalidSchedulePanel.element("result").textContent, /10분/);
+assert.equal(invalidSchedulePanel.requests.some(message => ["DIAGNOSE", "INSERT"].includes(message.type)), false);
+console.log("PASS: Side Panel KST schedule label and invalid-schedule preflight.");

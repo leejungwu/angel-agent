@@ -1,4 +1,6 @@
 type ExtensionTask = {
+  publishMode?: "manual" | "scheduled";
+  scheduledAt?: string | null;
   jobId?: string; attemptNo?: number;
   id: string | number; draftId: string | number; status: string; title: string; bodyText: string;
   images: { id: string | number; index: number; insertOffset: number; insertPrefix: string; signedUrl: string; expiresIn: number }[];
@@ -26,6 +28,7 @@ type ExtensionReply = {
   position?: EditorTargetPosition; existing?: boolean;
   imageReady?: boolean;
   needsParagraph?: boolean;
+  scheduleReady?: boolean;
   verification?: { titleMatches: boolean; bodyMatches: boolean; actualLength: number; expectedLength: number };
 };
 declare const chrome: {

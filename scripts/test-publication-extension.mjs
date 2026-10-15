@@ -46,14 +46,15 @@ const db = {
     return signFail ? { error: { code: "fixture" } } : { data: { signedUrl: `https://storage.invalid/${path}?generation=${signCalls.length}` } };
   } }; } },
 };
+const schedule = load("lib/blog-publishing/schedule.ts");
 const assets = load("lib/blog-task-assets.ts");
 const placementSettings = load("lib/blog-publishing/image-placement-settings.ts");
 const layout = load("lib/blog-publishing/image-layout.ts", { "./image-placement-settings": placementSettings });
 const preparation = load("lib/blog-publishing/preparation.ts", { "./image-layout": layout });
 const blocks = load("lib/blog-publishing/blocks.ts");
 const downloads = load("lib/blog-publishing/downloads.ts", { "../blog-task-assets": assets });
-const jobs = load("lib/blog-publishing/publication-jobs.ts", { "@/lib/supabase": { supabase: db }, "../blog-task-assets": assets, "./downloads": downloads, "./preparation": preparation, "./blocks": blocks });
-const api = load("lib/blog-publishing/publication-extension.ts", { "@/lib/supabase": { supabase: db }, "../blog-task-assets": assets, "./publication-jobs": jobs });
+const jobs = load("lib/blog-publishing/publication-jobs.ts", { "@/lib/supabase": { supabase: db }, "../blog-task-assets": assets, "./schedule": schedule, "./downloads": downloads, "./preparation": preparation, "./blocks": blocks });
+const api = load("lib/blog-publishing/publication-extension.ts", { "@/lib/supabase": { supabase: db }, "../blog-task-assets": assets, "./schedule": schedule, "./publication-jobs": jobs });
 for (const count of [0, 1, 2, 8, 10]) {
   reset(count);
   const frozen = JSON.stringify(row.execution_snapshot);
@@ -158,3 +159,21 @@ assert.equal((await result.POST(request({ attemptNo: "1", outcome: "inserted" })
 assert.equal((await result.POST(request({ attemptNo: 1, outcome: "inserted" }), context)).status, 200);
 assert.equal((await (await list.GET(request({}))).json()).jobs.length, 0);
 console.log("PASS: Job API/auth, snapshot-only adapter 0/1/2/8/10, fresh signing, atomic claim, legacy cap, success/failure, stale/idempotent results.");
+
+reset(10);
+assert.equal((await api.publicationJobToExtensionTask(row)).publishMode, "manual");
+assert.equal((await api.publicationJobToExtensionTask(row)).scheduledAt, null);
+row.publish_mode = "scheduled"; row.scheduled_at = "2026-10-20T05:30:00.000Z";
+const scheduleBefore = row.scheduled_at;
+assert.equal((await api.listExtensionPublicationJobs())[0].scheduledAt, scheduleBefore);
+const scheduledTask = await api.claimPublicationJob(id, "blocks");
+assert.equal(scheduledTask.publishMode, "scheduled"); assert.equal(scheduledTask.scheduledAt, scheduleBefore);
+await api.recordPublicationResult(id, 1, "failed", "fixture");
+await jobs.transitionPublicationJob(id, { action: "retry" });
+assert.equal(row.scheduled_at, scheduleBefore); assert.equal(row.attempt_no, 1);
+await api.claimPublicationJob(id, "blocks");
+row.started_at = new Date(Date.now() - 600001).toISOString();
+await jobs.transitionPublicationJob(id, { action: "recover" });
+assert.equal(row.scheduled_at, scheduleBefore); assert.equal(row.attempt_no, 2);
+assert.equal((await api.publicationJobToExtensionTask(await api.getPublicationJob(id))).scheduledAt, scheduleBefore);
+console.log("PASS: default/scheduled Extension metadata, claim, retry and stale recovery preserve schedule.");

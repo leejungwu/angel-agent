@@ -47,7 +47,7 @@
     jobDraftIds.clear();
     selected = undefined; tasks.replaceChildren(new Option("발행 Job을 선택하세요", ""));
     tasks.value = "";
-    element("title").textContent = "선택한 글 없음"; element("images").textContent = "이미지 0개";
+    element("title").textContent = "선택한 글 없음"; element("images").textContent = "이미지 0개"; element("schedule").textContent = "";
     connection.textContent = "연결 확인 중…";
     try {
       const reply = await request({ type: "JOBS" });
@@ -99,7 +99,7 @@
     selected = undefined;
     selectionLoading = false;
     updateInsertState();
-    element("title").textContent = "선택한 글 없음"; element("images").textContent = "이미지 0개";
+    element("title").textContent = "선택한 글 없음"; element("images").textContent = "이미지 0개"; element("schedule").textContent = "";
     if (busy) return;
     if (!jobId) { result.textContent = "Job을 선택해 주세요."; return; }
     if (!draftId) { result.textContent = "발행 Job 목록에서 선택해 주세요."; return; }
@@ -112,6 +112,7 @@
       selected = reply.task;
       element("title").textContent = selected.title;
       element("images").textContent = `이미지 ${selected.images.length}개`;
+      element("schedule").textContent = selected.publishMode === "scheduled" ? NaverSchedule.label(selected) : "";
       result.textContent = selected.status === "failed" ? "입력 실패 Job입니다. 일부 입력됐을 수 있습니다. 이번 단계에서는 재시도를 제공하지 않습니다." : "네이버 글쓰기 탭에서 DOM 진단 후 입력하세요.";
     } catch (error) {
       if (current()) result.textContent = error instanceof Error ? error.message : "초안 조회 실패";
@@ -139,6 +140,7 @@
     const refreshed = await request({ type: "JOB", id: jobId });
     if (sequence !== selectionSequence || tasks.value !== jobId || jobDraftIds.get(jobId) !== draftId || !matchesSelection(refreshed.task, jobId, draftId) || refreshed.task.status !== "queued") throw new Error("선택한 Job 또는 상태가 변경되었습니다. 다시 선택해 주세요.");
     selected = refreshed.task;
+    if (selected.publishMode === "scheduled") NaverSchedule.target(selected);
     const diagnostic = await diagnose();
     if (diagnostic?.ready !== true) throw new Error(diagnostic?.reason ?? "입력 영역을 확정하지 못했습니다. 프레임별 DOM 진단을 확인해 주세요.");
     const overwrite = !!diagnostic?.existing;

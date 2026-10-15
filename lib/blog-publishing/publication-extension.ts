@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { parsePublicationSchedule } from "./schedule";
 import { BLOG_TASK_ASSET_BUCKET, isBlogTaskAssetPath } from "../blog-task-assets";
 import { parsePublicationSnapshot, PublicationJobError, type PublicationJob } from "./publication-jobs";
 
@@ -12,12 +13,12 @@ export async function getPublicationJob(id: string): Promise<PublicationJob> {
 }
 
 export async function listExtensionPublicationJobs() {
-  const { data, error } = await supabase.from("blog_publication_jobs").select("id,blog_task_id,blog_draft_id,status,execution_snapshot")
+  const { data, error } = await supabase.from("blog_publication_jobs").select("id,blog_task_id,blog_draft_id,status,execution_snapshot,publish_mode,scheduled_at")
     .in("status", ["queued", "failed"]).order("created_at", { ascending: false }).order("id", { ascending: false });
   if (error) throw new Error("Job 목록 조회 실패");
   return (data ?? []).map(row => {
     const snapshot = parsePublicationSnapshot(row.execution_snapshot);
-    return { id: row.id, taskId: row.blog_task_id, draftId: row.blog_draft_id, status: row.status, title: snapshot.title, imageCount: snapshot.images.length };
+    return { ...parsePublicationSchedule({ publishMode: row.publish_mode, scheduledAt: row.scheduled_at }), id: row.id, taskId: row.blog_task_id, draftId: row.blog_draft_id, status: row.status, title: snapshot.title, imageCount: snapshot.images.length };
   });
 }
 
@@ -40,6 +41,7 @@ export async function publicationJobToExtensionTask(job: PublicationJob, signed 
     return { id: image.assetId, index, insertOffset, insertPrefix: snapshot.bodyText.slice(0, insertOffset), signedUrl, expiresIn: signed ? 600 : 0 };
   }));
   return {
+    ...parsePublicationSchedule({ publishMode: job.publish_mode, scheduledAt: job.scheduled_at }),
     id: job.blog_task_id, draftId: job.blog_draft_id, jobId: job.id, attemptNo: job.attempt_no,
     status: job.status, title: snapshot.title, bodyText: snapshot.bodyText, images,
     blocks: snapshot.blocks.map(block => block.type === "text" ? block : { ...images[block.index], type: "image" as const }),

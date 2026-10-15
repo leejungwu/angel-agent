@@ -12,6 +12,7 @@ function paragraph(value, order) {
     getClientRects: () => [{ width: 100, height: 20 }],
     getBoundingClientRect: () => { throw new Error("Block caret must not query screen coordinates"); },
     getAttribute: () => "se-text-paragraph", scrollIntoView() {},
+    querySelectorAll: () => [],
     focus() {},
     contains: (other) => other === p || other === node,
     closest: (selector) => selector === ".se-text-paragraph" ? p : null,

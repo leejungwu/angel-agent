@@ -206,6 +206,13 @@ Side Panel은 선택 sequence·Job ID·Draft ID를 검증한다. background는 c
 
 `/content/blog/[id]/prepare`는 본문 복사·사진 다운로드/ZIP의 수동 fallback이며 Extension 실행 화면이 아니다.
 `/content/blog/publishing`은 고정 snapshot을 가진 Publication Job 목록이다.
+등록 시 일반/예약 발행을 선택하며 예약 날짜·시간은 명시적인 Asia/Seoul 기준으로 UTC timestamptz로 변환한다.
+`publish_mode`와 `scheduled_at`은 content snapshot과 분리한 불변 Job metadata다. 기존 행은 manual/null이며, 신규 예약은 미래 10분 단위만 허용하고 초/밀리초를 0으로 정규화한다. 기본값은 KST 현재 시각 +20분을 다음 10분 경계로 올림한다.
+Extension 목록·상세·claim 응답은 `publishMode`와 `scheduledAt`을 전달한다. scheduled Job은 입력 전 예약시간을 검증하고, V3/legacy 입력 검증 완료 후 editor iframe의 발행 설정 패널을 연다.
+`extension/schedule.ts`는 공통 예약 검증·KST 표시·예약 DOM 설정을 담당하며 빌드에서 background/content/Side Panel에 포함된다.
+예약 radio 선택, datepicker의 최대 24회 다음달 이동·날짜 선택, 시/분 change 이벤트 후 값을 다시 확인한다.
+예약값 불일치·timeout·Naver 시간 오류는 failed 처리한다. 예약 설정까지 성공한 Job만 기존 inserted 결과로 기록한다.
+예약시간에 자동 실행하는 cron은 없다. 최종 발행 버튼 `[data-testid="seOnePublishBtn"]`은 모든 예약 클릭에서 차단하며 사용자가 직접 확인 후 누른다.
 상세에서 승인된 Draft를 등록하고 queued Job만 제거할 수 있다.
 Extension 입력 성공은 Job을 inserted로 기록한다. published 변경이나 Naver 최종 발행 버튼 클릭은 하지 않는다.
 

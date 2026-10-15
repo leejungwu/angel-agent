@@ -86,13 +86,16 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 - [x] 10분 이상 지난 inserting 수동 복구 / 시작 시각·attempt 조건부 보호 / 자동 재실행 없음
 - [x] 웹 수동 발행 완료 기록 / 선택 http·https URL / published_at 기록
 - [x] failed Job 동일 snapshot 재대기 / 다음 claim에서만 attempt 증가
-- [ ] 예약 발행
+- [x] 예약 발행 기반 데이터 / Publication Job 예약시간 관리
+- [x] Naver 예약 날짜/시간 자동 설정 — 10분 단위 / KST / 날짜·시·분 재검증
+- [ ] Naver 예약 설정 실제 운영 검증
+- [ ] Naver 최종 발행 버튼 자동 실행
 - [ ] 중간 실패 재개
 - [ ] 장시간 signed URL 갱신 / 비정상 종료 cleanup
 - [ ] 최종 자동 발행 / 예약 확인 자동화
 - [ ] Naver 실제 발행 결과 자동 확인
 
-현재 입력 완료 뒤 최종 검수·발행·예약은 사람이 직접 수행한다. Extension은 queued Job의 고정 snapshot을 실행한다. 웹에서 사용자가 발행 완료를 기록하고 failed Job을 같은 자료로 재대기할 수 있다. 실제 발행 여부는 자동 검증하지 않는다.
+예약 Job은 콘텐츠 입력 후 예약 날짜/시간까지 설정한다. 최종 검수·발행·예약 등록은 사람이 직접 수행한다. Extension은 queued Job의 고정 snapshot을 실행한다. 웹에서 사용자가 발행 완료를 기록하고 failed Job을 같은 자료로 재대기할 수 있다. 실제 발행 여부는 자동 검증하지 않는다.
 
 ### 키워드 / 운영 분석
 
