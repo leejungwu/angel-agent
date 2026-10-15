@@ -104,7 +104,23 @@ Draft 저장과 Task 상태 변경은 별도 DB 요청이다. Draft 편집 저�
          → image-layout → preparation → blocks
 ```
 
-- `app/content/blog/[id]/BlogTaskAssets.tsx`: 파일 선택, Storage 업로드, Task 사진 metadata 저장·전체 삭제.
+- `app/content/blog/[id]/BlogTaskAssets.tsx`: 파일 선택, Storage 업로드, Task 사진 미리보기·개별/전체 삭제·위/아래 이동·Product 사진 선택.
+- `/api/blog/tasks/[id]/assets/[assetId]`는 기존 Job 참조 검사와 Storage 백업·복구 절차를 재사용한다.
+  참조가 있어도 Task asset row는 제거하며, 참조된 Storage 파일은 의도적으로 보존한다.
+  참조가 없는 파일만 백업 후 삭제하고 DB 삭제 실패 시 복구한다. 전체 삭제도 같은 정책이다.
+  기존 정렬 RPC로 대상을 마지막에 배치한 후 row를 삭제하여 나머지 순서를 0..N-1로 유지한다.
+  삭제 실패 시 이전 상대 순서로 복원한다. 참조 사진을 거부하는 과거 삭제 RPC는 이 경로에서 사용하지 않는다.
+  API는 제거 수와 보존 파일 수를 반환하며 UI는 보존 안내와 요청 실패 메시지를 표시한다.
+- `/api/blog/tasks/[id]/assets/order`는 전체 asset ID 순서를 검증한 뒤 RPC로 0..N-1을 한 번에 저장한다.
+  정렬 기준은 계속 sort_order ASC / id ASC이며 기존 Job은 재계산하지 않는다.
+  위/아래 이동은 클라이언트 목록에 즉시 반영한다. 저장은 한 번에 한 요청만 보내며 연속 클릭은 최신 순서로 합친다.
+  실패하면 마지막 저장 확인 순서로 되돌리고 오류를 표시한다. 순서 저장 성공은 refresh하지 않으며,
+  저장 중에는 삭제·업로드·Product 추가만 잠시 막는다. 목록이 바뀌는 동작의 기존 refresh는 유지한다.
+- `/api/blog/tasks/[id]/assets/product`는 연결된 Product 사진만 조회·선택하며 product-assets에서 blog-task-assets로 독립 복사한다.
+  `lib/blog-task-assets/manage.ts`가 복사와 metadata 저장을 담당한다. nullable `source_product_asset_id`와
+  Task별 unique index로 같은 원본의 중복 추가를 막고, Product 삭제와 관계없이 복사본을 유지한다.
+  Blog 사진 삭제는 Product 원본을 삭제하지 않는다. Product 선택 순서 대신 기존 Product sort_order / id 순서로 뒤에 추가한다.
+  복사 후 DB 저장 실패 시 미참조 복사본만 정리하며, 저장 여부를 확인할 수 없으면 파일을 보존하고 오류를 표시한다.
 - `lib/blog-task-assets/compact.ts`, `lib/blog-task-assets.ts`: 크기 계산·WebP 압축 후보와 경로/형식 규칙.
 - `lib/blog-publishing/downloads.ts`: Task 경로 검사·순서 정리·번호 파일명·수동 ZIP.
 - `lib/blog-publishing/image-layout.ts`: prose가 부족하면 문단을 나누고 사진을 넣을 경계를 계획한다.
@@ -134,6 +150,9 @@ Job 등록 시 최종 bodyText와 blocks만 기존 execution_snapshot에 고정�
 Task 설정 변경은 Draft 내용·상태와 기존 Job에 영향을 주지 않으며 새 Job에만 반영된다.
 배포 전 `202610150004_add_blog_image_placement_settings.sql`을 별도로 적용해야 한다.
 이전 코드로 되돌려도 nullable 컬럼과 기존 데이터는 유지할 수 있다.
+사진 관리에는 `202610150005_blog_image_management.sql`을 별도로 적용해야 한다.
+이 migration은 출처 컬럼·unique index·순서 저장 RPC와 기존 내부 도구 방식의 sort_order UPDATE 권한을 추가한다.
+기존 직접 업로드는 출처가 null이며 그대로 동작한다. 이전 앱으로 되돌릴 때 추가 컬럼·함수는 유지할 수 있다.
 
 ## Blog 발행 흐름
 
@@ -253,7 +272,9 @@ Task 삭제 API는 모든 상태의 Job을 먼저 확인해 삭제를 거부하�
 
 사진 전체 삭제는 `DELETE /api/blog/tasks/[id]/assets`에서 기존 삭제 helper를 호출한다.
 helper는 Storage를 건드리기 전에 모든 사진의 asset ID 또는 경로를 모든 상태의 Job과 대조한다.
-참조가 있거나 조회에 실패하면 삭제를 중단한다. 기존 백업·복구 방식은 유지한다.
+조회 실패 시 삭제를 중단한다. 참조 사진은 Task row만 제거하고 Storage 원본을 보존한다.
+미참조 사진은 Storage와 row를 제거하며 기존 백업·복구 방식을 유지한다.
+Extension은 snapshot의 경로로 signed URL을 발급하므로 제거된 Task row를 다시 조회하지 않는다.
 이 보호는 앱 삭제 경로에 적용되며, 기존 anon 권한으로 DB/Storage에 직접 접근하는 경우까지 막는 DB 정책 변경은 아니다.
 등록/삭제 동시 요청 사이의 경쟁 조건은 DB transaction·Storage를 아우르는 별도 보호가 필요하다.
 현재 생성 함수의 여러 조회는 하나의 DB transaction이 아니므로 등록 도중 원본이 바뀌는 경우의 원자성은 보장하지 않는다.

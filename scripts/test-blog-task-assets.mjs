@@ -68,6 +68,11 @@ rows.push({ id: 16, blog_task_id: 8, sort_order: 0,
   let failSecondDelete = false;
   let referencedPath = null;
   const deleteSupabase = {
+    async rpc(name, args) {
+      assert.equal(name, "reorder_blog_task_assets");
+      assert.equal(args.p_task_id, 7);
+      return { error: null };
+    },
     from(table) {
       assert.equal(table, "blog_task_assets");
       let operation = "read";
@@ -110,13 +115,13 @@ rows.push({ id: 16, blog_task_id: 8, sort_order: 0,
     "@/lib/blog-task-assets": assets,
     "@/lib/blog-publishing/publication-jobs": { isAssetReferencedByPublicationJob: async ({ storagePath }) => storagePath === referencedPath },
   });
-  assert.equal(await deletion.removeAllBlogTaskAssets(7), 2);
+  assert.deepEqual(await deletion.removeAllBlogTaskAssets(7), { deleted: 2, preserved: 0 });
   assert.deepEqual(removed, targetRows.map((row) => row.storage_path));
   assert.deepEqual(restored, []);
   removed.length = 0;
   referencedPath = targetRows[1].storage_path;
-  await assert.rejects(() => deletion.removeAllBlogTaskAssets(7), /발행 대기열/);
-  assert.equal(removed.length, 0, "preflight must protect all images before deleting any");
+  assert.deepEqual(await deletion.removeAllBlogTaskAssets(7), { deleted: 2, preserved: 1 });
+  assert.deepEqual(removed, [targetRows[0].storage_path], "Referenced file stays; unreferenced file is removed");
   referencedPath = null;
   failSecondDelete = true;
   await assert.rejects(() => deletion.removeAllBlogTaskAssets(7), /1\/2.*복구/);

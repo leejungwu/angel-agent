@@ -26,7 +26,7 @@ export default function ImagePlacementSettings({ taskId, initialSettings }: { ta
   }
   return <form onSubmit={save} className="my-5 rounded-lg border p-4">
     <h3 className="font-medium">사진 배치 설정</h3>
-    <p className="mt-2 text-sm text-zinc-500">기본값은 현재 방식인 균등 배치입니다. 사진 순서는 업로드 순서를 유지합니다.</p>
+    <p className="mt-2 text-sm text-zinc-500">기본값은 현재 방식인 균등 배치입니다. 사진 목록에 저장된 순서를 유지합니다.</p>
     <fieldset disabled={busy} className="mt-3 space-y-2 text-sm">
       {([
         ["pinFirstAfterIntro", "첫 사진을 도입부 뒤에 배치"],

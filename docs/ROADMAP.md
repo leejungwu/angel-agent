@@ -6,7 +6,7 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 ## Blog 개발 우선순위
 
 1. 사진 배치 설정 migration 적용 / 실제 운영 검증
-2. 이미지 관리 / 전처리 / 재사용
+2. 사진 관리 migration 적용 / 운영 검증 및 이미지 전처리·최적화 확장
 3. VOC → Blog 연결
 4. 키워드 관리 / 검색 의도 / 검색량
 5. 실제 운영 데이터 축적
@@ -41,6 +41,11 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 ### 이미지
 
 - [x] Task 사진 업로드 / 정렬 저장 / 전체 삭제
+- [x] Blog 사진 개별 삭제 / 위·아래 순서 변경 / 작은 미리보기
+- [x] 사진 순서 즉시 반영 / 연속 클릭 직렬 저장 / 저장 실패 시 복원
+- [x] Task 사진 제거와 Job 원본 보존 분리 — 개별/전체 제거 시 참조 Storage 유지
+- [x] Product 사진의 Blog Task 독립 복사·재사용 / Task별 원본 중복 방지
+- [ ] 사진 관리 migration 적용 / 실제 저장·삭제·재사용 운영 검증
 - [x] 업로드 시 기본 축소 / WebP 압축 후보
 - [x] 문단 경계 기반 사진 배치 / 필요 시 prose 분할
 - [x] 전체 사진 text/image Block 순차 입력
@@ -48,7 +53,7 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 - [x] 이미지 증가 / 로딩 / 본문 경계·순서 검증
 - [x] Task 사진 배치 설정 UI — 도입 뒤 첫 사진 / 마무리 앞 마지막 사진 / 문단 자동 분할
 - [ ] 사진 배치 설정 migration 적용 / 실제 운영 검증
-- [ ] 이미지 전처리 / 최적화 / 재사용 확장
+- [ ] 이미지 전처리 / 최적화 / 재사용 확장 — Product 복사 외 관리 기능
 - [ ] crop / 밝기 / 테두리 / 워터마크
 - [ ] 모자이크 / blur
 - [ ] 원본 / 파생본 관리
@@ -65,7 +70,7 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 - [x] 서버 임시 사진 준비 / 종료 cleanup / 실패 단계 표시
 - [x] Publication Job 기반 — 테이블 migration / 승인 Draft 등록 함수 / immutable 실행 snapshot / runtime parser / 중복 등록 방지
 - [x] 웹 Queue — 승인 Draft 등록 / Job 목록·snapshot 사진 수 / queued 제거
-- [x] 앱 사진·Task 삭제 경로의 모든 상태 Job 참조 보호
+- [x] 모든 상태 Job의 Storage 원본 보존 / Job이 있는 Task 전체 삭제 차단
 - [x] Publication Job migration 적용 / 실제 웹 운영 검증
 - [ ] 등록·사진 삭제 동시 요청의 원자성 / DB·Storage 직접 삭제 보호
 - [x] Publication Job의 Extension 입력 연결 / snapshot adapter / 실행 직전 사진 URL 발급

@@ -62,6 +62,11 @@ const db = { from(table) {
     return { data: structuredClone(single ? matches[0] ?? null : matches), error: null };
   }
   return query;
+}, async rpc(name, args) {
+  assert.equal(name, "reorder_blog_task_assets");
+  assert.equal(args.p_asset_ids.length, rows.blog_task_assets.length);
+  args.p_asset_ids.forEach((id, index) => { rows.blog_task_assets.find(asset => String(asset.id) === String(id)).sort_order = index; });
+  return { error: null };
 }, storage: { from: () => ({
   download: async () => ({ data: new Blob(["image"], { type: "image/png" }) }),
   remove: async () => { storageRemoves++; return {}; }, upload: async () => ({}),
@@ -115,6 +120,7 @@ const page = load("app/content/blog/publishing/page.tsx", { ...common, "next/lin
   "./PublicationJobTransition": ({ status }) => React.createElement("button", {}, status === "inserted" ? "발행 완료 기록" : "다시 대기열로"),
 }).default;
 rows.blog_task_assets.push({ id: 9, blog_task_id: 1, storage_path: "tasks/1/new.png", file_name: "new.png", sort_order: 1 });
+const taskPhotoFixture = structuredClone(rows.blog_task_assets);
 rows.blog_drafts[0].title = "나중 제목";
 for (const [status, label] of [["queued", "발행 대기"], ["inserting", "입력 중"], ["inserted", "네이버 입력 완료"], ["published", "발행 완료"], ["failed", "입력 실패"]]) {
   job.status = status; job.error_message = status === "failed" ? "fixture failure" : null;
@@ -127,8 +133,14 @@ for (const [status, label] of [["queued", "발행 대기"], ["inserting", "입�
   assert.equal(html.includes("/prepare"), false);
   if (status === "failed") assert.ok(html.includes("fixture failure"));
   assert.equal((await taskRoute.DELETE(request({}), context("1"))).status, 409);
-  assert.equal((await assetRoute.DELETE(request({}), context("1"))).status, 409);
-  assert.equal(storageRemoves, 0, "all statuses must block Storage deletion, including unreferenced images before protected ones");
+  const frozenJob = JSON.stringify(job);
+  const removedPhotos = await assetRoute.DELETE(request({}), context("1"));
+  assert.equal(removedPhotos.status, 200);
+  assert.deepEqual(await removedPhotos.json(), { ok: true, deleted: 2, preserved: 1 });
+  assert.equal(storageRemoves, 1, "All Job states preserve referenced Storage files");
+  assert.equal(rows.blog_task_assets.length, 0);
+  assert.equal(JSON.stringify(job), frozenJob);
+  rows.blog_task_assets = structuredClone(taskPhotoFixture); storageRemoves = 0;
   if (status !== "queued") assert.equal((await remove.DELETE(request({}), context(job.id))).status, 409);
   assert.equal(JSON.stringify(job.execution_snapshot), frozen);
 }

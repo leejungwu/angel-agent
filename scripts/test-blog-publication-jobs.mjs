@@ -76,6 +76,21 @@ assert.equal(pinnedJob.execution_snapshot.bodyText, planned.executionBodyText);
 assert.deepEqual(Object.keys(pinnedJob.execution_snapshot).sort(), ["blocks", "bodyText", "images", "title", "version"]);
 taskSettings = { pinFirstAfterIntro: false, pinLastBeforeClosing: false, allowParagraphSplit: true };
 assert.equal(JSON.stringify((await api.createPublicationJob({ taskId: "1", draftId: "2" })).execution_snapshot), pinnedSnapshot);
+reset(3);
+const originalOrderJob = await api.createPublicationJob({ taskId: "1", draftId: "2" });
+const originalOrderSnapshot = JSON.stringify(originalOrderJob.execution_snapshot);
+for (const [index, assetId] of [3, 1, 2].entries()) assets.find(asset => asset.id === assetId).sort_order = index;
+const reordered = downloads.orderedTaskImages("1", assets);
+assert.deepEqual(Array.from(reordered, asset => asset.id), [3, 1, 2]);
+const reorderedPreparation = preparation.prepareBlogPost(draft, reordered.length, taskSettings);
+assert.deepEqual(Array.from(reorderedPreparation.blocks.filter(block => block.type === "image"), block => reordered[block.imageIndex].id), [3, 1, 2]);
+assert.equal(JSON.stringify((await api.createPublicationJob({ taskId: "1", draftId: "2" })).execution_snapshot), originalOrderSnapshot);
+// A new approved Draft gets the current order and independently copied Product photo.
+assets.push({ id: 4, storage_path: "tasks/1/product-copy.png", file_name: "product.png", sort_order: 3, source_product_asset_id: 99 });
+draft.id = 3;
+const reorderedJob = await api.createPublicationJob({ taskId: "1", draftId: "3" });
+assert.deepEqual(Array.from(reorderedJob.execution_snapshot.images, image => Number(image.assetId)), [3, 1, 2, 4]);
+assert.equal(JSON.stringify(jobs[0].execution_snapshot), originalOrderSnapshot);
 for (const status of ["draft", "rejected"]) {
   reset(); draft.status = status;
   await assert.rejects(api.createPublicationJob({ taskId: "1", draftId: "2" }), /승인/);
