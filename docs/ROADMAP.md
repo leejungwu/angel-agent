@@ -9,6 +9,7 @@ Angel Agent의 현재 기반과 향후 이커머스 자동화 계획을 구분�
 | 영역 | 구현된 기반 |
 |---|---|
 | Products | 상품 사실 CRUD, 상품 사진 업로드·조회 |
+| Ads Reference v1 | 광고 자료 CRUD, optional Product 연결, 이미지/영상 첨부·URL·태그·메모 |
 | Reviews / VOC | CSV/XLSX import, OpenAI VOC 분석·결과 저장·dashboard |
 | Blog generation | DB Prompt Preset, 생성 snapshot, Draft 편집·재승인·승인/반려 |
 | Blog images | 업로드·정렬·삭제·Product 복사·편집·배치 설정 |
@@ -37,7 +38,17 @@ manual 즉시 최종 발행, 실제 공개 완료 자동 판정, 중간 실패 �
 11. MCP / 외부 Agent
 
 Meta Ads와 Commerce의 순서는 실제 광고 집행량·판매 데이터가 쌓이는 시점에 따라 조정한다.
-아래 Phase는 모두 **planned**다. 기존 Blog의 “예약 발행”은 Naver UI 예약 등록이며 서버 cron 실행과 다르다.
+아래 Phase는 완료 표시한 Reference CRUD 외에는 **planned**다. 기존 Blog의 “예약 발행”은 Naver UI 예약 등록이며 서버 cron 실행과 다르다.
+
+## Ads v1 개발 순서
+
+1. [x] Reference DB — CRUD / optional Product / URL·태그·메모 / 독립 이미지·영상 Storage
+2. [ ] AI 광고 분석기
+3. [ ] 광고 기획기
+4. [ ] 이미지/영상 Prompt Builder
+
+- [ ] Ads Reference migration 적용 / 실제 Storage 업로드·교체·삭제 운영 검증
+- Meta API·성과·생성 서비스는 이번 Reference 구현 범위가 아니다.
 
 ## 향후 전체 이커머스 자동화 — planned
 
@@ -54,7 +65,8 @@ Task → Draft → Approval → Publish 패턴은 개념적으로 재사용한�
 
 ### Phase 2. 광고 Reference DB + Meta Ad Library
 
-- [ ] 자체 광고 reference DB: 수동 image/video/URL 저장, landing URL, brand, product, platform, category, tags
+- [x] 자체 광고 Reference DB: 수동 이미지/영상/URL, landing URL, brand, optional Product, platform, media type, tags, notes CRUD
+- [ ] Reference category 분류 확장 — 현재 별도 category 필드는 없음
 - [ ] AI 분석: Hook, Problem, Desire, USP, Offer, Proof, CTA, visual pattern, creative format, memo
 - [ ] Meta Ad Library는 여러 source 중 하나로 연결 — 일반 상업 광고·지역·기간·권한의 공식 API 범위 검증 필요
 - [ ] 경쟁사 광고·카피·소재 변경 관찰 — 수집 가능한 공개 정보만 사용
@@ -305,7 +317,7 @@ FAQ와 광고 hook은 분석 결과의 후보이며 별도 완성 FAQ·광고 �
 
 ### 레퍼런스 / 모니터링
 
-- [ ] 광고 레퍼런스·경쟁 광고 DB / 제품 연결
+- [x] 광고 Reference DB / 선택적 제품 연결 / 수동 광고 자료 등록
 - [ ] hook / 문제·욕구 / proof / CTA / 구조 / tone 분석
 - [ ] Meta Ad Library / 신규 광고 / 카피·소재 변화 모니터링
 - [ ] 경쟁사 가격·프로모션·신제품 / 시장 gap·키워드 기회 / 일간·주간 보고
@@ -379,6 +391,7 @@ FAQ와 광고 hook은 분석 결과의 후보이며 별도 완성 FAQ·광고 �
 - [ ] Blog/KIN 관리용 설정 API의 anon write 제거
 - [ ] 관리용 설정 API를 위한 서버 전용 Supabase client 도입
 - [ ] Blog/KIN 관리용 설정 API의 관리자 인증 경계 추가
+- [ ] Ads Reference의 anon write 제거 / 서버 전용 client·관리자 인증 경계 — 기존 내부 도구와 같은 접근 모델의 후속 보안 과제
 - [ ] Agent·자동화 실행 이력 / 전사 발행 이력
 
 Blog의 사용자 시작형 Extension과 승인 목록은 구현되어 있지만 범용 Agent 실행·스케줄 플랫폼은 아니다.

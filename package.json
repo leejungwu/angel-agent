@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:ad-references": "node scripts/test-ad-references.mjs",
     "build:extension": "node scripts/build-extension.mjs",
     "test:blog-body": "tsx scripts/test-blog-body.ts",
     "test:blog-generation": "tsx scripts/test-blog-generation.ts",

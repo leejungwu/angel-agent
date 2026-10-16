@@ -20,6 +20,10 @@ Tools for managing and processing product-related information and supporting eco
 
 Collection, organization, and analysis of customer feedback, with reusable voice-of-customer (VOC) insights.
 
+### Advertising References
+
+A library of reference ads, source and landing URLs, optional media files, and product associations.
+
 ### Knowledge Workflows
 
 Tools for generating and organizing knowledge-based content, including Q&A workflows.

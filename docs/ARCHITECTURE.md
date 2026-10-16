@@ -43,9 +43,32 @@ Extension은 웹 앱이 새 Chrome을 띄우는 방식이 아니라, 사용자�
 | `scripts/` | 회귀 검사와 Extension 빌드. 사용자 요청 처리 경로와 분리 | `build-extension.mjs`, `test-blog-body.ts`, `test-extension-api.mjs` |
 | `docs/` | 전체 기능 지도, 시스템 설명, 기능별 상세 안내 | `ROADMAP.md`, `ARCHITECTURE.md`, `AI_GENERATION.md` |
 
-실제 주요 모듈은 Product, 리뷰/VOC, Blog, KIN이다. `app/layout.tsx`의 Sourcing/Ads/Sales/Settings 표시는
+실제 주요 모듈은 Product, 리뷰/VOC, Blog, KIN, Ads Reference다. `app/layout.tsx`의 Sourcing/Sales/Settings 표시는
 현재 기능 페이지 연결과 구분한다. 루트 Dashboard도 매출 분석 화면이 아니다.
 `.next/`, `node_modules/`, `extension/dist/`는 생성물이며 기능 수정은 원본 코드에서 한다.
+
+## Ads Reference v1
+
+`/ads`는 `/ads/references`로 이동한다. sidebar Ads도 Reference 목록으로 연결한다.
+목록·등록·상세·수정 화면은 `app/ads/references/`이며 Product 선택은 optional이다.
+`ad_references`는 광고명·브랜드·플랫폼·소재 유형·원본/랜딩 URL·태그·메모와 optional 파일 경로를 저장한다.
+Product FK는 삭제 시 null이 되며 광고 자료 자체는 유지한다. Blog 사진·발행 snapshot과 공유하지 않는다.
+
+`lib/ads/references.ts`는 enum·문자열·http/https URL·태그·파일 유형/크기를 검증한다.
+`POST /api/ads/references`, `PATCH/DELETE /api/ads/references/[id]`는 `reference-store.ts`로 저장·삭제한다.
+서버가 Storage 경로를 생성하며 클라이언트가 임의의 삭제 경로를 지정하지 않는다.
+수정·삭제는 읽은 updated_at을 조건으로 처리하며 DB trigger가 새 updated_at을 기록한다.
+
+선택적 파일은 private `ad-reference-assets` bucket의 `references/{id}/{uuid}.{extension}`에 저장한다.
+JPEG/PNG/WebP는 10MB, MP4/WebM은 50MB까지 허용한다. 상세 화면은 1시간 signed URL로
+이미지와 첨부 열기를 제공한다. 영상 편집기·변환·URL 크롤링은 없다.
+교체는 새 파일 업로드·DB 저장 후 이전 파일을 정리하며, 삭제는 row 제거 후 파일을 정리한다.
+파일 정리 실패는 성공한 변경을 되돌리지 않고 경고한다. DB 저장 결과가 불명확하면 업로드 파일을 보존하므로
+고아 파일이 남을 수 있으며 자동 cleanup 기능은 없다.
+
+`202610160003_ad_references.sql`은 테이블·인덱스·updated_at trigger·RLS와 전용 bucket을 추가한다.
+기존 내부 도구의 publishable-key/anon CRUD 접근 모델을 따르며 관리자 인증 경계는 아니다.
+AI 분석 결과 컬럼·외부 API·성과 지표는 없다. 후속 분석은 Reference ID를 참조하는 별도 결과 구조로 설계한다.
 
 ## Blog 생성 흐름
 
@@ -282,6 +305,7 @@ kin_prompt_settings → 모든 KIN 생성의 공통 prompt
 | 데이터 | 역할 |
 |---|---|
 | `products` / `product_assets` | 상품 사실과 제품 사진. Blog Task 사진과 별개 |
+| `ad_references` | 독립 광고 Reference. optional Product FK, 플랫폼·소재 유형·URL·태그·메모·전용 Storage 파일 경로 |
 | `blog_tasks` | 제품·keyword/topic/instructions·preset_id. 같은 Task에서 여러 draft 생성 가능 |
 | `blog_drafts` | 제목·intro·sections·closing·검수 상태·provider/model·generation_snapshot. 새 Job은 approved만 등록하며 실행은 고정 snapshot 사용 |
 | `blog_prompt_presets` | 사용자 편집 prompt 4개와 분량·소제목·키워드 범위 |
@@ -447,5 +471,5 @@ Product 항목은 `app/products/[id]/`를 기준으로 읽는다.
 - `lib/supabase.ts`는 `NEXT_PUBLIC_SUPABASE_URL`과 publishable key를 사용한다. 서버 route 자체가 관리자 권한 경계는 아니다.
   일부 client의 직접 DB/Storage 접근과 내부 설정 write 정책이 남아 있다. Extension 전용 Bearer 인증과 구분한다.
 - 코드·migration의 존재와 remote DB 적용 여부는 별개다. 이 문서는 현재 main 코드 구조를 설명하며 DB를 조회·변경하지 않는다.
-- Threads, 광고 reference/성과, 상세페이지, 소싱, 판매·재고, 범용 모니터링, 내부 Agent와 MCP adapter는 현재 구현 모듈이 아니다.
+- Threads, 광고 AI 분석/성과, 상세페이지, 소싱, 판매·재고, 범용 모니터링, 내부 Agent와 MCP adapter는 현재 구현 모듈이 아니다.
   해당 범위와 외부 API 검증 과제는 ROADMAP에서 관리한다.
