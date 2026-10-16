@@ -17,7 +17,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 async function openPanel(fail = false, selectionTask, options = {}) {
   const elements = new Map();
   const requests = [];
-  let taskRequests = 0, completed = false;
+  let taskRequests = 0, completed = false, rechecked = false;
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, { value: "", textContent: "", hidden: true, listeners: {},
       options: [], addEventListener(event, handler) { this.listeners[event] = handler; }, replaceChildren() { this.options = []; }, add(option) { this.options.push(option); } });
@@ -26,6 +26,8 @@ async function openPanel(fail = false, selectionTask, options = {}) {
   vm.runInNewContext(panelCode, { URL, Option: class { constructor(text, value) { this.text = text; this.value = value; } }, document: { getElementById: element }, chrome: {
     storage, permissions: { request: async () => true },
     runtime: { sendMessage: async (message) => { requests.push(message); if (message.type === "JOB" && options.onTask) return options.onTask(message);
+    if (message.type === "RECHECK_JOBS") return { jobs: rechecked ? [] : options.recheckJobs ?? [] };
+    if (message.type === "RESERVATION_RECHECK") { rechecked = true; return { message: "예약 등록을 확인하고 기록했습니다.", reservationDiagnostics: [{ stage: "MATCHED", expectedTitle: "기존 예약 제목" }] }; }
     if (message.type === "JOB" && selectionTask) {
       taskRequests++;
       return options.revoke && taskRequests > 1 ? { error: "초안 승인이 취소되었습니다." } : { task: selectionTask };
@@ -34,6 +36,7 @@ async function openPanel(fail = false, selectionTask, options = {}) {
         const diagnostic = options.diagnostic ?? { ready: true, existing: false };
         return { diagnostic, diagnostics: [{ frameId: 2, diagnostic }] };
       }
+      if (message.type === "INSERT" && options.insertMessage) return { message: options.insertMessage, reservationDiagnostics: [{ stage: "LIST_OPEN_TIMEOUT" }] };
       if (message.type === "INSERT" && options.refreshAfterInsert) { completed = true; return { message: "예약 등록 요청을 완료했고 다음 글쓰기 화면을 준비했습니다." }; }
       if (message.type === "JOBS" && completed && options.refreshAfterInsert) return { jobs: options.tasks.slice(1) };
       return fail ? { error: "fixture failure" } : { jobs: options.tasks ?? (selectionTask ? [{ id: 1, draftId: 2, title: "제목", status: "queued" }] : []) }; } },
@@ -227,3 +230,31 @@ for (const [diagnostic, message] of [
   assert.equal(panel.requests.some(request => request.type === "INSERT"), false);
 }
 console.log("PASS: Side Panel always shows raw diagnostics with unavailable/stabilizing/ready messages.");
+
+const panelHtml = await readFile("extension/sidepanel/index.html", "utf8");
+assert.doesNotMatch(panelHtml, /예약 확인 필요|입력 완료 예약 Job|recheckJobs|recheckReservation|confirmationDiagnostic|예약 확인 진단/);
+assert.doesNotMatch(await readFile("extension/sidepanel/index.ts", "utf8"), /RECHECK_JOBS|RESERVATION_RECHECK|confirmationDiagnostic/);
+for (const [publishMode, finalizeMode, note] of [
+  ["scheduled", "auto", /예약 등록 후 다음 글쓰기 화면을 준비합니다/],
+  ["scheduled", "review", /결과 검수와 최종 발행은 직접/],
+  ["manual", "review", /결과 검수와 최종 발행은 직접/],
+]) {
+  const panel = await openPanel(false, { ...approvedTask, publishMode, finalizeMode, scheduledAt: publishMode === "scheduled" ? "2099-10-20T05:30:00Z" : null });
+  panel.element("tasks").value = "1"; panel.element("tasks").listeners.change(); await settle();
+  assert.match(panel.element("publishingNote").textContent, note);
+  assert.equal(panel.requests.some(request => ["RECHECK_JOBS", "RESERVATION_RECHECK"].includes(request.type)), false);
+}
+console.log("PASS: confirmation UI/requests removed, mode-specific publishing guidance retained.");
+
+for (const message of [
+  "예약 등록 요청은 완료했지만 자동 확인하지 못했습니다. 예약 등록 자동 확인 실패: timeout 다음 글쓰기 화면을 준비했습니다.",
+  "예약 등록을 확인했습니다. 다음 글쓰기 화면을 자동으로 준비하지 못했습니다. 새 글쓰기를 직접 열어 주세요.",
+]) {
+  const panel = await openPanel(false, { ...approvedTask, publishMode: "scheduled", finalizeMode: "auto", scheduledAt: "2099-10-20T05:30:00Z" }, { insertMessage: message });
+  panel.element("tasks").value = "1"; panel.element("tasks").listeners.change(); await settle();
+  panel.element("insert").listeners.click(); await settle();
+  assert.equal(panel.requests.filter(request => request.type === "INSERT").length, 1);
+  assert.doesNotMatch(panel.element("result").textContent, /자동 확인|등록을 확인했습니다|LIST_OPEN_TIMEOUT/);
+  assert.match(panel.element("result").textContent, /예약 등록 요청을 완료했습니다/);
+  assert.match(panel.element("result").textContent, /다음 글쓰기 화면/);
+}

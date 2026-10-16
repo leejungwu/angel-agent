@@ -17,7 +17,7 @@ function reset(count = 2) {
   const images = Array.from({ length: count }, (_, index) => ({ assetId: index + 1, storagePath: `tasks/1/${index}.png`, fileName: `${index}.png`, sortOrder: index }));
   const blocks = images.flatMap((_, index) => [{ type: "text", text: `구간${index}입니다.\n\n` }, { type: "image", index }]);
   blocks.push({ type: "text", text: "마지막 본문입니다." });
-  row = { id, blog_task_id: 1, blog_draft_id: 2, status: "queued", attempt_no: 0, error_message: "이전 오류", execution_snapshot: {
+  row = { id, blog_task_id: 1, blog_draft_id: 2, status: "queued", attempt_no: 0, reservation_confirmed_at: null, error_message: "이전 오류", execution_snapshot: {
     version: 1, title: "고정 제목", bodyText: blocks.filter(block => block.type === "text").map(block => block.text).join(""), blocks, images,
   } };
   signCalls = []; signFail = false;
@@ -29,6 +29,7 @@ const db = {
     const query = {
       select() { return this; }, order() { return this; },
       eq(key, value) { filters.push(candidate => candidate[key] === value); return this; },
+      is(key, value) { filters.push(candidate => candidate[key] === value); return this; },
       in(key, values) { filters.push(candidate => values.includes(candidate[key])); return this; },
       update(value) { update = value; return this; },
       async maybeSingle() { return run(true); },
@@ -197,3 +198,49 @@ await api.recordPublicationResult(id, 3, "inserted");
 assert.equal(row.status, "inserted"); assert.equal(row.published_at, undefined);
 assert.equal(row.finalize_mode, "auto"); assert.equal(JSON.stringify(row.execution_snapshot), finalSnapshot);
 console.log("PASS: finalize review compatibility, auto list/detail/claim serializer, retry/recovery immutable consent, inserted not published.");
+
+const confirmation = load("app/api/extension/publication-jobs/[id]/reservation-confirmation/route.ts", common);
+denied = true;
+assert.equal((await confirmation.POST(request({ attemptNo: 3 }), context)).status, 401);
+denied = false;
+for (const input of [{}, { attemptNo: "3" }, { attemptNo: 0 }, { attemptNo: 3, title: "client override" }]) {
+  assert.equal((await confirmation.POST(request(input), context)).status, 400);
+}
+assert.equal((await confirmation.POST(request({ attemptNo: 2 }), context)).status, 409);
+const beforeConfirmation = JSON.stringify(row);
+assert.equal((await confirmation.POST(request({ attemptNo: 3 }), context)).status, 200);
+assert.ok(row.reservation_confirmed_at);
+const confirmedAt = row.reservation_confirmed_at;
+assert.deepEqual(JSON.parse(beforeConfirmation), { ...row, reservation_confirmed_at: null }, "Only confirmation timestamp may change");
+const repeated = await confirmation.POST(request({ attemptNo: 3 }), context);
+assert.equal((await repeated.json()).alreadyConfirmed, true);
+assert.equal(row.reservation_confirmed_at, confirmedAt);
+row.reservation_confirmed_at = null;
+const concurrentConfirmation = await Promise.all([api.recordReservationConfirmation(id, 3), api.recordReservationConfirmation(id, 3)]);
+assert.equal(concurrentConfirmation[0].confirmedAt, concurrentConfirmation[1].confirmedAt);
+assert.equal(concurrentConfirmation.filter(result => result.alreadyConfirmed).length, 1);
+for (const changes of [{ status: "queued" }, { status: "inserting" }, { status: "failed" }, { status: "published" },
+  { publish_mode: "manual" }, { finalize_mode: "review" }, { scheduled_at: null }]) {
+  const original = { ...row }; Object.assign(row, changes);
+  assert.equal((await confirmation.POST(request({ attemptNo: 3 }), context)).status, 409);
+  row = original;
+}
+const missing = { params: Promise.resolve({ id: "00000000-0000-4000-8000-000000000099" }) };
+assert.equal((await confirmation.POST(request({ attemptNo: 3 }), missing)).status, 404);
+console.log("PASS: reservation confirmation auth/attempt/status/mode validation, timestamp-only update, idempotence, client override rejection, no published transition.");
+const confirmationMigration = readFileSync("supabase/migrations/202610160002_blog_schedule_confirmation.sql", "utf8");
+assert.match(confirmationMigration, /ADD COLUMN reservation_confirmed_at timestamptz NULL/);
+assert.match(confirmationMigration, /reservation_confirmed_at IS NULL OR publish_mode = 'scheduled'/);
+assert.doesNotMatch(confirmationMigration, /UPDATE public\.|ALTER COLUMN status|execution_snapshot\s*=/i);
+row.reservation_confirmed_at = null;
+assert.equal((await api.listReservationRechecks()).length, 1);
+assert.equal((await api.publicationJobToExtensionTask(row)).reservationConfirmedAt, null);
+const recheckRequest = new Request("http://localhost/api/extension/publication-jobs?confirmation=needed");
+assert.equal((await (await list.GET(recheckRequest)).json()).jobs[0].id, id);
+row.reservation_confirmed_at = "2026-10-16T00:00:00Z";
+assert.equal((await api.listReservationRechecks()).length, 0);
+for (const changes of [{ status: "queued" }, { publish_mode: "manual" }, { finalize_mode: "review" }]) {
+  const original = { ...row }; Object.assign(row, changes, { reservation_confirmed_at: null });
+  assert.equal((await api.listReservationRechecks()).length, 0);
+  row = original;
+}

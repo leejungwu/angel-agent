@@ -6,7 +6,7 @@ const code = ts.transpileModule((await readFile("extension/schedule.ts", "utf8")
 const task = { id: 1, title: "제목", bodyText: "abcdefghij", images: [2, 6, 8].map((insertOffset, index) => ({ id: index, index, insertOffset, insertPrefix: "abcdefghij".slice(0, insertOffset), signedUrl: `https://fixture.test/${index}.png` })) };
 const jobId = "00000000-0000-4000-8000-000000000001";
 async function scenario(input = task, failure = "", publisher = "legacy", diagnoseOnly = false) {
-  let listener, intercepted = false, sequence = 0, uploadVerified = 0, navigated = false, freshPolls = 0;
+  let listener, intercepted = false, sequence = 0, uploadVerified = 0, navigated = false, freshPolls = 0, viewClicked = false;
   const navigations = [];
   const deleteAttempts = new Map(), cleanupDelays = [], cleanupUploadCounts = [];
   const handlers = new Set(), commands = [], messages = [], downloads = [], removed = [], erased = [];
@@ -16,8 +16,8 @@ async function scenario(input = task, failure = "", publisher = "legacy", diagno
 
   const chrome = {
     storage: { local: { setAccessLevel: async () => {}, get: async () => ({ appUrl: "http://localhost:3000", extensionToken: "fixture-secret" }) } }, sidePanel: { setPanelBehavior: async () => {} },
-    tabs: { update: async (_tab, options) => { navigations.push(options.url); if (failure === "freshNavigation") throw new Error("navigation failure"); navigated = true; },
-      query: async () => [{ id: 1, url: "https://blog.naver.com/postwrite" }], sendMessage: async (_tab, message) => {
+    tabs: { update: async (_tab, options) => { navigations.push(options.url); if (["freshNavigation", "confirmationAndFresh"].includes(failure)) throw new Error("navigation failure"); navigated = true; },
+      query: async () => [{ id: 1, url: "https://blog.naver.com/postwrite" }], sendMessage: async (_tab, message, frameOptions) => {
       messages.push(message);
       timeline.push(message.type);
       if (failure === "nextParagraph" && message.type === "EDITOR_BLOCK_NEXT_TEXT" && !messages.some((m) => m.type === "EDITOR_BLOCK_NEXT_TEXT" && m !== message)) return { needsParagraph: true, position: { x: 10, y: 20 } };
@@ -27,16 +27,38 @@ async function scenario(input = task, failure = "", publisher = "legacy", diagno
         return { diagnostic: { baseReady: !["inactive", "notWritable"].includes(failure), editorId: failure === "unstable" ? String(messages.length) : navigated ? "fresh" : "original", writableEditor: failure !== "notWritable" && !(failure === "delayedInitialization" && navigated && freshPolls <= 2), writing: true, activeEditor: failure !== "inactive", visibleEditor: failure !== "inactive", frameReady: true, ready: failure !== "inactive" && !(navigated && failure === "freshTimeout"), titleFound: true, bodyFound: true, existing: false, publishPanelOpen: failure === "transitionTimeout" && outcomes.length > 0, reason: `raw:${failure || "ready"}` } };
       }
       if (message.type === "EDITOR_SCHEDULE") return { scheduleReady: true };
+      if (message.type === "EDITOR_RESERVATION_CONFIRMATION") {
+        const polls = messages.filter(item => item.type === message.type).length;
+        const listReads = messages.filter(item => item.type === message.type && !item.openList).length;
+        const closed = ["triggerMissing", "triggerAmbiguous", "crossTrigger"].includes(failure) || ["triggerClosed", "triggerNewFrame", "triggerClickFailed", "triggerNoOpen", "triggerWrongHit"].includes(failure) && !viewClicked ||
+          failure === "triggerDelayed" && (!viewClicked || listReads < 3);
+        const matchingEntries = closed || ["confirmationTimeout", "confirmationAndFresh", "entriesEmpty"].includes(failure) || failure === "otherFrame" && frameOptions.frameId === 2 ? 0 : failure === "confirmationAmbiguous" ? 2 : failure === "confirmationDelayed" && polls < 3 ? 0 : 1;
+        const diagnostic = { stage: message.openList && failure === "triggerWrongHit" ? "LIST_TRIGGER_HIT_TEST_FAILED" : closed ? "LIST_TRIGGER_MISSING" : failure === "entriesEmpty" ? "ENTRIES_EMPTY" : matchingEntries === 1 ? "MATCHED" : "MATCH_MISSING",
+          listAlreadyVisible: !closed, listTriggerFound: failure.startsWith("trigger") || failure === "crossTrigger",
+          listTriggerCount: failure === "triggerAmbiguous" ? 2 : ["triggerClosed", "triggerDelayed", "triggerNewFrame", "triggerClickFailed", "triggerNoOpen", "triggerWrongHit", "crossTrigger"].includes(failure) ? 1 : 0,
+          listTriggerClicked: !!message.openList, listVisibleAfterClick: !!message.openList && !closed, listHeadingFound: !closed,
+          entryCount: failure === "entriesEmpty" ? 0 : 1, matchingEntryCount: matchingEntries,
+          ariaExpanded: viewClicked ? "true" : "false", ariaPressed: null, triggerClass: viewClicked ? "open" : "closed", triggerFocused: viewClicked,
+          triggerHitTest: { hitClosestButtonMatchesTrigger: failure !== "triggerWrongHit" },
+          expectedTitle: input.title, expectedDateTime: "2099.10.20 14:30", frameId: null, frameUrl: null,
+          reason: failure === "entriesEmpty" ? "예약 목록은 열렸지만 예약 entry를 읽지 못했습니다." : closed ? "예약 목록 열기 버튼을 찾지 못했습니다." : "예약 entry 확인 결과" };
+        return { reservation: { listFound: !closed, matchingEntries, openedList: false, triggerPosition: message.openList && failure !== "triggerWrongHit" ? { x: 444, y: 33 } : undefined, diagnostic } };
+      }
       if (message.type === "EDITOR_SCHEDULE_FINAL_TARGET") return failure.startsWith("final:") ? { error: failure } : { position: { x: 777, y: 55 } };
       if (message.type === "EDITOR_PHOTO_VERIFY") uploadVerified++;
       if (message.type === "EDITOR_VERIFY") return { verification: { titleMatches: true, bodyMatches: true } };
       return { position: { x: message.type === "EDITOR_PHOTO_BUTTON" ? 99 : 10, y: 20 }, imageReady: true };
     } },
-    webNavigation: { getAllFrames: async () => [{ frameId: 2, url: "https://blog.naver.com/PostWriteForm.naver?blogId=fixture_blog&postNo=123" }] },
+    webNavigation: { getAllFrames: async () => failure === "triggerNewFrame" && viewClicked ? [{ frameId: 4, url: "https://section.blog.naver.com/reservations" }] : [{ frameId: 2, url: "https://blog.naver.com/PostWriteForm.naver?blogId=fixture_blog&postNo=123" },
+      ...(["otherFrame", "crossTrigger"].includes(failure) ? [{ frameId: 4, url: "https://section.blog.naver.com/reservations" }] : [])] },
     debugger: { attach: async () => {}, detach: async () => {}, onDetach: { addListener() {}, removeListener() {} },
       onEvent: { addListener: (handler) => handlers.add(handler), removeListener: (handler) => handlers.delete(handler) },
       sendCommand: async (_target, method, params) => {
         commands.push({ method, params });
+        if (method === "Input.dispatchMouseEvent" && params.x === 444) {
+          if (failure === "triggerClickFailed") throw new Error("CDP click rejected");
+          if (params.type === "mouseReleased" && failure !== "triggerNoOpen") viewClicked = true;
+        }
         if (method === "Input.insertText") timeline.push(params.text);
         if (method === "DOM.setFileInputFiles") timeline.push("image upload");
         if (method === "DOM.getDocument") {
@@ -63,6 +85,8 @@ async function scenario(input = task, failure = "", publisher = "legacy", diagno
   vm.runInNewContext(code, { chrome, URL, AbortSignal, fetch: async (url, options) => {
     assert.equal(options.headers.Authorization, "Bearer fixture-secret");
     assert.equal(url.origin, "http://localhost:3000");
+    if (diagnoseOnly === "recheck" && options.method === "GET") return { ok: true, json: async () => ({ ...input, jobId, attemptNo: 1,
+      status: failure === "recheckIneligible" ? "queued" : "inserted", reservationConfirmedAt: null }) };
     if (url.pathname.endsWith("/claim")) {
       timeline.push("claim");
       if (timeline.filter(item => item === "claim").length === 1) assert.equal(commands.length, 0, "claim must precede CDP input");
@@ -73,6 +97,13 @@ async function scenario(input = task, failure = "", publisher = "legacy", diagno
       outcomes.push(JSON.parse(options.body));
       if (failure === "result") return { ok: false, json: async () => ({ error: "fixture result write error" }) };
       return { ok: true, json: async () => ({ applied: true }) };
+    }
+    if (url.pathname.endsWith("/reservation-confirmation")) {
+      timeline.push("confirmation recorded");
+      if (diagnoseOnly !== "recheck") assert.equal(outcomes.at(-1).outcome, "inserted");
+      assert.deepEqual(JSON.parse(options.body), { attemptNo: 1 });
+      return failure === "confirmationApi" ? { ok: false, json: async () => ({ error: "fixture confirmation failure" }) }
+        : { ok: true, json: async () => ({ confirmedAt: "2026-10-16T00:00:00Z" }) };
     }
     if (options.method === "POST") {
       const body = JSON.parse(options.body); downloads.push(body);
@@ -91,7 +122,7 @@ async function scenario(input = task, failure = "", publisher = "legacy", diagno
     return { ok: true, json: async () => ({ ok: true }) };
   }, setTimeout: (fn, ms) => { if ([500, 1500, 3000].includes(ms)) { cleanupDelays.push(ms); return setTimeout(fn, 0); } return setTimeout(fn, ms === 250 ? 0 : failure === "timeout" && ms === 15000 ? 5 : ms); }, clearTimeout, Date,
     console: { info: (...args) => logs.push(args), warn: (...args) => logs.push(args) } });
-  const reply = await new Promise((resolve) => listener({ type: diagnoseOnly ? "DIAGNOSE" : "INSERT", jobId, publisher, task: { title: "untrusted", finalizeMode: "auto" } }, { id: "fixture" }, resolve));
+  const reply = await new Promise((resolve) => listener({ type: diagnoseOnly === "recheck" ? "RESERVATION_RECHECK" : diagnoseOnly ? "DIAGNOSE" : "INSERT", jobId, publisher, task: { title: "untrusted", finalizeMode: "auto" } }, { id: "fixture" }, resolve));
   let nextReply;
   if (["consecutive", "delayedInitialization"].includes(failure)) nextReply = await new Promise(resolve => listener({ type: "INSERT", jobId: "00000000-0000-4000-8000-000000000002", publisher }, { id: "fixture" }, resolve));
   assert.equal(handlers.size, 0); assert.equal(intercepted, false);
@@ -247,7 +278,7 @@ assert.equal(scheduledSuccess.navigations.length, 0);
 assert.equal(success.navigations.length, 0);
 assert.equal(autoSuccess.reply.error, undefined); assert.equal(finalClicks(autoSuccess), 1);
 assert.equal(autoSuccess.outcomes[0].outcome, "inserted");
-assert.match(autoSuccess.reply.message, /予約|예약 발행 등록을 요청/);
+assert.match(autoSuccess.reply.message, /예약 등록을 확인/);
 assert.ok(autoSuccess.timeline.indexOf("EDITOR_BLOCK_VERIFY") < autoSuccess.timeline.indexOf("EDITOR_SCHEDULE"));
 assert.ok(autoSuccess.timeline.indexOf("EDITOR_SCHEDULE") < autoSuccess.timeline.indexOf("EDITOR_SCHEDULE_FINAL_TARGET"));
 for (const failure of ["EDITOR_SCHEDULE", "final:radio", "final:date", "final:hour", "final:minute", "final:past", "final:naverError", "final:missing", "final:disabled"]) {
@@ -268,6 +299,18 @@ assert.equal(manualReview.reply.error, undefined); assert.equal(finalClicks(manu
 assert.equal(manualReview.messages.some(message => message.type === "EDITOR_SCHEDULE"), false);
 const explicitReview = await scenario({ ...scheduledInput, finalizeMode: "review" }, "", "blocks");
 assert.equal(explicitReview.reply.error, undefined); assert.equal(finalClicks(explicitReview), 0);
+assert.equal(explicitReview.messages.some(message => message.type === "EDITOR_RESERVATION_CONFIRMATION"), false);
+assert.equal(manualReview.messages.some(message => message.type === "EDITOR_RESERVATION_CONFIRMATION"), false);
+for (const failure of ["confirmationTimeout", "confirmationAmbiguous", "confirmationApi", "confirmationDelayed", "confirmationAndFresh"]) {
+  const checked = await scenario(autoInput, failure, "blocks");
+  assert.equal(checked.reply.error, undefined);
+  assert.deepEqual(checked.outcomes.map(outcome => outcome.outcome), ["inserted"]);
+  assert.equal(checked.navigations.length, 1);
+  if (failure === "confirmationDelayed") {
+    assert.equal(checked.messages.filter(message => message.type === "EDITOR_RESERVATION_CONFIRMATION").length, 3);
+    assert.match(checked.reply.message, /예약 등록을 확인/);
+  } else assert.match(checked.reply.message, /확인하지 못|기록에 실패/);
+}
 
 for (const failure of ["inactive", "notWritable", "unstable", ""]) {
   const diagnosed = await scenario(task, failure, "legacy", true);
@@ -287,3 +330,48 @@ const unavailable = await scenario(task, "EDITOR_DIAGNOSE", "legacy", true);
 assert.equal(unavailable.reply.error, undefined);
 assert.match(unavailable.reply.diagnostics[0].reason, /fixture failure/);
 console.log("PASS: raw diagnostics survive hidden/unwritable/unstable/missing content replies; stable observation only; INSERT alone gates claim.");
+for (const failure of ["", "triggerMissing", "triggerAmbiguous", "triggerClosed", "triggerDelayed", "triggerNewFrame", "triggerClickFailed", "triggerNoOpen", "triggerWrongHit", "entriesEmpty", "confirmationTimeout", "confirmationAmbiguous", "otherFrame", "crossTrigger"]) {
+  const rechecked = await scenario(autoInput, failure, "blocks", "recheck");
+  assert.equal(rechecked.reply.error, undefined);
+  assert.equal(rechecked.timeline.includes("claim"), false);
+  const trustedTrigger = ["triggerClosed", "triggerDelayed", "triggerNewFrame", "triggerClickFailed", "triggerNoOpen", "triggerWrongHit"].includes(failure);
+  assert.equal(rechecked.commands.length, trustedTrigger ? failure === "triggerWrongHit" ? 0 : failure === "triggerClickFailed" ? 1 : 3 : 0);
+  for (const command of rechecked.commands) {
+    assert.equal(command.method, "Input.dispatchMouseEvent");
+    assert.equal(command.params.x, 444); assert.equal(command.params.y, 33);
+  }
+  if (trustedTrigger && !["triggerClickFailed", "triggerWrongHit"].includes(failure)) assert.deepEqual(rechecked.commands.map(command => command.params.type), ["mouseMoved", "mousePressed", "mouseReleased"]);
+  assert.equal(rechecked.messages.some(message => message.type === "EDITOR_SCHEDULE" || message.type === "EDITOR_SCHEDULE_FINAL_TARGET"), false);
+  if (failure === "triggerClickFailed") assert.equal(rechecked.reply.reservationDiagnostics[0].stage, "LIST_TRIGGER_CLICK_FAILED");
+  if (failure === "triggerWrongHit") assert.equal(rechecked.reply.reservationDiagnostics[0].stage, "LIST_TRIGGER_HIT_TEST_FAILED");
+  if (failure === "triggerNoOpen") assert.equal(rechecked.reply.reservationDiagnostics[0].stage, "LIST_OPEN_TIMEOUT");
+  if (failure === "triggerNewFrame") {
+    const diagnostic = rechecked.reply.reservationDiagnostics.find(item => item.frameId === 4);
+    assert.equal(diagnostic.listVisibleAfterClick, true);
+    assert.equal(diagnostic.clickMode, "trusted-cdp");
+    assert.equal(diagnostic.framesBeforeClick[0].frameId, 2);
+    assert.equal(diagnostic.framesAfterClick[0].frameId, 4);
+  }
+  assert.equal(rechecked.navigations.length, 0);
+  assert.equal(rechecked.outcomes.length, 0);
+  assert.ok(rechecked.reply.reservationDiagnostics.length > 0);
+  assert.equal(rechecked.timeline.includes("confirmation recorded"), ["", "triggerClosed", "triggerDelayed", "triggerNewFrame", "otherFrame"].includes(failure));
+  if (failure === "triggerDelayed") {
+    assert.equal(rechecked.messages.filter(message => message.openList).length, 1);
+    assert.equal(rechecked.messages.filter(message => message.type === "EDITOR_RESERVATION_CONFIRMATION" && !message.openList).length, 3);
+    const diagnostic = rechecked.reply.reservationDiagnostics[0];
+    assert.equal(diagnostic.listTriggerFound, true); assert.equal(diagnostic.listTriggerCount, 1);
+    assert.equal(diagnostic.listTriggerClicked, true); assert.equal(diagnostic.listVisibleAfterClick, true);
+    assert.equal(diagnostic.listHeadingFound, true); assert.equal(diagnostic.matchingEntryCount, 1);
+    assert.equal(diagnostic.ariaExpandedBefore, "false"); assert.equal(diagnostic.ariaExpandedAfter, "true");
+    assert.equal(diagnostic.triggerFocusedAfterClick, true);
+  }
+  if (["triggerMissing", "triggerAmbiguous", "crossTrigger"].includes(failure)) assert.equal(rechecked.messages.some(message => message.openList), false);
+  if (failure === "entriesEmpty") assert.match(rechecked.reply.message, /entry를 읽지 못/);
+  if (failure === "triggerMissing") assert.match(rechecked.reply.message, /열기 버튼을 찾지 못/);
+  if (failure === "otherFrame") assert.ok(rechecked.reply.reservationDiagnostics.some(diagnostic => diagnostic.frameId === 4));
+}
+const rejectedRecheck = await scenario(autoInput, "recheckIneligible", "blocks", "recheck");
+assert.match(rejectedRecheck.reply.error, /입력 완료/);
+assert.equal(rejectedRecheck.messages.length, 0);
+assert.equal(rejectedRecheck.commands.length, 0);

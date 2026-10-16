@@ -173,6 +173,25 @@
     return { x, y, rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
   }
 
+  function reservationTriggerPosition(button: HTMLElement) {
+    let position: EditorTargetPosition | undefined;
+    try { position = targetPosition(button); } catch { /* Report local hit-test even when coordinate conversion is blocked. */ }
+    const rect = button.getBoundingClientRect();
+    const localX = rect.left + rect.width / 2, localY = rect.top + rect.height / 2;
+    const hit = document.elementFromPoint(localX, localY);
+    const hitButton = hit?.closest("button");
+    const details: ReservationTriggerDiagnostic = {
+      hitTag: hit?.tagName ?? null, hitText: hit?.textContent?.trim().slice(0, 80) ?? null,
+      hitClosestButtonText: hitButton?.textContent?.trim().slice(0, 80) ?? null,
+      hitClosestButtonMatchesTrigger: !!position && hitButton === button,
+      triggerRect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      viewportWidth: window.innerWidth, viewportHeight: window.innerHeight, devicePixelRatio: window.devicePixelRatio,
+      topLevel: window === window.top, iframeOffsetRequired: window !== window.top,
+      localX, localY, topX: position?.x ?? null, topY: position?.y ?? null, coordinateSpace: "top-viewport-css-pixels"
+    };
+    return { position: details.hitClosestButtonMatchesTrigger ? position : undefined, details };
+  }
+
   function compareBody(bodyText: string, paragraphs: HTMLElement[]) {
     const normalizeBody = (value: string) => value.replace(/\r/g, "").replace(/\u00a0/g, " ")
       .replace(/[\u200b-\u200d\u2060\ufeff]/g, "").replace(/\s+/g, " ").trim();
@@ -500,6 +519,24 @@
   }
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
+    if (sender.id === chrome.runtime.id && message.type === "EDITOR_RESERVATION_CONFIRMATION") {
+      try {
+        if (!message.task) throw new Error("예약 Job이 없습니다.");
+        let triggerHitTest: ReservationTriggerDiagnostic | undefined;
+        const reservation = NaverSchedule.reservationState(message.task, message.openList, element => {
+          const result = reservationTriggerPosition(element);
+          triggerHitTest = result.details;
+          return result.position!;
+        });
+        if (triggerHitTest) reservation.diagnostic.triggerHitTest = triggerHitTest;
+        if (message.openList && !reservation.triggerPosition && triggerHitTest) {
+          reservation.diagnostic.stage = "LIST_TRIGGER_HIT_TEST_FAILED";
+          reservation.diagnostic.reason = "예약 목록 조회 좌표가 검증한 버튼을 가리키지 않습니다.";
+        }
+        respond({ reservation });
+      } catch { respond({ error: "예약 목록을 확인하지 못했습니다." }); }
+      return;
+    }
     if (sender.id !== chrome.runtime.id || !["EDITOR_TITLE_FOCUS", "EDITOR_SCHEDULE_FINAL_TARGET", "EDITOR_SCHEDULE", "EDITOR_DIAGNOSE", "EDITOR_TARGET", "EDITOR_VERIFY", "EDITOR_PHOTO_TARGET", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY", "EDITOR_PHOTO_UPLOAD_CARET", "EDITOR_PHOTO_BUTTON", "EDITOR_PHOTO_VERIFY", "EDITOR_PHOTO_BODY_VERIFY", "EDITOR_BLOCK_START", "EDITOR_BLOCK_CARET", "EDITOR_BLOCK_TEXT_VERIFY", "EDITOR_BLOCK_VERIFY", "EDITOR_BLOCK_NEXT_TEXT", "EDITOR_BLOCK_IMAGE_TARGET", "EDITOR_BLOCK_TEXT_END"].includes(message.type)) return;
     void (async (): Promise<ExtensionReply> => {
       if (message.type === "EDITOR_TITLE_FOCUS") {

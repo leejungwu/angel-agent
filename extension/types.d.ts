@@ -2,6 +2,7 @@ type ExtensionTask = {
   publishMode?: "manual" | "scheduled";
   finalizeMode?: "review" | "auto";
   scheduledAt?: string | null;
+  reservationConfirmedAt?: string | null;
   jobId?: string; attemptNo?: number;
   id: string | number; draftId: string | number; status: string; title: string; bodyText: string;
   images: { id: string | number; index: number; insertOffset: number; insertPrefix: string; signedUrl: string; expiresIn: number }[];
@@ -29,9 +30,11 @@ type ExtensionMessage = {
   field?: "title" | "body";
   publisher?: "blocks" | "legacy";
   blockNumber?: number; imageNumber?: number;
+  openList?: boolean;
 };
 type ExtensionReply = {
-  jobs?: { id: string; taskId: string | number; draftId: string | number; title: string; imageCount: number; status: string }[];
+  cleanupWarning?: string;
+  jobs?: { id: string; taskId: string | number; draftId: string | number; title: string; imageCount: number; status: string; publishMode?: string; finalizeMode?: string; scheduledAt?: string | null; reservationConfirmedAt?: string | null }[];
   error?: string; tasks?: { id: string | number; draftId?: string | number; title: string; status: string }[]; task?: ExtensionTask;
   diagnostic?: EditorDiagnostic; frameId?: number; message?: string;
   diagnostics?: { frameId: number; diagnostic?: EditorDiagnostic; reason?: string }[];
@@ -39,7 +42,29 @@ type ExtensionReply = {
   imageReady?: boolean;
   needsParagraph?: boolean;
   scheduleReady?: boolean;
+  reservation?: { listFound: boolean; matchingEntries: number; openedList: boolean; diagnostic: ReservationDiagnostic; triggerPosition?: EditorTargetPosition };
+  reservationDiagnostics?: ReservationDiagnostic[];
   verification?: { titleMatches: boolean; bodyMatches: boolean; actualLength: number; expectedLength: number };
+};
+type ReservationTriggerDiagnostic = {
+  hitTag: string | null; hitText: string | null; hitClosestButtonText: string | null; hitClosestButtonMatchesTrigger: boolean;
+  triggerRect: { x: number; y: number; width: number; height: number };
+  viewportWidth: number; viewportHeight: number; devicePixelRatio: number;
+  topLevel: boolean; iframeOffsetRequired: boolean; localX: number; localY: number;
+  topX: number | null; topY: number | null; coordinateSpace: "top-viewport-css-pixels";
+};
+type ReservationDiagnostic = {
+  stage: string; listAlreadyVisible: boolean; listTriggerFound: boolean; listTriggerCount: number; listTriggerClicked: boolean;
+  listVisibleAfterClick: boolean; listHeadingFound: boolean; entryCount: number; matchingEntryCount: number;
+  expectedTitle: string; expectedDateTime: string; frameId: number | null; frameUrl: string | null; reason: string;
+  listTriggerCandidates?: { tag: string; name: string; role: string | null; testId: string | null; visible: boolean; allowed: boolean }[];
+  triggerHitTest?: ReservationTriggerDiagnostic;
+  ariaExpanded?: string | null; ariaPressed?: string | null; triggerClass?: string | null; triggerFocused?: boolean | null;
+  ariaExpandedBefore?: string | null; ariaExpandedAfter?: string | null;
+  ariaPressedBefore?: string | null; ariaPressedAfter?: string | null;
+  triggerClassBefore?: string | null; triggerClassAfter?: string | null; triggerFocusedAfterClick?: boolean | null;
+  clickMode?: "trusted-cdp"; triggerX?: number | null; triggerY?: number | null;
+  framesBeforeClick?: { frameId: number; url: string }[]; framesAfterClick?: { frameId: number; url: string }[];
 };
 declare const chrome: {
   debugger: {

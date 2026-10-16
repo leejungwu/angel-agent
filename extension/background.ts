@@ -68,14 +68,7 @@
     }
   }
 
-  async function prepareFreshEditor(tabId: number, previous: { frameId: number; url: string }) {
-    const url = new URL(previous.url);
-    const blogId = url.searchParams.get("blogId");
-    if (url.origin !== "https://blog.naver.com" || !/^\/(?:PostWriteForm\.naver|postwrite\/?$)/i.test(url.pathname) ||
-      !blogId || !/^[A-Za-z0-9_-]{1,100}$/.test(blogId)) throw new Error("새 글쓰기 URL 확인 실패");
-    // Reuse the known write route, but never carry draft/post identifiers into a fresh editor.
-    const fresh = new URL(url.pathname, url.origin);
-    fresh.searchParams.set("blogId", blogId);
+  async function waitForScheduleTransition(tabId: number, previous: { frameId: number; url: string }) {
     await new Promise(resolve => setTimeout(resolve, 1500));
     let transitioned = false;
     for (let attempt = 0; attempt < 30; attempt++) {
@@ -90,9 +83,143 @@
       await new Promise(resolve => setTimeout(resolve, 500));
     }
     if (!transitioned) throw new Error("예약 화면 전환 대기 timeout");
+  }
+
+  function isNaverUrl(value: string) {
+    try { const url = new URL(value); return url.protocol === "https:" && (url.hostname === "naver.com" || url.hostname.endsWith(".naver.com")); }
+    catch { return false; }
+  }
+  function reservationDiagnostic(task: ExtensionTask, stage: string, reason: string, frame?: { frameId: number; url: string }): ReservationDiagnostic {
+    const url = frame ? new URL(frame.url) : null;
+    return { stage, reason, listAlreadyVisible: false, listTriggerFound: false, listTriggerCount: 0, listTriggerClicked: false,
+      listVisibleAfterClick: false, listHeadingFound: false, entryCount: 0, matchingEntryCount: 0,
+      expectedTitle: task.title, expectedDateTime: task.scheduledAt ? NaverSchedule.reservationTime(task.scheduledAt) : "",
+      clickMode: "trusted-cdp", triggerX: null, triggerY: null, framesBeforeClick: [], framesAfterClick: [],
+      frameId: frame?.frameId ?? null, frameUrl: url ? `${url.origin}${url.pathname}` : null };
+  }
+  async function confirmReservation(tabId: number, task: ExtensionTask) {
+    let diagnostics: ReservationDiagnostic[] = [];
+    let clickedFrame: number | undefined;
+    let triggerAttempted = false;
+    let triggerError: ReservationDiagnostic | undefined;
+    let triggerPosition: EditorTargetPosition | undefined;
+    let triggerBefore: ReservationDiagnostic | undefined;
+    let triggerAfter: ReservationDiagnostic | undefined;
+    let framesBeforeClick: { frameId: number; url: string }[] = [];
+    const frameSummary = (frames: { frameId: number; url: string }[]) => frames.map(frame => ({ frameId: frame.frameId, url: new URL(frame.url).origin + new URL(frame.url).pathname }));
+    const initialVisibility = new Map<number, boolean>();
+    const deadline = Date.now() + 10000;
+    for (let poll = 0; poll < 20 && Date.now() < deadline; poll++) {
+      let active: { id?: number; url?: string } | undefined;
+      let frames: { frameId: number; url: string }[];
+      try {
+        [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+        frames = (await chrome.webNavigation.getAllFrames({ tabId }) ?? []).filter(frame => isNaverUrl(frame.url));
+      } catch { return { outcome: "unconfirmed", diagnostics: [reservationDiagnostic(task, "FRAME_SCAN_FAILED", "현재 Naver 탭/frame 조회에 실패했습니다.")] }; }
+      if (active?.id !== tabId || !active.url || !isNaverUrl(active.url)) return { outcome: "unconfirmed",
+        diagnostics: [reservationDiagnostic(task, "NAVER_TAB", "예약 목록을 확인할 Naver 탭으로 전환해 주세요.")] };
+      const observations: { frame: { frameId: number; url: string }; state?: ExtensionReply["reservation"]; diagnostic: ReservationDiagnostic }[] = [];
+      for (const frame of frames) {
+        try {
+          const reply = await chrome.tabs.sendMessage(tabId, { type: "EDITOR_RESERVATION_CONFIRMATION", task, openList: false }, { frameId: frame.frameId });
+          const diagnostic = { ...reservationDiagnostic(task, "FRAME_RESPONSE", reply.error ?? "예약 목록 진단 응답 없음", frame), ...reply.reservation?.diagnostic,
+            frameId: frame.frameId, frameUrl: new URL(frame.url).origin + new URL(frame.url).pathname };
+          observations.push({ frame, state: reply.reservation, diagnostic });
+        } catch { observations.push({ frame, diagnostic: reservationDiagnostic(task, "FRAME_UNAVAILABLE", "frame의 content script에 접근하지 못했습니다. 확장과 Naver 탭을 새로고침하세요.", frame) }); }
+      }
+      const triggerCount = observations.reduce((sum, observation) => sum + observation.diagnostic.listTriggerCount, 0);
+      const alreadyVisible = observations.some(observation => observation.state?.listFound);
+      for (const observation of observations) if (!initialVisibility.has(observation.frame.frameId)) initialVisibility.set(observation.frame.frameId, clickedFrame === undefined && !!observation.state?.listFound);
+      if (!alreadyVisible && !triggerAttempted && triggerCount === 1) {
+        const target = observations.find(observation => observation.diagnostic.listTriggerCount === 1)!;
+        triggerAttempted = true;
+        framesBeforeClick = frameSummary(frames);
+        let attached = false;
+        try {
+          await chrome.debugger.attach({ tabId }, "1.3");
+          attached = true;
+          const reply = await chrome.tabs.sendMessage(tabId, { type: "EDITOR_RESERVATION_CONFIRMATION", task, openList: true }, { frameId: target.frame.frameId });
+          triggerBefore = reply.reservation?.diagnostic;
+          if (triggerBefore?.stage === "LIST_TRIGGER_HIT_TEST_FAILED") {
+            triggerError = { ...target.diagnostic, stage: triggerBefore.stage, reason: triggerBefore.reason };
+            throw new Error();
+          }
+          if (!reply.reservation?.triggerPosition || reply.reservation.diagnostic.listTriggerCount !== 1 || reply.reservation.listFound) throw new Error();
+          triggerPosition = reply.reservation.triggerPosition;
+          const { x, y } = triggerPosition;
+          if (!triggerBefore?.triggerHitTest?.hitClosestButtonMatchesTrigger) {
+            triggerError = { ...target.diagnostic, stage: "LIST_TRIGGER_HIT_TEST_FAILED", reason: "예약 목록 조회 버튼의 hit-test를 확인하지 못했습니다." };
+            throw new Error();
+          }
+          if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) throw new Error();
+          const [current] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (current?.id !== tabId || !current.url || !isNaverUrl(current.url)) throw new Error();
+          await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none", buttons: 0 });
+          await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+          await chrome.debugger.sendCommand({ tabId }, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
+          clickedFrame = target.frame.frameId;
+          await new Promise(resolve => setTimeout(resolve, 200));
+          try {
+            const after = await chrome.tabs.sendMessage(tabId, { type: "EDITOR_RESERVATION_CONFIRMATION", task, openList: false }, { frameId: target.frame.frameId });
+            triggerAfter = after.reservation?.diagnostic;
+          } catch { /* Frame replacement is handled by the next all-frame scan. */ }
+        } catch { triggerError ??= { ...target.diagnostic, stage: "LIST_TRIGGER_CLICK_FAILED", reason: "예약 목록 조회 버튼의 trusted CDP 클릭에 실패했습니다. 재클릭하지 않았습니다." }; }
+        finally {
+          if (attached) try { await chrome.debugger.detach({ tabId }); }
+          catch { triggerError = { ...target.diagnostic, stage: "LIST_TRIGGER_CLICK_FAILED", reason: "예약 목록 조회 후 debugger 연결 해제를 확인하지 못했습니다." }; }
+        }
+      }
+      diagnostics = observations.map(observation => {
+        return { ...observation.diagnostic, listAlreadyVisible: initialVisibility.get(observation.frame.frameId)!,
+          listTriggerFound: observation.diagnostic.listTriggerFound || clickedFrame !== undefined,
+          listTriggerCount: clickedFrame !== undefined ? Math.max(1, observation.diagnostic.listTriggerCount) : observation.diagnostic.listTriggerCount,
+          listTriggerClicked: clickedFrame !== undefined, listVisibleAfterClick: clickedFrame !== undefined && !!observation.state?.listFound,
+          triggerHitTest: triggerBefore?.triggerHitTest,
+          ariaExpandedBefore: triggerBefore?.ariaExpanded ?? null, ariaExpandedAfter: triggerAfter?.ariaExpanded ?? null,
+          ariaPressedBefore: triggerBefore?.ariaPressed ?? null, ariaPressedAfter: triggerAfter?.ariaPressed ?? null,
+          triggerClassBefore: triggerBefore?.triggerClass ?? null, triggerClassAfter: triggerAfter?.triggerClass ?? null,
+          triggerFocusedAfterClick: triggerAfter?.triggerFocused ?? null,
+          clickMode: "trusted-cdp" as const, triggerX: triggerPosition?.x ?? null, triggerY: triggerPosition?.y ?? null,
+          framesBeforeClick, framesAfterClick: clickedFrame !== undefined ? frameSummary(frames) : [] };
+      });
+      if (triggerError && !observations.some(observation => observation.state?.listFound)) diagnostics = diagnostics.map(diagnostic =>
+        diagnostic.frameId === triggerError!.frameId ? { ...diagnostic, stage: triggerError!.stage, reason: triggerError!.reason } : diagnostic);
+      if (!diagnostics.length) diagnostics = [reservationDiagnostic(task, "FRAMES_MISSING", "현재 탭에서 Naver frame을 찾지 못했습니다.")];
+      const matches = observations.reduce((sum, observation) => sum + (observation.state?.listFound ? observation.state.matchingEntries : 0), 0);
+      if (matches > 1) return { outcome: "unconfirmed", diagnostics: diagnostics.map(diagnostic => ({ ...diagnostic,
+        stage: "MATCH_AMBIGUOUS", reason: `Naver frame 전체에서 동일 제목·예약시간 entry ${matches}개를 찾아 확정하지 않았습니다.` })) };
+      if (!alreadyVisible && triggerCount > 1 && clickedFrame === undefined) return { outcome: "unconfirmed", diagnostics: diagnostics.map(diagnostic => ({ ...diagnostic,
+        stage: "LIST_TRIGGER_AMBIGUOUS", reason: `Naver frame 전체에서 조회 버튼 후보 ${triggerCount}개를 찾아 클릭하지 않았습니다.` })) };
+      if (matches === 1) {
+        try {
+          const result = await api(`/api/extension/publication-jobs/${task.jobId}/reservation-confirmation`, "POST", { attemptNo: task.attemptNo });
+          if (typeof result.confirmedAt !== "string" || !Number.isFinite(Date.parse(result.confirmedAt))) throw new Error();
+          return { outcome: "confirmed", diagnostics };
+        } catch { return { outcome: "record_failed", diagnostics: diagnostics.map(diagnostic => ({ ...diagnostic, stage: "CONFIRMATION_API", reason: "예약 목록은 확인했지만 서버 기록에 실패했습니다." })) }; }
+      }
+      if (poll < 19) await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    return { outcome: "unconfirmed", diagnostics: diagnostics.map(diagnostic => diagnostic.listTriggerClicked && !diagnostic.listVisibleAfterClick
+      ? { ...diagnostic, stage: "LIST_OPEN_TIMEOUT", reason: "조회 버튼 클릭 후 예약 목록이 표시되지 않았습니다." } : diagnostic) };
+  }
+
+  async function prepareFreshEditor(tabId: number, previous: { frameId: number; url: string }, transitionObserved = false) {
+    const url = new URL(previous.url);
+    const blogId = url.searchParams.get("blogId");
+    if (url.origin !== "https://blog.naver.com" || !/^\/(?:PostWriteForm\.naver|postwrite\/?$)/i.test(url.pathname) ||
+      !blogId || !/^[A-Za-z0-9_-]{1,100}$/.test(blogId)) throw new Error("새 글쓰기 URL 확인 실패");
+    // Reuse the known write route, but never carry draft/post identifiers into a fresh editor.
+    const fresh = new URL(url.pathname, url.origin);
+    fresh.searchParams.set("blogId", blogId);
+    if (!transitionObserved) await waitForScheduleTransition(tabId, previous);
     await assertCurrentTab(tabId);
     await chrome.tabs.update(tabId, { url: fresh.href });
     await stableEditor(true, 120, tabId);
+  }
+
+  function reservationFailure(diagnostics: ReservationDiagnostic[]) {
+    return (diagnostics.find(diagnostic => diagnostic.listHeadingFound || diagnostic.listTriggerClicked || diagnostic.listTriggerFound)
+      ?? diagnostics.find(diagnostic => diagnostic.stage !== "FRAME_UNAVAILABLE") ?? diagnostics[0])?.reason ?? "예약 목록 frame을 확인하지 못했습니다.";
   }
 
   async function insertWithDebugger(tabId: number, frameId: number, task: ExtensionTask, overwrite: boolean, publisher: "blocks" | "legacy" = "legacy") {
@@ -384,7 +511,7 @@
       const blockDiagnostic = publisher === "blocks" && imageBlockNumber ? ` (image block ${imageBlockNumber}/${task.images.length})` : "";
       throw new Error(`${stage}${blockDiagnostic}: ${reason}${detachReason}${cleanupWarning} 일부 입력되었을 수 있으니 직접 확인하세요.`);
     }
-    return { message: task.publishMode === "scheduled"
+    return { cleanupWarning, message: task.publishMode === "scheduled"
       ? task.finalizeMode === "auto" ? `네이버 예약 발행 등록을 요청했습니다. 예약 목록에서 최종 상태를 확인해 주세요.${cleanupWarning}`
         : `네이버 입력 및 예약 설정이 완료되었습니다. 최종 발행 버튼을 확인 후 눌러주세요.${cleanupWarning}`
       : `입력 완료 - 네이버에서 직접 확인 후 발행하세요${cleanupWarning}` };
@@ -397,6 +524,24 @@
     void (async (): Promise<ExtensionReply> => {
       switch (message.type) {
         case "JOBS": return { jobs: (await api("/api/extension/publication-jobs")).jobs };
+        case "RECHECK_JOBS": return { jobs: (await api("/api/extension/publication-jobs?confirmation=needed")).jobs };
+        case "RESERVATION_RECHECK": {
+          if (!message.jobId || !jobIdPattern.test(message.jobId)) throw new Error("재확인할 Job을 선택하세요.");
+          if (jobRunning) throw new Error("Job 작업이 이미 진행 중입니다.");
+          jobRunning = true;
+          try {
+            // Read-only snapshot refresh. Never claim, attach debugger, insert, navigate or publish in this path.
+            const task: ExtensionTask = await api(`/api/extension/publication-jobs/${message.jobId}`);
+            if (task.jobId !== message.jobId || task.status !== "inserted" || task.publishMode !== "scheduled" || task.finalizeMode !== "auto" ||
+              !task.scheduledAt || task.reservationConfirmedAt != null || !Number.isSafeInteger(task.attemptNo) || (task.attemptNo ?? 0) < 1) throw new Error("예약 확인이 필요한 입력 완료 자동 예약 Job만 재확인할 수 있습니다.");
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tab?.id || !tab.url || !isNaverUrl(tab.url)) return { message: "예약 목록을 볼 Naver 탭을 열어 주세요.",
+              reservationDiagnostics: [reservationDiagnostic(task, "NAVER_TAB", "현재 활성 탭이 Naver가 아닙니다.")] };
+            const checked = await confirmReservation(tab.id, task);
+            return { message: checked.outcome === "confirmed" ? "예약 등록을 확인하고 기록했습니다." : `예약 등록 자동 확인 실패: ${reservationFailure(checked.diagnostics)}`,
+              reservationDiagnostics: checked.diagnostics };
+          } finally { jobRunning = false; }
+        }
         case "JOB":
           if (!message.id || !jobIdPattern.test(message.id)) throw new Error("Job ID를 확인해 주세요.");
           return { task: await api(`/api/extension/publication-jobs/${message.id}`) };
@@ -459,12 +604,22 @@
           try { await record("inserted"); }
           catch { return { message: `${reply.message} JOB_RESULT: 입력은 완료됐지만 상태 기록을 확인하지 못했습니다. 재입력하지 말고 대기열과 네이버를 직접 확인하세요.` }; }
           if (task.publishMode === "scheduled" && task.finalizeMode === "auto") {
+            let transitionObserved = false;
+            let confirmation = { outcome: "unconfirmed", diagnostics: [reservationDiagnostic(task, "NAVER_TRANSITION", "최종 클릭 후 Naver 전환을 확인하지 못했습니다.")] };
             try {
-              await prepareFreshEditor(editor.tabId, target);
+              await waitForScheduleTransition(editor.tabId, target);
+              transitionObserved = true;
+              confirmation = await confirmReservation(editor.tabId, task);
+            } catch { /* Final click already completed; keep inserted and still try fresh-editor preparation. */ }
+            const confirmationMessage = confirmation.outcome === "confirmed" ? "예약 등록을 확인했습니다." : confirmation.outcome === "record_failed"
+              ? "예약 목록에서는 확인했지만 서버 확인 기록에 실패했습니다. 대기열에서 확인해 주세요."
+              : `예약 등록 요청은 완료했지만 자동 확인하지 못했습니다. 예약 등록 자동 확인 실패: ${reservationFailure(confirmation.diagnostics)}`;
+            try {
+              await prepareFreshEditor(editor.tabId, target, transitionObserved);
               freshEditorRequired = false;
-              return { message: `${reply.message} 다음 글쓰기 화면을 준비했습니다.` };
+              return { message: `${confirmationMessage} 다음 글쓰기 화면을 준비했습니다.${reply.cleanupWarning ?? ""}`, reservationDiagnostics: confirmation.diagnostics };
             } catch {
-              return { message: `${reply.message} 예약 등록 요청은 완료했지만 다음 글쓰기 화면을 자동으로 준비하지 못했습니다. 새 글쓰기를 직접 열어 주세요. 이 Job을 재실행하지 마세요.` };
+              return { message: `${confirmationMessage} 다음 글쓰기 화면을 자동으로 준비하지 못했습니다. 새 글쓰기를 직접 열어 주세요. 이 Job을 재실행하지 마세요.${reply.cleanupWarning ?? ""}`, reservationDiagnostics: confirmation.diagnostics };
             }
           }
           return reply;

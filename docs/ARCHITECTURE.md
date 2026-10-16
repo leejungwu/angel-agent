@@ -188,6 +188,8 @@ approved draft + 현재 Task 사진 → 웹 Queue 등록 시 execution_snapshot 
   → scheduled+auto는 safety validation 후 최종 예약 등록 버튼 CDP 클릭
   → 임시 파일 정리·debugger detach
   → 해당 attempt의 inserted 또는 failed 기록
+  → scheduled+auto는 Naver 전환 대기·예약 목록 확인·확인 timestamp 기록 시도
+  → scheduled+auto는 확인 결과와 독립적으로 fresh editor 준비
   → review는 사용자 검수·최종 발행 / scheduled+auto도 성공 시 inserted 유지
 ```
 
@@ -218,13 +220,15 @@ Extension 목록·상세·claim 응답은 `publishMode`와 `scheduledAt`을 전�
 review는 최종 버튼을 누르지 않는다. scheduled+auto만 예약 상태·미래 시간·Naver 오류·최종 버튼 유일성/표시/활성 상태를 재검증한다.
 content script는 `[data-testid="seOnePublishBtn"]`의 검증된 좌표만 반환하고 background가 CDP trusted 클릭 1회를 보낸다. 상단 `tpb.publish` trigger와 구분하며 최종 클릭을 재시도하지 않는다.
 scheduled+auto는 실제 Chrome/Naver에서 V3 입력, 예약 날짜/시간 설정, 안전 검증, 최종 버튼 자동 클릭 후 예약 발행 글 목록 등록까지 사용자 검증을 완료했다.
-예약 등록 성공을 확인하는 DOM/URL 신호는 아직 없으므로 클릭 후에도 inserted만 기록하고 예약 목록에서 확인하도록 안내한다. 자동으로 published 처리하지 않는다.
+scheduled+auto는 최종 클릭 후 inserted를 기록하고 Naver 전환을 기다린 다음 예약 목록 확인을 시도한다. 활성 Naver 탭의 모든 naver.com frame에서 publishLayer 밖 portal을 포함해 “예약 발행 글” 목록을 찾는다. 개별 LI의 BUTTON 안 제목과 KST 예약 날짜·시간이 정확히 일치하는 entry가 하나일 때만 예약 등록을 확인한다. 목록이 없으면 frame 전체에서 유일한 “예약 발행 N건” BUTTON만 조회 목적으로 클릭하며 예약 entry·수정·삭제·최종 발행 버튼은 누르지 않는다. content script는 검증된 조회 버튼의 좌표만 반환하고 background가 trusted CDP 클릭을 한 번 수행한다. 매 poll마다 현재 frame 목록을 다시 조회해 새 frame이나 portal의 heading과 목록을 확인한 뒤 matcher를 실행한다. 500ms 간격으로 최대 약 10초 확인하고, 0개·중복·timeout은 미확인으로 남긴다. 조회 버튼·목록 heading·entry 수·매칭 수·실패 단계와 frame 경로는 내부 응답에 구조화해 유지하며 사용자 UI와 원문 DOM에는 표시하지 않는다.
+`POST /api/extension/publication-jobs/[id]/reservation-confirmation`은 기존 Extension 인증과 현재 attempt_no, inserted/scheduled/auto, scheduled_at을 검사한다. `reservation_confirmed_at`만 서버 시각으로 조건부 기록하며 재요청은 idempotent하다. 이 nullable 값은 예약 목록 등록 확인 시각이며 실제 공개 완료를 뜻하는 published_at/published_url과 다르다. content snapshot과 status는 변경하지 않는다. 예약 확인 값과 진단은 사용자 화면에 표시하지 않는다. Queue는 scheduled+auto의 inserted_at을 “예약 등록 요청 완료”로 표시하며 published_at이 없으면 발행 완료 행을 숨긴다.
+Side Panel은 Publication Job 선택·입력과 DOM 진단만 노출한다. 예약 확인 목록·재확인 버튼·confirmation 진단 UI는 제공하지 않는다. 내부 recheck API와 matcher, reservation_confirmed_at은 유지한다.
 Extension은 claim 전에 active/visible/writable/stable editor preflight를 수행한다. document 로드 완료, SmartEditor 제목·본문 target의 표시·크기·비활성 상태, 상위 iframe의 화면 노출·가림 상태와 실제 화면 안에 열린 발행 패널/모달을 검사한다. Naver target wrapper 자체의 contenteditable은 필수 조건이 아니며, 편집 host를 찾지 못해도 기존 trusted 입력 target을 후보로 인정한다. 일반 role=dialog와 평상시에도 표시되는 publishLayer root만으로 발행 패널이 열렸다고 판단하지 않는다. root 내부의 즉시/예약 radio 또는 최종 발행 버튼이 실제 화면에 보일 때 열린 상태로 판정한다. 같은 document·제목·본문과 frame이 250ms 간격으로 3회 연속 준비 상태를 유지해야 claim한다. 숨겨진 잔여 editor나 초기화 중인 editor는 claim하지 않는다. 제목 클릭 후 실제 focus/selection을 확인하고 한 번만 입력하며, 제목 DOM 반영을 최대 2초 polling한다.
-scheduled+auto는 inserted 기록 후 예약 패널/활성 editor 또는 frame URL의 전환을 기다린다. 기존 글쓰기 frame URL의 blogId로 새 글쓰기를 열고 빈 활성 editor 준비를 확인한다. 이 후처리 실패는 inserted를 failed로 바꾸지 않으며 직접 새 글쓰기를 열도록 안내한다. 복귀 성공은 예약 등록 성공의 증거가 아니며 다음 Job은 사용자가 별도로 실행한다. review와 manual은 자동 이동하지 않는다.
+예약 목록 확인 시도 뒤에는 기존 글쓰기 frame URL의 blogId로 새 글쓰기를 열고 빈 활성 editor 준비를 확인한다. 예약 확인/서버 기록 실패와 fresh editor 실패는 독립적인 후처리이며 어느 쪽도 inserted를 failed로 바꾸지 않는다. 사용자에게는 예약 등록 요청 완료와 다음 글쓰기 준비 결과만 안내한다. 복귀 성공은 예약 등록 성공의 증거가 아니며 다음 Job은 사용자가 별도로 실행한다. review와 manual은 예약 자동 확인과 자동 이동을 하지 않는다.
 Side Panel은 입력 성공 후 Job 목록을 자동 재조회해 실행이 끝난 Job을 제거하고 결과 메시지는 유지한다. 다음 실행에는 남은 Job을 다시 선택해야 한다.
 동일 Chrome/Naver 세션에서 scheduled+auto Job 2건의 연속 예약 등록을 사용자 실검증했다. 첫 Job 이후 새 빈 글쓰기 자동 복귀·목록 갱신·ready/baseReady/stableEditor 확인과 다음 Job의 제목 검증·예약 등록까지 통과했으며, 중간에 사용자가 글쓰기 화면을 다시 열 필요가 없었다.
 상세에서 승인된 Draft를 등록하고 queued Job만 제거할 수 있다.
-Extension 입력 성공은 Job을 inserted로 기록한다. scheduled-auto도 실제 예약 등록 성공이나 공개 여부를 자동 판정하지 않으며 published로 변경하지 않는다.
+Extension 입력 성공은 Job을 inserted로 기록한다. scheduled+auto의 예약 목록 일치는 reservation_confirmed_at으로만 기록하고 실제 공개 여부를 자동 판정하거나 published로 변경하지 않는다.
 
 ## Extension의 역할 구분
 

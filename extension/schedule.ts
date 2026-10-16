@@ -167,5 +167,93 @@ const NaverSchedule = (() => {
       return { scheduleReady: true };
     } catch (error) { throw new Error(`${stage}: ${error instanceof Error ? error.message : "예약 설정 실패"}`); }
   }
-  return { target, label, configure, finalizeMode, finalTarget };
+  function reservationTime(value: string) {
+    const p = parts(value);
+    return `${p.year}.${pad(p.month)}.${pad(p.day)} ${pad(p.hour)}:${pad(p.minute)}`;
+  }
+  function reservationState(task: ScheduleTask & { title: string }, openList = false, positionForTrigger?: (element: HTMLElement) => EditorTargetPosition): NonNullable<ExtensionReply["reservation"]> {
+    const diagnostic: ReservationDiagnostic = { stage: "ELIGIBILITY", listAlreadyVisible: false, listTriggerFound: false, listTriggerCount: 0,
+      listTriggerClicked: false, listVisibleAfterClick: false, listHeadingFound: false, entryCount: 0, matchingEntryCount: 0,
+      expectedTitle: task.title, expectedDateTime: "", frameId: null,
+      frameUrl: typeof location === "undefined" ? null : `${location.origin}${location.pathname}`, reason: "자동 예약 Job이 아닙니다." };
+    const empty = { listFound: false, matchingEntries: 0, openedList: false, diagnostic };
+    if (task.publishMode !== "scheduled" || task.finalizeMode !== "auto" || !task.scheduledAt) return empty;
+    const expectedTime = reservationTime(task.scheduledAt);
+    diagnostic.expectedDateTime = expectedTime;
+    const normalize = (text: string) => text.replace(/[\u200b-\u200d\ufeff]/g, "").replace(/\s+/g, " ").trim();
+    const shown = (element: Element) => {
+      for (let node: Element | null = element; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (node.hasAttribute("hidden") || node.getAttribute("aria-hidden") === "true" || style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.opacity === "0") return false;
+      }
+      return [...element.getClientRects()].some(rect => rect.width > 0 && rect.height > 0);
+    };
+    const isHeading = (element: Element) => /^예약\s*발행\s*글(?:\s*총\s*\d+\s*개)?$/.test(normalize(element.textContent ?? "")) && !element.closest("li");
+    const lists = new Set<Element>();
+    // Reservation views may be portals or another Naver document, outside the editor's publishLayer.
+    const headings = [...document.querySelectorAll<HTMLElement>('h1,h2,h3,h4,[role="heading"],span,div,p,button')]
+        .filter(element => shown(element) && isHeading(element) && ![...element.children].some(isHeading));
+    diagnostic.listHeadingFound = headings.length > 0;
+    for (const heading of headings) {
+        for (let container = heading.parentElement; container; container = container.parentElement) {
+          const candidates = [...container.querySelectorAll('ul,ol,[role="list"]')].filter(shown);
+          if (candidates.length === 1) { lists.add(candidates[0]); break; }
+          if (candidates.length > 1 || container.matches("body,html")) break;
+        }
+    }
+    const triggerName = /^예약\s*발행\s*\d+\s*건$/;
+    const findButtons = () => [...document.querySelectorAll<HTMLElement>('button,[role="button"]')].filter(button =>
+      button.tagName === "BUTTON" && shown(button) && !button.closest("li") && !button.matches(':disabled,[aria-disabled="true"],[type="submit"],[role="radio"]') &&
+      !button.closest('[data-testid="seOnePublishBtn"],[data-click-area="tpb.publish"],[data-testid="preTimeRadioBtn"],[data-testid="nowTimeRadioBtn"]') &&
+      [button.getAttribute("aria-label"), button.getAttribute("title"), button.textContent].some(name => !!name && triggerName.test(normalize(name))));
+    const buttons = findButtons();
+    const trigger = buttons.length === 1 ? buttons[0] : null;
+    diagnostic.ariaExpanded = trigger?.getAttribute("aria-expanded") ?? null;
+    diagnostic.ariaPressed = trigger?.getAttribute("aria-pressed") ?? null;
+    diagnostic.triggerClass = trigger?.getAttribute("class") ?? null;
+    diagnostic.triggerFocused = trigger ? trigger.contains(document.activeElement) : null;
+    diagnostic.listAlreadyVisible = lists.size > 0;
+    diagnostic.listTriggerCount = buttons.length;
+    diagnostic.listTriggerFound = buttons.length > 0;
+    diagnostic.listTriggerCandidates = [...document.querySelectorAll<HTMLElement>('button,[role="button"],a,[role="tab"]')]
+      .filter(element => !element.closest("li") && /예약/.test(`${element.getAttribute("aria-label") ?? ""} ${element.getAttribute("title") ?? ""} ${element.textContent ?? ""}`))
+      .slice(0, 8).map(element => ({ tag: element.tagName, name: normalize(element.getAttribute("aria-label") || element.getAttribute("title") || element.textContent || "").slice(0, 80),
+        role: element.getAttribute("role"), testId: element.getAttribute("data-testid"), visible: shown(element), allowed: buttons.includes(element) }));
+    if (!lists.size && openList && buttons.length === 1) {
+        // Authorize coordinates only. Background owns the one trusted click; content never clicks this trigger.
+        const triggerPosition = positionForTrigger?.(buttons[0]);
+        const current = findButtons();
+        if (current.length !== 1 || current[0] !== buttons[0]) throw new Error("예약 목록 조회 버튼이 변경되었습니다.");
+        return { ...empty, triggerPosition, diagnostic: { ...diagnostic, stage: "LIST_TRIGGER_TARGET", clickMode: "trusted-cdp",
+          triggerX: triggerPosition?.x ?? null, triggerY: triggerPosition?.y ?? null, reason: "예약 목록 조회 버튼의 trusted 클릭 좌표를 확인했습니다." } };
+    }
+    let matchingEntries = 0;
+    for (const list of lists) {
+      for (const entry of list.querySelectorAll("li")) {
+        if (!shown(entry) || entry.querySelectorAll("li").length) continue;
+        diagnostic.entryCount++;
+        const buttons = [...entry.querySelectorAll("button")].filter(button => button.closest("li") === entry && shown(button));
+        if (buttons.length !== 1) continue;
+        const text = normalize(buttons[0].textContent ?? "");
+        const dates = [...text.matchAll(/\b(\d{4})\s*\.\s*(\d{1,2})\s*\.\s*(\d{1,2})\s+(\d{1,2}):(\d{2})(?!\d)/g)];
+        if (dates.length !== 1) continue;
+        const date = dates[0];
+        const actualTime = `${date[1]}.${pad(Number(date[2]))}.${pad(Number(date[3]))} ${pad(Number(date[4]))}:${date[5]}`;
+        const actualTitle = normalize(text.slice(0, date.index) + text.slice(date.index! + date[0].length));
+        if (actualTitle === normalize(task.title) && actualTime === expectedTime) matchingEntries++;
+      }
+    }
+    diagnostic.matchingEntryCount = matchingEntries;
+    diagnostic.stage = !lists.size ? buttons.length === 0 ? "LIST_TRIGGER_MISSING" : buttons.length > 1 ? "LIST_TRIGGER_AMBIGUOUS" : "LIST_CLOSED"
+      : diagnostic.entryCount === 0 ? "ENTRIES_EMPTY" : matchingEntries === 1 ? "MATCHED" : matchingEntries > 1 ? "MATCH_AMBIGUOUS" : "MATCH_MISSING";
+    diagnostic.reason = !lists.size ? buttons.length === 0 ? "예약 목록 열기 버튼을 찾지 못했습니다." : buttons.length > 1 ? "예약 목록 열기 버튼 후보가 여러 개입니다." : "예약 목록이 아직 열리지 않았습니다."
+      : diagnostic.entryCount === 0 ? "예약 목록은 열렸지만 예약 entry를 읽지 못했습니다." : matchingEntries === 1 ? "동일 entry의 제목과 예약시간을 확인했습니다."
+        : matchingEntries > 1 ? "동일 제목·예약시간 entry가 여러 개라 확정하지 않았습니다." : "예약 목록에서 동일 제목·예약시간 entry를 찾지 못했습니다.";
+    if (!lists.size && headings.length > 0 && buttons.length === 0) {
+      diagnostic.stage = "LIST_CONTAINER_MISSING";
+      diagnostic.reason = "예약 목록 제목은 찾았지만 entry 컨테이너를 확정하지 못했습니다.";
+    }
+    return { listFound: lists.size > 0, matchingEntries, openedList: false, diagnostic };
+  }
+  return { target, label, configure, finalizeMode, finalTarget, reservationState, reservationTime };
 })();

@@ -22,6 +22,19 @@ export async function listExtensionPublicationJobs() {
   });
 }
 
+export async function listReservationRechecks() {
+  const { data, error } = await supabase.from("blog_publication_jobs")
+    .select("id,blog_task_id,blog_draft_id,execution_snapshot,status,publish_mode,finalize_mode,scheduled_at,reservation_confirmed_at")
+    .eq("status", "inserted").eq("publish_mode", "scheduled").eq("finalize_mode", "auto").is("reservation_confirmed_at", null)
+    .order("created_at", { ascending: false }).order("id", { ascending: false });
+  if (error) throw new Error("예약 확인 필요 목록 조회 실패");
+  return (data ?? []).map(row => {
+    const snapshot = parsePublicationSnapshot(row.execution_snapshot);
+    return { id: row.id, taskId: row.blog_task_id, draftId: row.blog_draft_id, title: snapshot.title, imageCount: snapshot.images.length,
+      status: row.status, publishMode: row.publish_mode, finalizeMode: row.finalize_mode, scheduledAt: row.scheduled_at, reservationConfirmedAt: row.reservation_confirmed_at };
+  });
+}
+
 // Adapt frozen blocks, never current Draft/Task assets or a newly computed image plan.
 export async function publicationJobToExtensionTask(job: PublicationJob, signed = false) {
   const snapshot = parsePublicationSnapshot(job.execution_snapshot);
@@ -43,6 +56,7 @@ export async function publicationJobToExtensionTask(job: PublicationJob, signed 
   return {
     ...parsePublicationSchedule({ publishMode: job.publish_mode, scheduledAt: job.scheduled_at }),
     finalizeMode: parseFinalizeMode(job.finalize_mode, job.publish_mode),
+    reservationConfirmedAt: job.reservation_confirmed_at ?? null,
     id: job.blog_task_id, draftId: job.blog_draft_id, jobId: job.id, attemptNo: job.attempt_no,
     status: job.status, title: snapshot.title, bodyText: snapshot.bodyText, images,
     blocks: snapshot.blocks.map(block => block.type === "text" ? block : { ...images[block.index], type: "image" as const }),
@@ -77,4 +91,24 @@ export async function claimPublicationJob(id: string, publisher: "blocks" | "leg
     await recordPublicationResult(id, attemptNo, "failed", "실행 사진 URL 또는 snapshot 준비 실패");
     throw new PublicationJobError("실행 사진 URL 또는 snapshot을 준비하지 못했습니다. Job 상태를 확인하세요.", 500);
   }
+}
+
+export async function recordReservationConfirmation(id: string, attemptNo: number) {
+  if (!PUBLICATION_JOB_ID.test(id) || !Number.isSafeInteger(attemptNo) || attemptNo < 1) throw new PublicationJobError("실행 번호를 확인해 주세요.");
+  const eligible = (job: PublicationJob) => job.status === "inserted" && job.publish_mode === "scheduled" &&
+    job.finalize_mode === "auto" && !!job.scheduled_at && job.attempt_no === attemptNo;
+  const job = await getPublicationJob(id);
+  if (!eligible(job)) throw new PublicationJobError("현재 실행의 자동 예약 입력 완료 Job만 예약 등록을 확인할 수 있습니다.", 409);
+  if (job.reservation_confirmed_at) return { confirmedAt: job.reservation_confirmed_at, alreadyConfirmed: true };
+  const confirmedAt = new Date().toISOString();
+  const { data, error } = await supabase.from("blog_publication_jobs")
+    .update({ reservation_confirmed_at: confirmedAt })
+    .eq("id", id).eq("status", "inserted").eq("attempt_no", attemptNo)
+    .eq("publish_mode", "scheduled").eq("finalize_mode", "auto").eq("scheduled_at", job.scheduled_at)
+    .is("reservation_confirmed_at", null).select("reservation_confirmed_at").maybeSingle();
+  if (error) throw new Error("예약 등록 확인 기록 실패");
+  if (data) return { confirmedAt: data.reservation_confirmed_at, alreadyConfirmed: false };
+  const current = await getPublicationJob(id);
+  if (eligible(current) && current.reservation_confirmed_at) return { confirmedAt: current.reservation_confirmed_at, alreadyConfirmed: true };
+  throw new PublicationJobError("Job 실행 상태가 변경되어 예약 확인을 기록하지 않았습니다.", 409);
 }

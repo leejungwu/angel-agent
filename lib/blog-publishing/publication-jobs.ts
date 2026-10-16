@@ -23,6 +23,7 @@ export type PublicationJob = {
   publish_mode: PublishMode;
   finalize_mode: FinalizeMode;
   scheduled_at: string | null;
+  reservation_confirmed_at: string | null;
   created_at: string;
   started_at: string | null;
   inserted_at: string | null;

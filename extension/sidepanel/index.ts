@@ -22,6 +22,10 @@
   function matchesSelection(task: ExtensionTask | undefined, jobId = tasks.value, draftId = jobDraftIds.get(jobId)): task is ExtensionTask {
     return !!task && ["queued", "failed"].includes(task.status) && !!jobId && !!draftId && task.jobId === jobId && String(task.draftId) === draftId;
   }
+  function updatePublishingNote(task?: ExtensionTask) {
+    element("publishingNote").textContent = task?.publishMode === "scheduled" && task.finalizeMode === "auto"
+      ? "예약 등록 후 다음 글쓰기 화면을 준비합니다." : "결과 검수와 최종 발행은 직접 진행하세요.";
+  }
   function updateInsertState() { insert.disabled = busy || selectionLoading || !matchesSelection(selected) || selected.status !== "queued"; }
   const request = async (message: ExtensionMessage) => {
     const reply = await chrome.runtime.sendMessage(message);
@@ -45,7 +49,7 @@
   async function loadJobs() {
     selectionSequence++; selectionLoading = false;
     jobDraftIds.clear();
-    selected = undefined; tasks.replaceChildren(new Option("발행 Job을 선택하세요", ""));
+    selected = undefined; updatePublishingNote(); tasks.replaceChildren(new Option("발행 Job을 선택하세요", ""));
     tasks.value = "";
     element("title").textContent = "선택한 글 없음"; element("images").textContent = "이미지 0개"; element("schedule").textContent = "";
     connection.textContent = "연결 확인 중…";
@@ -96,7 +100,7 @@
   async function loadSelectedJob() {
     const sequence = ++selectionSequence;
     const jobId = tasks.value, draftId = jobDraftIds.get(jobId);
-    selected = undefined;
+    selected = undefined; updatePublishingNote();
     selectionLoading = false;
     updateInsertState();
     element("title").textContent = "선택한 글 없음"; element("images").textContent = "이미지 0개"; element("schedule").textContent = "";
@@ -109,7 +113,7 @@
       const reply = await request({ type: "JOB", id: jobId });
       if (!current()) return;
       if (!matchesSelection(reply.task, jobId, draftId)) throw new Error("선택한 Job과 상태가 변경되었습니다. 목록을 새로고침하세요.");
-      selected = reply.task;
+      selected = reply.task; updatePublishingNote(selected);
       element("title").textContent = selected.title;
       element("images").textContent = `이미지 ${selected.images.length}개`;
       element("schedule").textContent = selected.publishMode === "scheduled" ? NaverSchedule.label(selected) : "";
@@ -156,9 +160,12 @@
     if (sequence !== selectionSequence || !matchesSelection(selected, jobId, draftId) || tasks.value !== jobId || jobDraftIds.get(jobId) !== draftId) throw new Error("작업 선택이 변경되어 입력을 중단했습니다.");
     const publisher = element<HTMLSelectElement>("publisher").value === "legacy" ? "legacy" : "blocks";
     if (publisher === "legacy" && selected.images.length > 3) throw new Error("사진 3장 초과 Job은 V3 순차 입력을 사용하세요.");
+    const scheduledAuto = selected.publishMode === "scheduled" && selected.finalizeMode === "auto";
     selected = undefined;
     const reply = await request({ type: "INSERT", jobId: jobId, overwrite, publisher });
-    const completedMessage = reply.message ?? "입력 결과를 확인해 주세요.";
+    const completedMessage = scheduledAuto && !reply.message?.includes("JOB_RESULT")
+      ? "예약 등록 요청을 완료했습니다. " + (reply.message?.match(/다음 글쓰기 화면[\s\S]*/)?.[0] ?? reply.cleanupWarning ?? "예약 목록에서 최종 상태를 확인해 주세요.")
+      : reply.message ?? "입력 결과를 확인해 주세요.";
     try { await loadJobs(); result.textContent = completedMessage; }
     catch { result.textContent = `${completedMessage} Job 목록 갱신에 실패했습니다. 목록을 새로고침하세요.`; }
   }); });

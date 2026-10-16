@@ -431,3 +431,23 @@ try {
   assert.equal(walk(render(add, props)).filter(node => node.props?.name?.startsWith("finalize-"))[0].props.checked, true);
 } finally { globalThis.fetch = originalFetch; }
 console.log("PASS: auto API/Queue metadata, duplicate keeps original mode, scheduled-only explicit UI consent, manual reset.");
+const scheduledQueueJob = rows.blog_publication_jobs.find(job => job.publish_mode === "scheduled");
+assert.ok(scheduledQueueJob);
+scheduledQueueJob.status = "inserted";
+
+scheduledQueueJob.finalize_mode = "auto";
+scheduledQueueJob.inserted_at = "2026-10-16T03:39:00Z";
+scheduledQueueJob.published_at = null;
+scheduledQueueJob.reservation_confirmed_at = null;
+const unconfirmedHtml = renderToStaticMarkup(await page());
+assert.match(unconfirmedHtml, /예약 등록 요청 완료 · /);
+assert.doesNotMatch(unconfirmedHtml, /예약 등록 확인|발행 완료 · /);
+scheduledQueueJob.reservation_confirmed_at = "2026-10-16T02:31:00Z";
+assert.equal(renderToStaticMarkup(await page()), unconfirmedHtml);
+for (const [mode, finalize] of [["scheduled", "review"], ["manual", "review"]]) {
+  scheduledQueueJob.publish_mode = mode; scheduledQueueJob.finalize_mode = finalize;
+  assert.match(renderToStaticMarkup(await page()), /네이버 입력 완료 · /);
+}
+scheduledQueueJob.published_at = "2026-10-16T05:00:00Z";
+assert.match(renderToStaticMarkup(await page()), /발행 완료 · /);
+console.log("PASS: contextual inserted label, absent published time hidden, confirmation value has no UI effect.");

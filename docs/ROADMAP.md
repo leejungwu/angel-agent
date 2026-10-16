@@ -93,13 +93,15 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 - [x] 최종 예약 등록 자동 클릭 실제 Chrome/Naver 운영 검증 — scheduled+auto 실행 후 예약 발행 글 목록 등록 확인
 - [x] 활성 editor claim 전 검사 / scheduled+auto 이후 새 빈 글쓰기 자동 복귀·다음 Job 준비 — 실제 Chrome/Naver 검증 완료
 - [x] 입력 가능 editor 연속 안정성 검사 / 제목 focus·DOM 검증 / 성공 후 Job 목록 자동 갱신 — 동일 세션 scheduled+auto Job 2건 연속 예약 등록 실검증 완료
+- [x] scheduled+auto 예약 등록 자동 확인 / 동일 LI entry 제목·KST 예약시간 매칭 / reservation_confirmed_at 기록 — mock 검증, migration 적용·실환경 확인은 필요
+- 예약 등록 confirmation 내부 코드/API는 유지하되 사용자 UI는 제공하지 않음. Queue는 예약 등록 요청 완료와 실제 발행 완료 기록을 구분
 - [ ] 일반 발행 최종 버튼 자동 실행 — 미구현 / 후순위
 - [ ] 중간 실패 재개
 - [ ] 장시간 signed URL 갱신 / 비정상 종료 cleanup
-- [ ] 최종 자동 발행 / 예약 확인 자동화
+- [ ] 일반 발행 최종 자동 실행 / 실제 공개 완료 자동 확인
 - [ ] Naver 실제 발행 결과 자동 확인
 
-예약 Job은 콘텐츠 입력 후 예약 날짜/시간까지 설정한다. 기본 review는 사람이 최종 확인·발행한다. 명시적 scheduled+auto는 안전 검증 후 최종 예약 등록 버튼을 자동 클릭하며, 실제 Chrome/Naver에서 예약 발행 글 목록 등록까지 사용자가 확인했다. 프로그램은 실제 등록 성공이나 공개 여부를 자동 판정하지 않으며 Job은 inserted로 유지한다. Extension은 queued Job의 고정 snapshot을 실행한다. 웹에서 사용자가 발행 완료를 기록하고 failed Job을 같은 자료로 재대기할 수 있다. published 자동 확정은 아직 구현하지 않았다.
+예약 Job은 콘텐츠 입력 후 예약 날짜/시간까지 설정한다. 기본 review는 사람이 최종 확인·발행한다. 명시적 scheduled+auto는 안전 검증 후 최종 예약 등록 버튼을 자동 클릭하며, 실제 Chrome/Naver에서 예약 발행 글 목록 등록까지 사용자가 확인했다. 예약 목록의 동일 entry 제목·KST 예약시간이 유일하게 일치하면 reservation_confirmed_at을 기록하고 Job은 inserted로 유지한다. 확인하지 못한 경우 직접 확인하도록 안내한다. Extension은 queued Job의 고정 snapshot을 실행한다. 웹에서 사용자가 발행 완료를 기록하고 failed Job을 같은 자료로 재대기할 수 있다. 실제 공개 완료 자동 확인과 published 자동 확정은 아직 구현하지 않았다.
 
 ### 키워드 / 운영 분석
 
