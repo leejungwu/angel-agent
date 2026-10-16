@@ -368,7 +368,7 @@ try {
   let calls = 0;
   globalThis.fetch = async (_url, options) => {
     calls++;
-    assert.deepEqual(JSON.parse(options.body), { taskId: 1, draftId: 2, publishMode: "scheduled", scheduledAt: "2099-10-20T05:30:00.000Z" });
+    assert.deepEqual(JSON.parse(options.body), { taskId: 1, draftId: 2, publishMode: "scheduled", scheduledAt: "2099-10-20T05:30:00.000Z", finalizeMode: "review" });
     return Response.json({ job: { id: "scheduled" } });
   };
   await walk(render(add, props)).find(node => node.type === "button").props.onClick();
@@ -395,3 +395,39 @@ assert.deepEqual(React.Children.toArray(minuteInput.props.children).map(option =
 const defaultTime = Date.parse(schedule.seoulScheduleToIso(dateInput.props.value, hourInput.props.value + ":" + minuteInput.props.value));
 assert.ok(defaultTime > Date.now() + 19.9 * 60000 && defaultTime <= Date.now() + 30 * 60000);
 console.log("PASS: create API rejects 43 minutes; UI defaults >=20 minutes ahead and only exposes 10-minute options.");
+
+rows.blog_publication_jobs.length = 0;
+assert.equal((await create.POST(request({ taskId: 1, draftId: 2, finalizeMode: "auto" }))).status, 400);
+assert.equal(rows.blog_publication_jobs.length, 0);
+const autoRequest = { taskId: 1, draftId: 2, publishMode: "scheduled", scheduledAt: "2099-10-20T05:30:00Z", finalizeMode: "auto" };
+const autoResponse = await create.POST(request(autoRequest));
+assert.equal(autoResponse.status, 201);
+const autoResult = await autoResponse.json(); assert.equal(autoResult.job.finalizeMode, "auto");
+assert.ok(renderToStaticMarkup(await page()).includes("최종 동작: 자동 예약 등록"));
+const reused = await (await create.POST(request({ ...autoRequest, finalizeMode: "review" }))).json();
+assert.equal(reused.alreadyExists, true); assert.equal(reused.job.finalizeMode, "auto");
+try {
+  state = [];
+  const props = { taskId: 1, draftId: 2 };
+  let nodes = walk(render(add, props));
+  assert.equal(nodes.some(node => node.props?.name?.startsWith("finalize-")), false);
+  nodes.filter(node => node.props?.type === "radio")[1].props.onChange();
+  nodes = walk(render(add, props));
+  assert.equal(nodes.filter(node => node.props?.name?.startsWith("finalize-"))[0].props.checked, true);
+  nodes.find(node => node.props?.type === "date").props.onChange({ target: { value: "2099-10-20" } });
+  nodes.find(node => node.props?.["aria-label"] === "예약 시").props.onChange({ target: { value: "14" } });
+  nodes = walk(render(add, props));
+  nodes.find(node => node.props?.["aria-label"] === "예약 분").props.onChange({ target: { value: "30" } });
+  nodes.filter(node => node.props?.name?.startsWith("finalize-"))[1].props.onChange();
+  let body;
+  globalThis.fetch = async (_url, options) => { body = JSON.parse(options.body); return Response.json(autoResult); };
+  await walk(render(add, props)).find(node => node.type === "button").props.onClick();
+  assert.equal(body.finalizeMode, "auto"); assert.equal(body.publishMode, "scheduled");
+  assert.equal(walk(render(add, props)).some(node => node.props?.role === "alert"), false);
+  walk(render(add, props)).filter(node => node.props?.type === "radio")[0].props.onChange();
+  await walk(render(add, props)).find(node => node.type === "button").props.onClick();
+  assert.equal(body.finalizeMode, undefined); assert.equal(body.publishMode, undefined);
+  walk(render(add, props)).filter(node => node.props?.type === "radio")[1].props.onChange();
+  assert.equal(walk(render(add, props)).filter(node => node.props?.name?.startsWith("finalize-"))[0].props.checked, true);
+} finally { globalThis.fetch = originalFetch; }
+console.log("PASS: auto API/Queue metadata, duplicate keeps original mode, scheduled-only explicit UI consent, manual reset.");

@@ -1,5 +1,6 @@
 type ExtensionTask = {
   publishMode?: "manual" | "scheduled";
+  finalizeMode?: "review" | "auto";
   scheduledAt?: string | null;
   jobId?: string; attemptNo?: number;
   id: string | number; draftId: string | number; status: string; title: string; bodyText: string;

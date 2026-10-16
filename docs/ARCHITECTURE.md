@@ -184,9 +184,11 @@ approved draft + 현재 Task 사진 → 웹 Queue 등록 시 execution_snapshot 
   → background: 현재 Naver tab/frame 확정·debugger attach
   → 제목 입력·검증 → text/image Blocks 순차 실행
   ↔ content: DOM 위치/문서 끝 selection/본문·이미지 검증
+  → scheduled는 예약 날짜/시간 설정
+  → scheduled+auto는 safety validation 후 최종 예약 등록 버튼 CDP 클릭
   → 임시 파일 정리·debugger detach
   → 해당 attempt의 inserted 또는 failed 기록
-  → Naver SmartEditor에서 사용자가 검수·최종 발행
+  → review는 사용자 검수·최종 발행 / scheduled+auto도 성공 시 inserted 유지
 ```
 
 `/api/extension/publication-jobs`는 queued/failed Job 목록을 반환한다.
@@ -211,10 +213,14 @@ Side Panel은 선택 sequence·Job ID·Draft ID를 검증한다. background는 c
 Extension 목록·상세·claim 응답은 `publishMode`와 `scheduledAt`을 전달한다. scheduled Job은 입력 전 예약시간을 검증하고, V3/legacy 입력 검증 완료 후 editor iframe의 발행 설정 패널을 연다.
 `extension/schedule.ts`는 공통 예약 검증·KST 표시·예약 DOM 설정을 담당하며 빌드에서 background/content/Side Panel에 포함된다.
 예약 radio 선택, datepicker의 최대 24회 다음달 이동·날짜 선택, 시/분 change 이벤트 후 값을 다시 확인한다.
-예약값 불일치·timeout·Naver 시간 오류는 failed 처리한다. 예약 설정까지 성공한 Job만 기존 inserted 결과로 기록한다.
-예약시간에 자동 실행하는 cron은 없다. 최종 발행 버튼 `[data-testid="seOnePublishBtn"]`은 모든 예약 클릭에서 차단하며 사용자가 직접 확인 후 누른다.
+예약값 불일치·timeout·Naver 시간 오류는 failed 처리한다. review는 예약 설정 완료 후, auto는 추가 안전 검증과 최종 버튼 클릭까지 완료한 뒤 기존 inserted 결과로 기록한다.
+예약시간에 자동 실행하는 cron은 없다. `finalize_mode`는 review(기본)/auto이며 Job 생성 시 고정된다. manual+auto는 API/DB/Extension에서 거부한다.
+review는 최종 버튼을 누르지 않는다. scheduled+auto만 예약 상태·미래 시간·Naver 오류·최종 버튼 유일성/표시/활성 상태를 재검증한다.
+content script는 `[data-testid="seOnePublishBtn"]`의 검증된 좌표만 반환하고 background가 CDP trusted 클릭 1회를 보낸다. 상단 `tpb.publish` trigger와 구분하며 최종 클릭을 재시도하지 않는다.
+scheduled+auto는 실제 Chrome/Naver에서 V3 입력, 예약 날짜/시간 설정, 안전 검증, 최종 버튼 자동 클릭 후 예약 발행 글 목록 등록까지 사용자 검증을 완료했다.
+예약 등록 성공을 확인하는 DOM/URL 신호는 아직 없으므로 클릭 후에도 inserted만 기록하고 예약 목록에서 확인하도록 안내한다. 자동으로 published 처리하지 않는다.
 상세에서 승인된 Draft를 등록하고 queued Job만 제거할 수 있다.
-Extension 입력 성공은 Job을 inserted로 기록한다. published 변경이나 Naver 최종 발행 버튼 클릭은 하지 않는다.
+Extension 입력 성공은 Job을 inserted로 기록한다. scheduled-auto도 실제 예약 등록 성공이나 공개 여부를 자동 판정하지 않으며 published로 변경하지 않는다.
 
 ## Extension의 역할 구분
 

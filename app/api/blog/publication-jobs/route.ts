@@ -14,8 +14,8 @@ export async function POST(request: Request) {
     if (error) throw new Error("DraftLookupFailed");
     if (!draft) return Response.json({ error: "해당 작업의 초안이 없습니다." }, { status: 404 });
     if (draft.status !== "approved") return Response.json({ error: "승인된 초안만 등록할 수 있습니다." }, { status: 403 });
-    const job = await createPublicationJob({ taskId: input.taskId, draftId: input.draftId, publishMode: input.publishMode, scheduledAt: input.scheduledAt });
-    return Response.json({ job: { id: job.id, status: job.status, publishMode: job.publish_mode, scheduledAt: job.scheduled_at }, alreadyExists: job.alreadyExists }, { status: job.alreadyExists ? 200 : 201 });
+    const job = await createPublicationJob({ taskId: input.taskId, draftId: input.draftId, publishMode: input.publishMode, scheduledAt: input.scheduledAt, finalizeMode: input.finalizeMode });
+    return Response.json({ job: { id: job.id, status: job.status, publishMode: job.publish_mode, scheduledAt: job.scheduled_at, finalizeMode: job.finalize_mode }, alreadyExists: job.alreadyExists }, { status: job.alreadyExists ? 200 : 201 });
   } catch (error) {
     if (error instanceof PublicationJobError) return Response.json({ error: error.message }, { status: error.status });
     return Response.json({ error: "발행 대기열 등록에 실패했습니다. DB migration 적용 상태와 초안·사진을 확인해 주세요." }, { status: 500 });

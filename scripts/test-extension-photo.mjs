@@ -22,6 +22,7 @@ async function scenario(input = task, failure = "", publisher = "legacy") {
       if (message.type === failure) return { error: "fixture failure" };
       if (message.type === "EDITOR_DIAGNOSE") return { diagnostic: { frameReady: true, ready: true, titleFound: true, bodyFound: true } };
       if (message.type === "EDITOR_SCHEDULE") return { scheduleReady: true };
+      if (message.type === "EDITOR_SCHEDULE_FINAL_TARGET") return failure.startsWith("final:") ? { error: failure } : { position: { x: 777, y: 55 } };
       if (message.type === "EDITOR_PHOTO_VERIFY") uploadVerified++;
       if (message.type === "EDITOR_VERIFY") return { verification: { titleMatches: true, bodyMatches: true } };
       return { position: { x: message.type === "EDITOR_PHOTO_BUTTON" ? 99 : 10, y: 20 }, imageReady: true };
@@ -84,7 +85,7 @@ async function scenario(input = task, failure = "", publisher = "legacy") {
     return { ok: true, json: async () => ({ ok: true }) };
   }, setTimeout: (fn, ms) => { if ([500, 1500, 3000].includes(ms)) { cleanupDelays.push(ms); return setTimeout(fn, 0); } return setTimeout(fn, ms === 250 ? 0 : failure === "timeout" && ms === 15000 ? 5 : ms); }, clearTimeout, Date,
     console: { info: (...args) => logs.push(args), warn: (...args) => logs.push(args) } });
-  const reply = await new Promise((resolve) => listener({ type: "INSERT", jobId, publisher, task: { title: "untrusted" } }, { id: "fixture" }, resolve));
+  const reply = await new Promise((resolve) => listener({ type: "INSERT", jobId, publisher, task: { title: "untrusted", finalizeMode: "auto" } }, { id: "fixture" }, resolve));
   assert.equal(handlers.size, 0); assert.equal(intercepted, false);
   if (["", "cleanup", "cleanupRetry", "cleanupOne"].includes(failure)) assert.ok(cleanupUploadCounts.every((count) => count === expectedUploads));
   return { reply, commands, messages, downloads, removed, erased, cleanupDelays, timeline, logs, outcomes };
@@ -201,3 +202,31 @@ for (const scheduledAt of [null, "2000-01-01T00:00:00Z", "2099-10-20T05:43:00Z"]
 }
 assert.equal(success.messages.some(message => message.type === "EDITOR_SCHEDULE"), false);
 console.log("PASS: scheduled preflight before Naver writes, setup after V3 verification, inserted/failed results, unchanged manual path.");
+const finalClicks = result => result.commands.filter(command => command.method === "Input.dispatchMouseEvent" && command.params.type === "mouseReleased" && command.params.x === 777).length;
+assert.equal(finalClicks(scheduledSuccess), 0, "Missing finalizeMode defaults to review despite client-provided auto");
+assert.equal(scheduledSuccess.messages.some(message => message.type === "EDITOR_SCHEDULE_FINAL_TARGET"), false);
+const autoInput = { ...scheduledInput, finalizeMode: "auto" };
+const autoSuccess = await scenario(autoInput, "", "blocks");
+assert.equal(autoSuccess.reply.error, undefined); assert.equal(finalClicks(autoSuccess), 1);
+assert.equal(autoSuccess.outcomes[0].outcome, "inserted");
+assert.match(autoSuccess.reply.message, /予約|예약 발행 등록을 요청/);
+assert.ok(autoSuccess.timeline.indexOf("EDITOR_BLOCK_VERIFY") < autoSuccess.timeline.indexOf("EDITOR_SCHEDULE"));
+assert.ok(autoSuccess.timeline.indexOf("EDITOR_SCHEDULE") < autoSuccess.timeline.indexOf("EDITOR_SCHEDULE_FINAL_TARGET"));
+for (const failure of ["EDITOR_SCHEDULE", "final:radio", "final:date", "final:hour", "final:minute", "final:past", "final:naverError", "final:missing", "final:disabled"]) {
+  const rejected = await scenario(autoInput, failure, "blocks");
+  assert.ok(rejected.reply.error, failure); assert.equal(finalClicks(rejected), 0, failure);
+  assert.equal(rejected.outcomes[0].outcome, "failed");
+}
+const manualAuto = await scenario({ ...autoInput, publishMode: "manual" }, "", "blocks");
+assert.ok(manualAuto.reply.error); assert.equal(manualAuto.commands.length, 0);
+assert.equal(manualAuto.outcomes[0].outcome, "failed");
+const resultMissing = await scenario(autoInput, "result", "blocks");
+assert.equal(finalClicks(resultMissing), 1); assert.match(resultMissing.reply.message, /JOB_RESULT/);
+assert.ok(resultMissing.outcomes.every(outcome => outcome.outcome !== "published"));
+console.log("PASS: review=0 final clicks, scheduled-auto=1 trusted click, all guard/setup failures=0, manual-auto rejected, inserted only, no final-click retry.");
+
+const manualReview = await scenario({ ...task, publishMode: "manual", finalizeMode: "review" });
+assert.equal(manualReview.reply.error, undefined); assert.equal(finalClicks(manualReview), 0);
+assert.equal(manualReview.messages.some(message => message.type === "EDITOR_SCHEDULE"), false);
+const explicitReview = await scenario({ ...scheduledInput, finalizeMode: "review" }, "", "blocks");
+assert.equal(explicitReview.reply.error, undefined); assert.equal(finalClicks(explicitReview), 0);

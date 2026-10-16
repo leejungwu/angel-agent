@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { defaultPublicationSchedule, parsePublicationSchedule, seoulScheduleToIso, type PublishMode } from "@/lib/blog-publishing/schedule";
+import { defaultPublicationSchedule, parsePublicationSchedule, seoulScheduleToIso, type FinalizeMode, type PublishMode } from "@/lib/blog-publishing/schedule";
 
 export default function AddPublicationJob({ taskId, draftId }: { taskId: number; draftId: string | number }) {
   const [busy, setBusy] = useState(false);
@@ -11,18 +11,20 @@ export default function AddPublicationJob({ taskId, draftId }: { taskId: number;
   const [publishMode, setPublishMode] = useState<PublishMode>("manual");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
+  const [finalizeMode, setFinalizeMode] = useState<FinalizeMode>("review");
   function selectMode(mode: PublishMode) {
     if (mode === "scheduled" && !date && !time) {
       const initial = defaultPublicationSchedule();
       setDate(initial.date); setTime(initial.time);
     }
     setPublishMode(mode);
+    if (mode === "manual") setFinalizeMode("review");
   }
   async function add() {
     if (busy) return;
     setBusy(true); setError(""); setMessage("");
     try {
-      const schedule = publishMode === "scheduled" ? parsePublicationSchedule({ publishMode, scheduledAt: seoulScheduleToIso(date, time) }, true) : {};
+      const schedule = publishMode === "scheduled" ? { ...parsePublicationSchedule({ publishMode, scheduledAt: seoulScheduleToIso(date, time) }, true), finalizeMode } : {};
       const response = await fetch("/api/blog/publication-jobs", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taskId, draftId, ...schedule }),
       });
@@ -42,7 +44,7 @@ export default function AddPublicationJob({ taskId, draftId }: { taskId: number;
         </label>)}
       </div>
       {publishMode === "scheduled" && <div className="space-y-2">
-        <p className="text-zinc-500">네이버 예약 발행에 사용할 날짜와 시간을 지정합니다. Extension이 예약 설정까지 입력하며 최종 발행은 직접 확인 후 진행합니다.</p>
+        <p className="text-zinc-500">네이버 예약 날짜와 시간을 자동 설정합니다. 최종 동작은 아래 선택을 따릅니다.</p>
         <div className="flex flex-wrap gap-3">
           <label>예약 날짜 (한국 시간) <input type="date" value={date} onChange={event => setDate(event.target.value)} className="rounded border px-2 py-1" /></label>
           <label>예약 시 <select aria-label="예약 시" value={time.slice(0, 2)} onChange={event => setTime(`${event.target.value}:${time.slice(3)}`)} className="rounded border px-2 py-1">
@@ -52,6 +54,13 @@ export default function AddPublicationJob({ taskId, draftId }: { taskId: number;
             {["00", "10", "20", "30", "40", "50"].map(minute => <option key={minute} value={minute}>{minute}</option>)}
           </select></label>
         </div>
+        <fieldset className="space-y-2">
+          <legend className="mb-1 font-medium">발행 완료 방식</legend>
+          <label className="block"><input type="radio" name={`finalize-${taskId}-${draftId}`} checked={finalizeMode === "review"} onChange={() => setFinalizeMode("review")} /> 네이버 입력 후 직접 확인
+            <span className="ml-2 text-zinc-500">예약 설정까지만 자동</span></label>
+          <label className="block"><input type="radio" name={`finalize-${taskId}-${draftId}`} checked={finalizeMode === "auto"} onChange={() => setFinalizeMode("auto")} /> 예약 발행까지 자동 완료
+            <span className="ml-2 text-zinc-500">네이버 최종 발행 버튼까지 자동 실행하며, 예약 시간이 되면 네이버가 게시합니다.</span></label>
+        </fieldset>
       </div>}
     </fieldset>
     <button type="button" onClick={add} disabled={busy} className="rounded-lg border bg-white px-4 py-2 text-sm disabled:opacity-50">

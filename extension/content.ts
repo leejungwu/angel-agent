@@ -415,8 +415,15 @@
   }
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
-    if (sender.id !== chrome.runtime.id || !["EDITOR_SCHEDULE", "EDITOR_DIAGNOSE", "EDITOR_TARGET", "EDITOR_VERIFY", "EDITOR_PHOTO_TARGET", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY", "EDITOR_PHOTO_UPLOAD_CARET", "EDITOR_PHOTO_BUTTON", "EDITOR_PHOTO_VERIFY", "EDITOR_PHOTO_BODY_VERIFY", "EDITOR_BLOCK_START", "EDITOR_BLOCK_CARET", "EDITOR_BLOCK_TEXT_VERIFY", "EDITOR_BLOCK_VERIFY", "EDITOR_BLOCK_NEXT_TEXT", "EDITOR_BLOCK_IMAGE_TARGET", "EDITOR_BLOCK_TEXT_END"].includes(message.type)) return;
+    if (sender.id !== chrome.runtime.id || !["EDITOR_SCHEDULE_FINAL_TARGET", "EDITOR_SCHEDULE", "EDITOR_DIAGNOSE", "EDITOR_TARGET", "EDITOR_VERIFY", "EDITOR_PHOTO_TARGET", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY", "EDITOR_PHOTO_UPLOAD_CARET", "EDITOR_PHOTO_BUTTON", "EDITOR_PHOTO_VERIFY", "EDITOR_PHOTO_BODY_VERIFY", "EDITOR_BLOCK_START", "EDITOR_BLOCK_CARET", "EDITOR_BLOCK_TEXT_VERIFY", "EDITOR_BLOCK_VERIFY", "EDITOR_BLOCK_NEXT_TEXT", "EDITOR_BLOCK_IMAGE_TARGET", "EDITOR_BLOCK_TEXT_END"].includes(message.type)) return;
     void (async (): Promise<ExtensionReply> => {
+      if (message.type === "EDITOR_SCHEDULE_FINAL_TARGET") {
+        if (!message.task) throw new Error("예약 Job이 없습니다.");
+        const button = NaverSchedule.finalTarget(message.task);
+        const position = targetPosition(button);
+        if (NaverSchedule.finalTarget(message.task) !== button) throw new Error("최종 발행 버튼이 변경되었습니다.");
+        return { position };
+      }
       if (message.type === "EDITOR_SCHEDULE") {
         if (!message.task) throw new Error("예약 Job이 없습니다.");
         return NaverSchedule.configure(message.task);

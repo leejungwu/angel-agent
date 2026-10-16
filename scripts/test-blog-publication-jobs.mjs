@@ -6,7 +6,7 @@ import ts from "typescript";
 async function load(path, imports = {}) {
   const testModule = { exports: {} };
   const code = ts.transpileModule(await readFile(path, "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
-  vm.runInNewContext(code, { module: testModule, exports: testModule.exports, require(name) { assert.ok(name in imports, name); return imports[name]; } });
+  vm.runInNewContext(code, { Error, module: testModule, exports: testModule.exports, require(name) { assert.ok(name in imports, name); return imports[name]; } });
   return testModule.exports;
 }
 const schedule = await load("lib/blog-publishing/schedule.ts");
@@ -206,3 +206,24 @@ for (const [now, expected] of [["2026-10-20T05:03:00Z", "14:30"], ["2026-10-20T0
 }
 assert.equal(schedule.defaultPublicationSchedule(Date.parse("2026-12-31T14:45:00Z")).date, "2027-01-01");
 console.log("PASS: 10-minute validation/second normalization and now+20 default rounding.");
+
+reset();
+await assert.rejects(api.createPublicationJob({ taskId: 1, draftId: 2, finalizeMode: "auto" }), /예약/);
+reset();
+const autoJob = await api.createPublicationJob({ taskId: 1, draftId: 2, publishMode: "scheduled", scheduledAt: "2099-10-20T05:30:00Z", finalizeMode: "auto" });
+assert.equal(autoJob.finalize_mode, "auto");
+const autoFrozen = JSON.stringify(autoJob.execution_snapshot);
+assert.equal((await api.createPublicationJob({ taskId: 1, draftId: 2, finalizeMode: "review" })).finalize_mode, "auto");
+assert.equal(JSON.stringify(jobs[0].execution_snapshot), autoFrozen);
+reset();
+assert.equal((await api.createPublicationJob({ taskId: 1, draftId: 2 })).finalize_mode, "review");
+reset();
+await assert.rejects(api.createPublicationJob({ taskId: 1, draftId: 2, finalizeMode: "unknown" }), /최종/);
+console.log("PASS: finalize defaults, scheduled-auto only, immutable existing Job mode/snapshot.");
+
+const finalizeSql = await readFile("supabase/migrations/202610160001_blog_final_publish.sql", "utf8");
+assert.match(finalizeSql, /finalize_mode text NOT NULL DEFAULT 'review'/);
+assert.match(finalizeSql, /finalize_mode = 'auto' AND publish_mode = 'scheduled'/);
+assert.match(finalizeSql, /NEW.finalize_mode IS DISTINCT FROM OLD.finalize_mode/);
+assert.match(finalizeSql, /BEFORE UPDATE ON public.blog_publication_jobs/);
+console.log("PASS: finalize migration default/constraint/immutable trigger contract (not applied).");

@@ -7,13 +7,20 @@ const NaverSchedule = (() => {
   const hourSelector = 'select[title="예약 발행 시간 선택"]';
   const minuteSelector = 'select[title="예약 발행 분 선택"]';
   const pad = (value: number) => String(value).padStart(2, "0");
+  type ScheduleTask = Pick<ExtensionTask, "publishMode" | "scheduledAt" | "finalizeMode">;
+  function finalizeMode(task: ScheduleTask) {
+    if (task.finalizeMode === undefined || task.finalizeMode === "review") return "review";
+    if (task.finalizeMode !== "auto" || task.publishMode !== "scheduled") throw new Error("자동 최종 동작은 명시적으로 선택한 예약 Job에서만 허용됩니다.");
+    return "auto";
+  }
 
   function parts(value: string) {
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) || !Number.isFinite(Date.parse(value))) throw new Error("예약시간 형식을 확인해주세요.");
     const seoul = new Date(Date.parse(value) + 9 * 3600000);
     return { year: seoul.getUTCFullYear(), month: seoul.getUTCMonth() + 1, day: seoul.getUTCDate(), hour: seoul.getUTCHours(), minute: seoul.getUTCMinutes() };
   }
-  function target(task: Pick<ExtensionTask, "publishMode" | "scheduledAt">, now = Date.now()) {
+  function target(task: ScheduleTask, now = Date.now()) {
+    finalizeMode(task);
     if (task.publishMode === undefined || task.publishMode === "manual") return null;
     if (task.publishMode !== "scheduled" || !task.scheduledAt) throw new Error("예약시간이 없습니다. 새 예약 작업을 생성해주세요.");
     const result = parts(task.scheduledAt);
@@ -22,14 +29,53 @@ const NaverSchedule = (() => {
     if (Date.parse(task.scheduledAt) % 60000 !== 0) throw new Error("예약시간의 초/밀리초는 0이어야 합니다. 새 예약 작업을 생성해주세요.");
     return result;
   }
-  function label(task: Pick<ExtensionTask, "publishMode" | "scheduledAt">) {
+  function label(task: ScheduleTask) {
     if (task.publishMode !== "scheduled") return "";
     if (!task.scheduledAt) return "예약 발행 · 예약시간 확인 필요";
     const p = parts(task.scheduledAt);
-    return `예약 발행 · ${p.year}.${pad(p.month)}.${pad(p.day)} ${pad(p.hour)}:${pad(p.minute)} (한국 시간)`;
+    return `예약 발행 · ${p.year}.${pad(p.month)}.${pad(p.day)} ${pad(p.hour)}:${pad(p.minute)} (한국 시간) · ${finalizeMode(task) === "auto" ? "자동 예약 등록" : "직접 확인"}`;
   }
 
-  async function configure(task: Pick<ExtensionTask, "publishMode" | "scheduledAt">) {
+  function assertNoTimeError() {
+    const radio = document.querySelector(radioSelector);
+    const panel = document.querySelector('[data-focus-lock="publishLayer"]') ?? radio?.closest("li");
+    const errors = Array.from((panel ?? document).querySelectorAll<HTMLElement>("span,p,div"))
+      .filter(element => element.textContent?.trim() === "현재 시간 이후로 설정해주세요.");
+    if (errors.some(element => {
+      for (let parent: HTMLElement | null = element; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (style.display === "none" || style.visibility === "hidden" || parent.hidden) return false;
+      }
+      return true;
+    })) throw new Error("네이버 오류: 현재 시간 이후로 설정해주세요.");
+  }
+
+  // Authorize a trusted CDP click only. Never invoke final button.click() here.
+  function finalTarget(task: ScheduleTask) {
+    if (finalizeMode(task) !== "auto") throw new Error("직접 확인 Job은 최종 발행 버튼을 클릭할 수 없습니다.");
+    const expected = target(task);
+    if (!expected) throw new Error("예약 Job만 자동 최종 동작을 실행할 수 있습니다.");
+    const one = <T extends HTMLElement>(selector: string): T => {
+      const elements = document.querySelectorAll<T>(selector);
+      if (elements.length !== 1) throw new Error(`최종 클릭 검증: ${selector} 요소 ${elements.length}개`);
+      return elements[0];
+    };
+    const date = `${expected.year}. ${pad(expected.month)}. ${pad(expected.day)}`;
+    if (!one<HTMLInputElement>(radioSelector).checked || one<HTMLInputElement>(dateSelector).value.replace(/\s+/g, " ").trim() !== date ||
+      one<HTMLSelectElement>(hourSelector).value !== pad(expected.hour) || one<HTMLSelectElement>(minuteSelector).value !== pad(expected.minute)) throw new Error("최종 클릭 검증: 예약 radio/날짜/시/분 불일치");
+    assertNoTimeError();
+    const button = one<HTMLButtonElement>(finalButton);
+    if (button.tagName !== "BUTTON" || button.matches('[data-click-area="tpb.publish"]') || button.disabled || button.closest(':disabled,[aria-disabled="true"]')) throw new Error("최종 발행 버튼이 비활성 상태이거나 올바르지 않습니다.");
+    for (let element: HTMLElement | null = button; element; element = element.parentElement) {
+      const style = getComputedStyle(element);
+      if (element.hidden || element.hasAttribute("inert") || element.getAttribute("aria-hidden") === "true" || style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.pointerEvents === "none" || style.opacity === "0") throw new Error("최종 발행 버튼이 표시되거나 클릭 가능한 상태가 아닙니다.");
+    }
+    const rect = button.getBoundingClientRect();
+    if (!button.getClientRects().length || rect.width <= 0 || rect.height <= 0) throw new Error("최종 발행 버튼의 화면 영역을 확인하지 못했습니다.");
+    return button;
+  }
+
+  async function configure(task: ScheduleTask) {
     const expected = target(task);
     if (!expected) return { scheduleReady: false }; // Manual Jobs never query schedule DOM.
     let stage = "SCHEDULE_TRIGGER";
@@ -117,18 +163,9 @@ const NaverSchedule = (() => {
       target(task); // Time may have elapsed while the article was being inserted.
       await new Promise(resolve => setTimeout(resolve, 200));
       if (!one<HTMLInputElement>(radioSelector).checked || !dateMatches() || one<HTMLSelectElement>(hourSelector).value !== pad(expected.hour) || one<HTMLSelectElement>(minuteSelector).value !== pad(expected.minute)) throw new Error("예약 날짜/시/분이 요청값과 일치하지 않습니다.");
-      const panel = document.querySelector('[data-focus-lock="publishLayer"]') ?? one<HTMLInputElement>(radioSelector).closest("li");
-      const errors = Array.from((panel ?? document).querySelectorAll<HTMLElement>("span,p,div"))
-        .filter(element => element.textContent?.trim() === "현재 시간 이후로 설정해주세요.");
-      if (errors.some(element => {
-        for (let parent: HTMLElement | null = element; parent; parent = parent.parentElement) {
-          const style = getComputedStyle(parent);
-          if (style.display === "none" || style.visibility === "hidden" || parent.hidden) return false;
-        }
-        return true;
-      })) throw new Error("네이버 오류: 현재 시간 이후로 설정해주세요.");
+      assertNoTimeError();
       return { scheduleReady: true };
     } catch (error) { throw new Error(`${stage}: ${error instanceof Error ? error.message : "예약 설정 실패"}`); }
   }
-  return { target, label, configure };
+  return { target, label, configure, finalizeMode, finalTarget };
 })();

@@ -8,10 +8,15 @@ function fixture(options = {}) {
   let clock = Date.parse("2026-10-15T00:00:00Z"), calendarOpen = false, year = 2026, month = 10;
   const clicks = [], events = [], queries = [];
   class Element {
-    constructor(text = "", kind = "") { this.textContent = text; this.kind = kind; this.disabled = false; this.style = { pointerEvents: "auto", display: "block", visibility: "visible" }; this.parentElement = newParent(); }
-    matches(selector) { return selector.includes('data-testid="seOnePublishBtn"') ? this.kind === "final" : selector.includes(":disabled") ? this.disabled : false; }
+    constructor(text = "", kind = "") { this.tagName = "BUTTON"; this.textContent = text; this.kind = kind; this.disabled = false; this.style = { pointerEvents: "auto", display: "block", visibility: "visible" }; this.parentElement = newParent(); }
+    matches(selector) { return selector.includes('data-testid="seOnePublishBtn"') ? this.kind === "final" : selector.includes('data-click-area="tpb.publish"') ? this.kind === "trigger" : selector.includes(":disabled") ? this.disabled : false; }
     closest(selector) { if (selector === ".ui-state-disabled") return this.disabled ? this : null; if (selector === "li") return panel; return null; }
     querySelector() { return null; }
+    hasAttribute() { return false; }
+    getAttribute() { return null; }
+    getClientRects() { return this.style.display === "none" ? [] : [{}]; }
+    getBoundingClientRect() { return { x: 700, y: 30, left: 700, top: 30, width: 100, height: 40 }; }
+    scrollIntoView() {}
     click() {
       clicks.push(this.kind);
       assert.notEqual(this.kind, "final", "FINAL PUBLISH BUTTON MUST NOT BE CLICKED");
@@ -31,7 +36,7 @@ function fixture(options = {}) {
       return true;
     }
   }
-  function newParent() { return { style: { pointerEvents: "auto", display: "block", visibility: "visible" }, parentElement: null, hidden: false }; }
+  function newParent() { return { style: { pointerEvents: "auto", display: "block", visibility: "visible" }, parentElement: null, hidden: false, hasAttribute: () => false, getAttribute: () => null }; }
   class Input extends Element { constructor(kind) { super("", kind); this.value = ""; this.checked = false; } }
   class Select extends Element {
     constructor(kind, values) { super("", kind); this.options = values.map(value => ({ value, disabled: false })); this._value = values[0]; }
@@ -57,6 +62,7 @@ function fixture(options = {}) {
       queries.push(selector);
       if (options.noDom) throw new Error("Manual/invalid Job must not query DOM");
       if (selector === "button") return [trigger, final];
+      if (selector === '[data-testid="seOnePublishBtn"]') return options.noFinal ? [] : options.duplicateFinal ? [final, final] : [final];
       if (selector.includes('data-testid="preTimeRadioBtn"')) return [radio];
       if (selector === "input.input_date__UwKAB") return [date];
       if (selector.includes("예약 발행 시간 선택")) return [hour];
@@ -65,15 +71,18 @@ function fixture(options = {}) {
       return [];
     },
     querySelector(selector) { return selector.includes("publishLayer") ? panel : this.querySelectorAll(selector)[0] ?? null; },
+    elementFromPoint: () => final,
   };
+  const window = { innerWidth: 1000, innerHeight: 800 }; window.top = window;
   const context = { document, HTMLInputElement: Input, HTMLSelectElement: Select,
+    window,
     Event: class { constructor(type) { this.type = type; } },
     Date: class extends Date { static now() { return clock; } },
     setTimeout: resolve => { clock += 100; resolve(); }, getComputedStyle: element => element.style,
   };
   vm.createContext(context);
   vm.runInContext(code + "\nglobalThis.schedule = NaverSchedule;", context);
-  return { schedule: context.schedule, clicks, events, queries, hour, minute, date, context };
+  return { schedule: context.schedule, clicks, events, queries, hour, minute, date, radio, final, context, advance: ms => { clock += ms; } };
 }
 const scheduled = iso => ({ publishMode: "scheduled", scheduledAt: iso });
 const plain = fixture({ noDom: true });
@@ -132,4 +141,36 @@ vm.runInContext(contentCode, routed.context);
 const reply = await new Promise(resolve => listener({ type: "EDITOR_SCHEDULE", task: scheduled("2026-10-15T20:10:00Z") }, { id: "fixture" }, resolve));
 assert.equal(reply.scheduleReady, true);
 assert.equal(listener({ type: "EDITOR_SCHEDULE", task: scheduled("2026-10-15T20:10:00Z") }, { id: "other" }, () => assert.fail("Foreign sender")), undefined);
+const autoTask = { ...scheduled("2026-10-15T20:10:00Z"), finalizeMode: "auto" };
+const allowed = await new Promise(resolve => listener({ type: "EDITOR_SCHEDULE_FINAL_TARGET", task: autoTask }, { id: "fixture" }, resolve));
+assert.equal(allowed.error, undefined); assert.equal(allowed.position.x, 750);
+assert.equal(routed.clicks.includes("final"), false, "Content authorizes coordinates; only background may dispatch trusted final click");
+const deniedReview = await new Promise(resolve => listener({ type: "EDITOR_SCHEDULE_FINAL_TARGET", task: scheduled("2026-10-15T20:10:00Z") }, { id: "fixture" }, resolve));
+assert.match(deniedReview.error, /직접 확인/);
+for (const [name, change] of [
+  ["radio", f => { f.radio.checked = false; }],
+  ["date", f => { f.date.value = "2026. 10. 17"; }],
+  ["hour", f => { f.hour.value = "23"; }],
+  ["minute", f => { f.minute.value = "20"; }],
+  ["disabled", f => { f.final.disabled = true; }],
+  ["hidden", f => { f.final.style.display = "none"; }],
+  ["pointer", f => { f.final.style.pointerEvents = "none"; }],
+  ["past", f => { f.advance(3 * 86400000); }],
+]) {
+  const f = fixture(); await f.schedule.configure(autoTask); change(f);
+  assert.throws(() => f.schedule.finalTarget(autoTask), undefined, name);
+  assert.equal(f.clicks.includes("final"), false, name);
+}
+for (const flags of [{ noFinal: true }, { duplicateFinal: true }]) {
+  const f = fixture(flags); await f.schedule.configure(autoTask);
+  assert.throws(() => f.schedule.finalTarget(autoTask), /최종 클릭 검증/);
+  assert.equal(f.clicks.includes("final"), false);
+}
+const lateOptions = {};
+const lateError = fixture(lateOptions); await lateError.schedule.configure(autoTask); lateOptions.timeError = true;
+assert.throws(() => lateError.schedule.finalTarget(autoTask), /현재 시간 이후/);
+assert.equal(lateError.clicks.includes("final"), false);
+const manualAuto = fixture({ noDom: true });
+assert.throws(() => manualAuto.schedule.finalTarget({ ...autoTask, publishMode: "manual" }), /예약 Job/);
+assert.equal(manualAuto.queries.length, 0);
 console.log("PASS: manual/invalid preflight, KST, radio, date/month/year navigation, disabled days, all hour/minute options, DOM final verification/time error, zero final publication clicks.");

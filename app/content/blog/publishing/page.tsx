@@ -15,7 +15,7 @@ function date(value: string | null) {
 
 export default async function PublishingQueuePage() {
   const { data, error } = await supabase.from("blog_publication_jobs")
-    .select("id,blog_task_id,blog_draft_id,status,publish_mode,scheduled_at,execution_snapshot,created_at,started_at,inserted_at,published_at,published_url,error_message")
+    .select("id,blog_task_id,blog_draft_id,status,publish_mode,scheduled_at,finalize_mode,execution_snapshot,created_at,started_at,inserted_at,published_at,published_url,error_message")
     .order("created_at", { ascending: false }).order("id", { ascending: false });
   return <main className="p-10">
     <div className="flex items-center justify-between gap-4">
@@ -35,6 +35,7 @@ export default async function PublishingQueuePage() {
               <h2 className="text-xl font-bold">{snapshot.title}</h2>
               <p className="mt-2 text-sm text-zinc-500">Task #{job.blog_task_id} · Draft #{job.blog_draft_id} · {staleInserting ? "입력이 중단된 것으로 보입니다" : STATUS_LABELS[job.status as PublicationJob["status"]] ?? "상태 확인 필요"} · 사진 {snapshot.images.length}장</p>
               <p className="mt-2 text-sm">{job.publish_mode === "scheduled" && job.scheduled_at ? `예약 발행 · ${formatScheduledAt(job.scheduled_at)} (한국 시간)` : "일반 발행"}</p>
+              <p className="mt-1 text-sm">최종 동작: {job.finalize_mode === "auto" ? "자동 예약 등록" : "직접 확인"}</p>
               <dl className="mt-3 space-y-1 text-sm text-zinc-500">
                 <div><dt className="inline">Queue 등록: </dt><dd className="inline">{date(job.created_at)}</dd></div>
                 <div><dt className="inline">네이버 입력 완료: </dt><dd className="inline">{date(job.inserted_at)}</dd></div>

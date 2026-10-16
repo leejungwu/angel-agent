@@ -1,4 +1,11 @@
 export type PublishMode = "manual" | "scheduled";
+export type FinalizeMode = "review" | "auto";
+export function parseFinalizeMode(value: unknown, publishMode: unknown): FinalizeMode {
+  if (value === undefined || value === "review") return "review";
+  if (value !== "auto") throw new Error("최종 동작을 확인해 주세요.");
+  if (publishMode !== "scheduled") throw new Error("자동 최종 동작은 예약 발행에서만 허용됩니다.");
+  return "auto";
+}
 export type PublicationSchedule = { publishMode: PublishMode; scheduledAt: string | null };
 
 export function defaultPublicationSchedule(now = Date.now()) {

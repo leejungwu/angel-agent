@@ -48,6 +48,7 @@
   }
 
   async function insertWithDebugger(tabId: number, frameId: number, task: ExtensionTask, overwrite: boolean, publisher: "blocks" | "legacy" = "legacy") {
+    if (task.finalizeMode !== undefined) NaverSchedule.finalizeMode(task);
     if (task.publishMode === "scheduled") NaverSchedule.target(task);
     if (inputRunning) throw new Error("입력 작업이 이미 진행 중입니다.");
     if (!task.title?.trim() || !task.bodyText?.trim()) throw new Error("제목 또는 본문이 비어 있습니다.");
@@ -295,6 +296,15 @@
         stage = "SCHEDULE_SETUP";
         const scheduled = await frameRequest({ type: "EDITOR_SCHEDULE", task });
         if (!scheduled.scheduleReady) throw new Error("예약 설정 검증 결과가 없습니다.");
+        if (task.finalizeMode === "auto") {
+          stage = "SCHEDULE_FINAL_PUBLISH";
+          const final = await frameRequest({ type: "EDITOR_SCHEDULE_FINAL_TARGET", task });
+          if (!final.position) throw new Error("최종 발행 버튼 검증 좌표가 없습니다.");
+          const { x, y } = final.position;
+          // Exactly one trusted click; no retries and no synthetic final publication.
+          await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+          await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
+        }
       }
     } catch (error) {
       failure = error;
@@ -323,7 +333,8 @@
       throw new Error(`${stage}${blockDiagnostic}: ${reason}${detachReason}${cleanupWarning} 일부 입력되었을 수 있으니 직접 확인하세요.`);
     }
     return { message: task.publishMode === "scheduled"
-      ? `네이버 입력 및 예약 설정이 완료되었습니다. 최종 발행 버튼을 확인 후 눌러주세요.${cleanupWarning}`
+      ? task.finalizeMode === "auto" ? `네이버 예약 발행 등록을 요청했습니다. 예약 목록에서 최종 상태를 확인해 주세요.${cleanupWarning}`
+        : `네이버 입력 및 예약 설정이 완료되었습니다. 최종 발행 버튼을 확인 후 눌러주세요.${cleanupWarning}`
       : `입력 완료 - 네이버에서 직접 확인 후 발행하세요${cleanupWarning}` };
   }
 

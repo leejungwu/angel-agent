@@ -140,6 +140,7 @@
     const refreshed = await request({ type: "JOB", id: jobId });
     if (sequence !== selectionSequence || tasks.value !== jobId || jobDraftIds.get(jobId) !== draftId || !matchesSelection(refreshed.task, jobId, draftId) || refreshed.task.status !== "queued") throw new Error("선택한 Job 또는 상태가 변경되었습니다. 다시 선택해 주세요.");
     selected = refreshed.task;
+    if (selected.finalizeMode !== undefined) NaverSchedule.finalizeMode(selected);
     if (selected.publishMode === "scheduled") NaverSchedule.target(selected);
     const diagnostic = await diagnose();
     if (diagnostic?.ready !== true) throw new Error(diagnostic?.reason ?? "입력 영역을 확정하지 못했습니다. 프레임별 DOM 진단을 확인해 주세요.");
