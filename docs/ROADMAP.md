@@ -1,20 +1,139 @@
 # Roadmap
 
-Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료, `[ ]`는 미구현 또는 부분 구현이다.
-부분 구현은 항목에 범위를 표시한다. 현재 우선 개발 영역은 Blog이며, 코드가 없는 장기 영역은 계획으로 구분한다.
+Angel Agent의 현재 기반과 향후 이커머스 자동화 계획을 구분한다. `[x]`는 적힌 범위의 구현 완료,
+`[ ]`는 미구현 또는 부분 구현이다. 코드 구현·mock 검증·사용자 실환경 검증·remote migration 적용은 같은 의미가 아니다.
+현재 구조는 [ARCHITECTURE](ARCHITECTURE.md)에서 확인한다.
 
-## Blog 개발 우선순위
+## Existing Foundation — 현재 기반
 
-1. 사진 배치 설정 migration 적용 / 실제 운영 검증
-2. 사진 관리 migration 적용 / 운영 검증 및 이미지 전처리·최적화 확장
-3. VOC → Blog 연결
-4. 키워드 관리 / 검색 의도 / 검색량
-5. 실제 운영 데이터 축적
-6. 발행 이력 / 검색 순위
-7. 예약 발행
-8. 중간 실패 재개
-9. 최종 자동 발행
-10. 경쟁글 / 블로그 분석 / AI 이미지 / 다중 플랫폼
+| 영역 | 구현된 기반 |
+|---|---|
+| Products | 상품 사실 CRUD, 상품 사진 업로드·조회 |
+| Reviews / VOC | CSV/XLSX import, OpenAI VOC 분석·결과 저장·dashboard |
+| Blog generation | DB Prompt Preset, 생성 snapshot, Draft 편집·재승인·승인/반려 |
+| Blog images | 업로드·정렬·삭제·Product 복사·편집·배치 설정 |
+| Blog publication | immutable Publication Job, Queue, Extension V3, 실패 재대기·고착 복구 |
+| Naver scheduled publishing v1 | scheduled+auto 예약 설정·최종 클릭, 새 editor 복귀·동일 세션 다음 Job 실행 |
+| KIN | 공통 Prompt UI, preset, 답변 생성·품질 검사·이력·복사 |
+| AI provider | Blog/KIN의 OpenAI / Claude / Grok 공통 transport |
+
+Blog는 **v1 운영 단계**다. 실제 저장 Draft·사진 10장 입력과 scheduled+auto 연속 예약 등록은 사용자 실검증 범위다.
+기능을 무한히 확장하기보다 운영 중 확인되는 실패·품질·사용성 문제를 우선 수정한다.
+예약 confirmation 내부 코드/API/DB는 유지하지만 사용자 핵심 기능으로 제공하지 않는다.
+manual 즉시 최종 발행, 실제 공개 완료 자동 판정, 중간 실패 재개는 미구현이다.
+
+## 전체 개발 우선순위
+
+1. Blog v1 운영 / 실제 사용 중 안정화
+2. Threads API + 콘텐츠 분석/발행
+3. 광고 Reference DB + Meta Ad Library 조사
+4. AI 광고 기획 / 소재 생성
+5. 상세페이지 기획
+6. 상품 소싱
+7. Meta Ads 성과
+8. Commerce / Sales 데이터
+9. 통합 분석 / 자동 모니터링
+10. Internal Angel Agent
+11. MCP / 외부 Agent
+
+Meta Ads와 Commerce의 순서는 실제 광고 집행량·판매 데이터가 쌓이는 시점에 따라 조정한다.
+아래 Phase는 모두 **planned**다. 기존 Blog의 “예약 발행”은 Naver UI 예약 등록이며 서버 cron 실행과 다르다.
+
+## 향후 전체 이커머스 자동화 — planned
+
+### Phase 1. Threads 콘텐츠 자동화
+
+- [ ] Meta Threads OAuth / 계정 연결 — **공식 API 범위 검증 필요**: 권한·앱 검수·토큰·대상 계정
+- [ ] 내 게시물 저장 / 게시물별 insight 수집 / 조회·좋아요·댓글·공유 등 성과 분석 — 지표별 공식 API 범위 검증 필요
+- [ ] 성과 우수 게시물 분류 / AI 문체·구조·Hook 분석 / 잘된 구조 기반 신규 Draft 생성
+- [ ] Draft 저장·수정·승인 / Threads 발행 — 공식 API 제공 범위·권한 검증 후 구현
+- [ ] 공개 인기 게시물 검색 — 공식 API 범위 검증 후 제공 여부 결정
+
+Task → Draft → Approval → Publish 패턴은 개념적으로 재사용한다.
+실제 도메인 요구가 확인되기 전 Blog/KIN/Threads 공통 테이블이나 범용 추상화를 먼저 만들지 않는다.
+
+### Phase 2. 광고 Reference DB + Meta Ad Library
+
+- [ ] 자체 광고 reference DB: 수동 image/video/URL 저장, landing URL, brand, product, platform, category, tags
+- [ ] AI 분석: Hook, Problem, Desire, USP, Offer, Proof, CTA, visual pattern, creative format, memo
+- [ ] Meta Ad Library는 여러 source 중 하나로 연결 — 일반 상업 광고·지역·기간·권한의 공식 API 범위 검증 필요
+- [ ] 경쟁사 광고·카피·소재 변경 관찰 — 수집 가능한 공개 정보만 사용
+
+경쟁사 ROAS·매출 등 접근할 수 없는 지표를 수집 가능하거나 신뢰할 수 있는 추정값처럼 표시하지 않는다.
+
+### Phase 3. AI 광고 기획 / 소재 생성
+
+- [ ] Products + VOC + 광고 reference + Brand rules + 사용 가능한 실제 광고 성과를 입력으로 연결
+- [ ] Hook, Target, Core Problem, Desire, Angle, Offer, Ad structure, Scene, Script, B-roll, CTA 생성
+- [ ] image/video prompt 및 A/B test hypothesis 저장·검수
+- [ ] Gemini / Kling / Higgsfield / Veo 등 외부 생성 서비스 연결 — API·라이선스·비용 검증 필요
+
+이미지·영상 생성 엔진 자체는 개발하지 않는다. 생성 기획과 외부 실행을 구분한다.
+
+### Phase 4. 상세페이지 기획 / 생성
+
+- [ ] Product + VOC + 경쟁상품 + 광고 reference/performance + Brand guide 기반 구조 JSON
+- [ ] Hero / Problem / Empathy / Solution / Product / USP / Comparison / Usage / Evidence / FAQ / CTA
+- [ ] section별 headline, body copy, purpose, layout hint, required visual, image prompt
+- [ ] 초기 기획·카피 저장·검수, 이후 section reorder/edit·이미지 자동 생성·preview 확장
+
+### Phase 5. 상품 소싱 시스템
+
+- [ ] 후보 DB: 상품명, category, 예상 원가, 판매가, 배송비, 예상 광고비·마진
+- [ ] 검색량, 경쟁상품, 리뷰 수, 시장 메모, 공급사·MOQ·리드타임·견적 비교
+- [ ] AI 시장 Gap / 경쟁제품 문제 / 차별화 / selling point / risk / test plan
+- [ ] 초기 수동 입력, 필요성이 확인된 외부 데이터 API부터 단계적 연결
+
+### Phase 6. Meta 광고 성과 Dashboard
+
+- [ ] Meta Marketing API 광고 계정 OAuth/권한 — 공식 API 범위 검증 필요
+- [ ] campaign / ad set / ad / creative 저장·연결
+- [ ] spend, impressions, CTR, CPC, CPM, conversion, CPA, ROAS — 제공 지표·귀속 기준 확인
+- [ ] 기간·주간 비교 / creative thumbnail + performance / AI 분석·개선안
+- [ ] 광고 수정·예산 변경 write action은 반드시 사용자 승인 후 실행
+
+### Phase 7. Commerce / Sales Data
+
+- [ ] Cafe24부터 시작 가능하되 Naver / Coupang / 기타 채널에 묶이지 않는 연결 구조
+- [ ] products / page views(가능 범위) / carts / orders / payments / cancellation / refund / revenue / inventory
+- [ ] 원가 + 배송비 + ad spend + sales 결합 / 공헌이익·실제 수익성·재고·판매 속도
+- [ ] 개인정보·추적 동의·보관 정책과 각 채널 공식 API 제공 범위 확인
+
+### Phase 8. Unified Marketing / Sales Intelligence
+
+- [ ] Meta Ads + Store Sales + Product + VOC + Creative DB 연결
+- [ ] 광고비 증가·매출 감소 원인 탐색 / CTR 외 실제 구매 기여 분석
+- [ ] 상품별 공헌이익 / 소재별 성과 변화 / 고객 VOC와 광고 메시지 성과 비교
+- [ ] 출처·기간·귀속 한계를 표시하고 관측 데이터와 AI 해석을 구분
+
+### Phase 9. Automatic Monitoring
+
+- [ ] Cron/Webhook 수집 / 최근 평균 비교 / 이상 탐지 / 필요한 알림만 표시
+- [ ] CTR 급락 / CPA 상승 / ROAS·전환율 하락 / 취소·환불 증가 / 재고 부족 예상
+- [ ] “이상 발견 → 사용자 보고” 우선. 자동 예산 변경·발행 등 행동은 별도 승인
+
+### Phase 10. Internal Angel Agent
+
+- [ ] 기존 내부 기능을 Tool로 정리: get_product(), get_voc(), search_ads(), get_ad_performance()
+- [ ] get_sales(), get_inventory(), generate_ad_concepts(), generate_detail_page(), create_content_draft()
+- [ ] “제품 VOC와 성과 좋은 광고를 분석해 이번 주 광고안 5개 준비” 같은 다단계 업무
+- [ ] tool calling / execution logs / retry / human approval / cost limits / idempotency
+
+MCP보다 내부 Tool과 업무 책임을 먼저 안정화한다. 현재 함수가 이미 존재한다는 의미가 아니다.
+
+### Phase 11. MCP / External Agent Integration
+
+- [ ] 안정화된 내부 API/Tool을 ChatGPT/Codex, Claude, Cursor, OpenClaw 등 MCP client에 노출
+- [ ] 후보: get_my_posts, get_my_best_posts, analyze_post, create_draft, publish_post
+- [ ] 후보: get_ad_performance, analyze_ad_creatives, get_store_metrics, get_product, get_voc, search_ads
+- [ ] search_viral_posts는 공식 접근 가능 범위 검증 후 결정
+- [ ] authentication / permissions / execution log / duplicate execution prevention / write approval
+
+MCP는 비즈니스 로직을 다시 만드는 곳이 아닌 기존 Angel Agent 기능의 adapter다.
+
+## 기존 영역별 상태 / 세부 백로그
+
+이하 기존 TODO는 기능별 범위를 보존한다. 장기 항목은 위 Phase의 세부 후보이며 현재 구현을 뜻하지 않는다.
 
 ## Blog
 
@@ -93,15 +212,15 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 - [x] 최종 예약 등록 자동 클릭 실제 Chrome/Naver 운영 검증 — scheduled+auto 실행 후 예약 발행 글 목록 등록 확인
 - [x] 활성 editor claim 전 검사 / scheduled+auto 이후 새 빈 글쓰기 자동 복귀·다음 Job 준비 — 실제 Chrome/Naver 검증 완료
 - [x] 입력 가능 editor 연속 안정성 검사 / 제목 focus·DOM 검증 / 성공 후 Job 목록 자동 갱신 — 동일 세션 scheduled+auto Job 2건 연속 예약 등록 실검증 완료
-- [x] scheduled+auto 예약 등록 자동 확인 / 동일 LI entry 제목·KST 예약시간 매칭 / reservation_confirmed_at 기록 — mock 검증, migration 적용·실환경 확인은 필요
-- 예약 등록 confirmation 내부 코드/API는 유지하되 사용자 UI는 제공하지 않음. Queue는 예약 등록 요청 완료와 실제 발행 완료 기록을 구분
+- 내부/보류: 예약 목록 2차 확인 matcher·API·reservation_confirmed_at은 남아 있으나 사용자 UI는 제공하지 않음. 자동 confirmation은 운영 완료로 취급하지 않음
+- [x] Queue 표시 단순화 — 예약 등록 요청 완료와 실제 발행 완료 기록 구분 / confirmation UI 미제공
 - [ ] 일반 발행 최종 버튼 자동 실행 — 미구현 / 후순위
 - [ ] 중간 실패 재개
 - [ ] 장시간 signed URL 갱신 / 비정상 종료 cleanup
-- [ ] 일반 발행 최종 자동 실행 / 실제 공개 완료 자동 확인
+- [ ] 실제 공개 완료 자동 확인 — 예약 시각 경과만으로 published 처리하지 않음
 - [ ] Naver 실제 발행 결과 자동 확인
 
-예약 Job은 콘텐츠 입력 후 예약 날짜/시간까지 설정한다. 기본 review는 사람이 최종 확인·발행한다. 명시적 scheduled+auto는 안전 검증 후 최종 예약 등록 버튼을 자동 클릭하며, 실제 Chrome/Naver에서 예약 발행 글 목록 등록까지 사용자가 확인했다. 예약 목록의 동일 entry 제목·KST 예약시간이 유일하게 일치하면 reservation_confirmed_at을 기록하고 Job은 inserted로 유지한다. 확인하지 못한 경우 직접 확인하도록 안내한다. Extension은 queued Job의 고정 snapshot을 실행한다. 웹에서 사용자가 발행 완료를 기록하고 failed Job을 같은 자료로 재대기할 수 있다. 실제 공개 완료 자동 확인과 published 자동 확정은 아직 구현하지 않았다.
+예약 Job은 콘텐츠 입력 후 예약 날짜/시간까지 설정한다. 기본 review는 사람이 최종 확인·발행한다. 명시적 scheduled+auto는 안전 검증 후 최종 예약 등록 버튼을 자동 클릭하며, 실제 Chrome/Naver에서 예약 발행 글 목록 등록까지 사용자가 확인했다. 예약 confirmation은 내부/보류 기능이며 현재 사용자 성공 판정으로 노출하지 않는다. 최종 예약 등록 클릭 뒤에도 Job은 inserted를 유지한다. Extension은 queued Job의 고정 snapshot을 실행한다. 웹에서 사용자가 발행 완료를 기록하고 failed Job을 같은 자료로 재대기할 수 있다. 실제 공개 완료 자동 확인과 published 자동 확정은 아직 구현하지 않았다.
 
 ### 키워드 / 운영 분석
 

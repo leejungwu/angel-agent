@@ -23,7 +23,8 @@ lib business logic
            ↓ Chrome/CDP    ↓ Naver DOM 탐색·selection·검증
            └──────────→ 현재 열린 Naver SmartEditor
                          ↓
-                    사용자 최종 검수 / 발행
+                    review: 사용자 검수 / 최종 발행
+                    scheduled+auto: 예약 등록 요청 / 다음 글쓰기
 ```
 
 Extension은 웹 앱이 새 Chrome을 띄우는 방식이 아니라, 사용자가 열고 로그인한 Naver 탭에서 실행한다.
@@ -76,6 +77,9 @@ presetId를 생략하면 Task의 preset_id, 그다음 is_default 프리셋을 �
 기존 공통 규칙·전략·카피라이팅·natural tone·각 template·medium 제품 노출·CTA none 원문을 옮긴 값이다.
 정보형만 기본값이다. 이후 글쓰기 규칙은 DB 프리셋에서 편집하며 Markdown이나 코드 상수를 추가 로딩하지 않는다.
 키워드는 Task의 keyword, 이번 글 지시는 Task의 instructions 한 곳만 사용한다. 역사적 purpose는 생성에 사용하지 않는다.
+
+`docs/CONTENT_STRATEGY.md`와 `docs/COPYWRITING_SKILLS.md`는 참고/보관 문서다.
+현재 생성 코드에서 읽거나 prompt에 합치지 않는다.
 
 새 생성에는 `202610150001_create_blog_prompt_presets.sql` 적용이 필요하다. migration은 자동 실행하지 않는다.
 기존 `blog_tasks.generation_settings` 컬럼과 값은 호환성·롤백을 위해 보존하지만 앱에서는 읽거나 쓰지 않는다.
@@ -179,17 +183,18 @@ Task 설정 변경은 Draft 내용·상태와 기존 Job에 영향을 주지 않
 ```text
 approved draft + 현재 Task 사진 → 웹 Queue 등록 시 execution_snapshot 고정
   → Side Panel queued/failed Job 조회·같은 Job 재조회 (queued만 실행)
-  → background가 Job 선점·attempt 증가·실행 직전 signed URL 발급 요청
+  → background: 활성·표시·입력 가능·안정 editor preflight (실패하면 claim하지 않음)
+  → Job 선점·attempt 증가·실행 직전 signed URL 발급 요청
   → snapshot adapter (고정 본문 / 사진 / Blocks)
-  → background: 현재 Naver tab/frame 확정·debugger attach
+  → background: debugger attach
   → 제목 입력·검증 → text/image Blocks 순차 실행
   ↔ content: DOM 위치/문서 끝 selection/본문·이미지 검증
   → scheduled는 예약 날짜/시간 설정
   → scheduled+auto는 safety validation 후 최종 예약 등록 버튼 CDP 클릭
   → 임시 파일 정리·debugger detach
   → 해당 attempt의 inserted 또는 failed 기록
-  → scheduled+auto는 Naver 전환 대기·예약 목록 확인·확인 timestamp 기록 시도
-  → scheduled+auto는 확인 결과와 독립적으로 fresh editor 준비
+  → scheduled+auto는 Naver 전환 대기 후 fresh editor 준비
+    (내부 예약 목록 확인 시도와 독립적인 후처리)
   → review는 사용자 검수·최종 발행 / scheduled+auto도 성공 시 inserted 유지
 ```
 
@@ -220,9 +225,18 @@ Extension 목록·상세·claim 응답은 `publishMode`와 `scheduledAt`을 전�
 review는 최종 버튼을 누르지 않는다. scheduled+auto만 예약 상태·미래 시간·Naver 오류·최종 버튼 유일성/표시/활성 상태를 재검증한다.
 content script는 `[data-testid="seOnePublishBtn"]`의 검증된 좌표만 반환하고 background가 CDP trusted 클릭 1회를 보낸다. 상단 `tpb.publish` trigger와 구분하며 최종 클릭을 재시도하지 않는다.
 scheduled+auto는 실제 Chrome/Naver에서 V3 입력, 예약 날짜/시간 설정, 안전 검증, 최종 버튼 자동 클릭 후 예약 발행 글 목록 등록까지 사용자 검증을 완료했다.
-scheduled+auto는 최종 클릭 후 inserted를 기록하고 Naver 전환을 기다린 다음 예약 목록 확인을 시도한다. 활성 Naver 탭의 모든 naver.com frame에서 publishLayer 밖 portal을 포함해 “예약 발행 글” 목록을 찾는다. 개별 LI의 BUTTON 안 제목과 KST 예약 날짜·시간이 정확히 일치하는 entry가 하나일 때만 예약 등록을 확인한다. 목록이 없으면 frame 전체에서 유일한 “예약 발행 N건” BUTTON만 조회 목적으로 클릭하며 예약 entry·수정·삭제·최종 발행 버튼은 누르지 않는다. content script는 검증된 조회 버튼의 좌표만 반환하고 background가 trusted CDP 클릭을 한 번 수행한다. 매 poll마다 현재 frame 목록을 다시 조회해 새 frame이나 portal의 heading과 목록을 확인한 뒤 matcher를 실행한다. 500ms 간격으로 최대 약 10초 확인하고, 0개·중복·timeout은 미확인으로 남긴다. 조회 버튼·목록 heading·entry 수·매칭 수·실패 단계와 frame 경로는 내부 응답에 구조화해 유지하며 사용자 UI와 원문 DOM에는 표시하지 않는다.
-`POST /api/extension/publication-jobs/[id]/reservation-confirmation`은 기존 Extension 인증과 현재 attempt_no, inserted/scheduled/auto, scheduled_at을 검사한다. `reservation_confirmed_at`만 서버 시각으로 조건부 기록하며 재요청은 idempotent하다. 이 nullable 값은 예약 목록 등록 확인 시각이며 실제 공개 완료를 뜻하는 published_at/published_url과 다르다. content snapshot과 status는 변경하지 않는다. 예약 확인 값과 진단은 사용자 화면에 표시하지 않는다. Queue는 scheduled+auto의 inserted_at을 “예약 등록 요청 완료”로 표시하며 published_at이 없으면 발행 완료 행을 숨긴다.
-Side Panel은 Publication Job 선택·입력과 DOM 진단만 노출한다. 예약 확인 목록·재확인 버튼·confirmation 진단 UI는 제공하지 않는다. 내부 recheck API와 matcher, reservation_confirmed_at은 유지한다.
+최종 클릭 성공 후에도 Job은 inserted를 유지한다. Queue의 inserted_at은 scheduled+auto에서 “예약 등록 요청 완료”,
+manual/review에서 “네이버 입력 완료”로 표시한다. published_at은 사용자의 실제 발행 완료 기록이며
+scheduled_at 경과만으로 채우지 않는다. 값이 있을 때만 “발행 완료” 행을 표시한다.
+Side Panel은 Job 선택·입력과 DOM 진단을 제공하며 예약 확인 목록·재확인 버튼·confirmation 진단은 노출하지 않는다.
+
+예약 목록 2차 확인용 matcher, recheck API와 reservation_confirmed_at은 내부/보류 기능으로 남아 있다.
+현재 background에는 최종 클릭 이후 목록 확인 시도가 남아 있지만 사용자 핵심 흐름의 성공 기준으로 쓰지 않는다.
+동일 LI > BUTTON의 제목·KST 예약 날짜·시간이 유일하게 일치하는 경우만 확인 timestamp를 기록한다.
+`POST /api/extension/publication-jobs/[id]/reservation-confirmation`은 인증·현재 attempt와 inserted/scheduled/auto 조건을 검사한다.
+이 값은 실제 공개 완료가 아니며 status나 content snapshot을 변경하지 않는다. 목록 acquisition은 실환경에서
+timeout이 보고되어 자동 확인 성공을 보장할 수 없다. 사용자 UI에서는 확인 값·성공/실패 진단을 숨긴다.
+
 Extension은 claim 전에 active/visible/writable/stable editor preflight를 수행한다. document 로드 완료, SmartEditor 제목·본문 target의 표시·크기·비활성 상태, 상위 iframe의 화면 노출·가림 상태와 실제 화면 안에 열린 발행 패널/모달을 검사한다. Naver target wrapper 자체의 contenteditable은 필수 조건이 아니며, 편집 host를 찾지 못해도 기존 trusted 입력 target을 후보로 인정한다. 일반 role=dialog와 평상시에도 표시되는 publishLayer root만으로 발행 패널이 열렸다고 판단하지 않는다. root 내부의 즉시/예약 radio 또는 최종 발행 버튼이 실제 화면에 보일 때 열린 상태로 판정한다. 같은 document·제목·본문과 frame이 250ms 간격으로 3회 연속 준비 상태를 유지해야 claim한다. 숨겨진 잔여 editor나 초기화 중인 editor는 claim하지 않는다. 제목 클릭 후 실제 focus/selection을 확인하고 한 번만 입력하며, 제목 DOM 반영을 최대 2초 polling한다.
 예약 목록 확인 시도 뒤에는 기존 글쓰기 frame URL의 blogId로 새 글쓰기를 열고 빈 활성 editor 준비를 확인한다. 예약 확인/서버 기록 실패와 fresh editor 실패는 독립적인 후처리이며 어느 쪽도 inserted를 failed로 바꾸지 않는다. 사용자에게는 예약 등록 요청 완료와 다음 글쓰기 준비 결과만 안내한다. 복귀 성공은 예약 등록 성공의 증거가 아니며 다음 Job은 사용자가 별도로 실행한다. review와 manual은 예약 자동 확인과 자동 이동을 하지 않는다.
 Side Panel은 입력 성공 후 Job 목록을 자동 재조회해 실행이 끝난 Job을 제거하고 결과 메시지는 유지한다. 다음 실행에는 남은 Job을 다시 선택해야 한다.
@@ -240,7 +254,8 @@ Extension 입력 성공은 Job을 inserted로 기록한다. scheduled+auto의 �
 | `extension/types.d.ts` | Task/Block/message/reply/diagnostic/Chrome API 타입 계약 | runtime 실행 및 검증 자체는 아님 |
 | `extension/manifest.json` | MV3 권한, service worker, side panel, Naver all_frames content scripts | 새 Chrome/profile이나 자동 로그인 기능 없음 |
 
-ready 기준은 올바른 글쓰기 frame과 제목·본문의 발견 여부다. contenteditable 여부를 입력 필수 조건으로 삼지 않는다.
+raw diagnostic은 준비 여부와 관계없이 반환한다. 실행은 active/visible/writable 조건과 동일 editor의 연속 안정성까지 확인한다.
+SmartEditor wrapper 자체의 contenteditable=true는 필수 조건이 아니다.
 본문을 DOM에 직접 대입하지 않으며 실제 입력은 background의 CDP가 한다.
 앱 주소·연결 토큰은 Chrome local storage에 보관하고 trusted extension context로 접근을 제한한다.
 Extension API는 `ANGEL_EXTENSION_TOKEN` Bearer 인증을 사용한다.
@@ -268,7 +283,7 @@ kin_prompt_settings → 모든 KIN 생성의 공통 prompt
 |---|---|
 | `products` / `product_assets` | 상품 사실과 제품 사진. Blog Task 사진과 별개 |
 | `blog_tasks` | 제품·keyword/topic/instructions·preset_id. 같은 Task에서 여러 draft 생성 가능 |
-| `blog_drafts` | 제목·intro·sections·closing·검수 상태·provider/model·generation_snapshot. Extension은 approved만 사용 |
+| `blog_drafts` | 제목·intro·sections·closing·검수 상태·provider/model·generation_snapshot. 새 Job은 approved만 등록하며 실행은 고정 snapshot 사용 |
 | `blog_prompt_presets` | 사용자 편집 prompt 4개와 분량·소제목·키워드 범위 |
 | `blog_task_assets` | Task 사진 경로·파일명·sort_order. 실제 bytes는 Storage에 저장 |
 | `blog_publication_jobs` | 승인 Draft 실행 snapshot, 웹 Queue, Extension 선점·attempt·입력 성공/실패 기록 |
@@ -330,7 +345,8 @@ failed는 웹에서 부분 입력 확인·정리 후 같은 Job을 queued로 되
 중간 재개는 제공하지 않으며 처음부터 입력한다. service worker 종료·선점 응답 유실로 inserting이 남으면 10분 이후 수동 복구한다.
 10분 경과는 실제 종료의 증명이 아니다. 사용자가 기존 Extension 입력 종료와 부분 입력 정리를 확인해야 하며, 자동 재실행하지 않는다.
 입력 성공 뒤 결과 저장만 실패하면 완료 안내와 상태 기록 미확인 경고를 표시하며 failed로 덮어쓰지 않는다.
-V3 10장 입력 엔진의 기존 실검증과 새 Job 연결의 mock 검증을 구분한다. 새 연결의 Chrome/Naver 실검증은 별도로 필요하다.
+V3는 실제 저장 Draft와 사진 10장·마지막 본문 입력까지 사용자 실검증을 완료했다. Publication Job 실행 연결과
+scheduled+auto의 같은 세션 연속 실행도 사용자 실검증 범위다. mock 검사는 DOM fixture 기반 회귀이며 모든 Naver UI 변화를 보장하지 않는다.
 
 ## Product / VOC / KIN 흐름
 
@@ -357,8 +373,10 @@ VOC는 자체 OpenAI 호출을 사용한다. 현재 Blog generate는 VOC를 직�
 → 구조화 답변 검증 → 제품 언급 hard validation → quality-check 경고 → kin_drafts/Task 상태 저장.
 
 `KinPromptSettings.tsx → /api/kin/prompt-settings`는 기본 접힘 상태의 공통 prompt 편집기다.
-`kin_prompt_settings`는 단일 행이며 기존 시스템/공통 스타일 문구를 원문 그대로 seed한다.
+`kin_prompt_settings`는 단일 행이며 시스템/사실성 지시와 공통 스타일 지시를 저장한다.
+migration seed는 초기값이며 이후 생성은 DB에서 조회한 현재 값을 사용한다.
 공통 문구가 없으면 생성은 중단하며 코드 기본 prompt로 조용히 대체하지 않는다.
+공통 Prompt는 모든 답변, preset은 선택 스타일, instructions는 이번 질문에만 적용한다.
 `KinPresetControl.tsx → /api/kin/presets/ → lib/kin/presets.ts`는 선택 스타일 CRUD를 유지한다.
 이번 질문의 추가 지시는 기존 textarea를 사용하며 프리셋과 별개다.
 
@@ -366,6 +384,8 @@ VOC는 자체 OpenAI 호출을 사용한다. 현재 Blog generate는 VOC를 직�
 이 순서와 none/relevant/direct 정책을 system 역할의 JSON 계약으로 전달하고, 모든 글쓰기 자연어는
 공통 Prompt·preset·추가 지시 데이터에 둔다. 코드에서 자연어 안내를 append하지 않는다.
 구조화된 preset 설정도 자연어 template로 변환하지 않고 JSON 그대로 전달한다.
+schema description·데이터 key·enum·validation 오류는 프로그램 계약이며 사용자가 편집하는 글쓰기 자연어와 구분한다.
+출력 길이·필수 필드·제품 언급 정책은 코드에서 강제하며 공통 Prompt를 편집해도 완화되지 않는다.
 초기 공통 prompt의 문구도 사용자가 편집할 수 있으며 프로그램 계약을 무효화하지 않는다.
 
 `lib/kin/generate.ts`는 answer schema·모델 기본값·응답 검증·VOC 압축을 담당한다.
@@ -399,7 +419,8 @@ KIN은 생성·확인·복사 도구다. Draft 편집, 승인/반려, Queue, 자
 | 사진 위치 정책 | `lib/blog-publishing/image-layout.ts` |
 | 본문 조립·사진 offset·수동 마커 | `lib/blog-publishing/preparation.ts` |
 | 실행 Block 계약 | `lib/blog-publishing/blocks.ts` |
-| Extension 데이터·승인 draft 선택 | `lib/blog-publishing/extension-api.ts`, `app/api/extension/blog-tasks/` |
+| 현재 Job 실행 데이터·선점·결과 | `lib/blog-publishing/publication-extension.ts`, `app/api/extension/publication-jobs/` |
+| 호환용 Task/Draft 실행 데이터 | `lib/blog-publishing/extension-api.ts`, `app/api/extension/blog-tasks/` |
 | Side Panel·선택 상태 | `extension/sidepanel/` |
 | Naver 실제 입력·DOM 검증 | `extension/background.ts`, `extension/content.ts` |
 | Task 사진 업로드·전체 삭제·압축 | `[id]/BlogTaskAssets.tsx`, `lib/blog-task-assets/` |
@@ -417,3 +438,14 @@ KIN은 생성·확인·복사 도구다. Draft 편집, 승인/반려, Queue, 자
 
 표의 `[id]/...`는 해당 기능의 동적 상세 화면 경로다. Blog 항목은 `app/content/blog/[id]/`,
 Product 항목은 `app/products/[id]/`를 기준으로 읽는다.
+
+## 현재 운영 경계
+
+- Blog는 v1 운영 단계다. 일반 manual 최종 버튼 자동 클릭, 중간 실패 block resume, 실제 공개 완료 자동 판정은 없다.
+- 현재 발행 경로는 Chrome Extension + CDP + content script다. 과거 Playwright publisher는 현재 실행 경로가 아니다.
+- 공통 AI transport는 Blog/KIN에서 사용한다. VOC는 별도 OpenAI 분석 경로이며 공유 transport로 통합되었다고 보지 않는다.
+- `lib/supabase.ts`는 `NEXT_PUBLIC_SUPABASE_URL`과 publishable key를 사용한다. 서버 route 자체가 관리자 권한 경계는 아니다.
+  일부 client의 직접 DB/Storage 접근과 내부 설정 write 정책이 남아 있다. Extension 전용 Bearer 인증과 구분한다.
+- 코드·migration의 존재와 remote DB 적용 여부는 별개다. 이 문서는 현재 main 코드 구조를 설명하며 DB를 조회·변경하지 않는다.
+- Threads, 광고 reference/성과, 상세페이지, 소싱, 판매·재고, 범용 모니터링, 내부 Agent와 MCP adapter는 현재 구현 모듈이 아니다.
+  해당 범위와 외부 API 검증 과제는 ROADMAP에서 관리한다.
