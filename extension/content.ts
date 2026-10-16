@@ -23,25 +23,110 @@
         !img.closest(helperSelector) && /^(https?:\/\/|blob:|data:image\/)/i.test(img.currentSrc || img.getAttribute("src") || ""))).length;
   }
 
+  function displayed(element: HTMLElement) {
+    for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (node.hidden || node.getAttribute("aria-hidden") === "true" || style.display === "none" ||
+        style.visibility === "hidden" || style.visibility === "collapse" || style.opacity === "0") return false;
+    }
+    return [...element.getClientRects()].some(rect => rect.width > 0 && rect.height > 0);
+  }
+
+  let activeEditorReason = "";
+  function activeFrame() {
+    activeEditorReason = "active";
+    try {
+      if (document.visibilityState !== "visible") { activeEditorReason = "document_hidden"; return false; }
+      let current: Window = window;
+      while (current !== current.top) {
+        const frame = current.frameElement as HTMLElement | null;
+        if (!frame) { activeEditorReason = "parent_frame_inaccessible"; return false; }
+        for (let node: HTMLElement | null = frame; node; node = node.parentElement) {
+          const style = current.parent.getComputedStyle(node);
+          if (node.hidden || node.getAttribute("aria-hidden") === "true" || style.display === "none" ||
+            style.visibility === "hidden" || style.visibility === "collapse" || style.opacity === "0") { activeEditorReason = "parent_frame_hidden"; return false; }
+        }
+        const rect = frame.getBoundingClientRect();
+        const left = Math.max(0, rect.left), right = Math.min(current.parent.innerWidth, rect.right);
+        const top = Math.max(0, rect.top), bottom = Math.min(current.parent.innerHeight, rect.bottom);
+        if (right <= left || bottom <= top) { activeEditorReason = "parent_frame_outside_viewport"; return false; }
+        if (current.parent.document.elementFromPoint((left + right) / 2, (top + bottom) / 2) !== frame) { activeEditorReason = "parent_frame_center_obscured"; return false; }
+        current = current.parent;
+      }
+      return true;
+    } catch { activeEditorReason = "parent_frame_access_error"; return false; } // Inaccessible parent cannot prove an active editor.
+  }
+
+  const editorSession = `${Date.now()}-${Math.random()}`;
+  let editorRevision = 0;
+  let editorNodes: (HTMLElement | undefined)[] = [];
+  // Callers supply only the queried SmartEditor title/paragraph targets. Naver manages their editing host after trusted focus.
+  const writable = (element: HTMLElement | undefined) => !!element &&
+    !element.closest('[disabled],[inert],[aria-disabled="true"],[aria-hidden="true"]') && getComputedStyle(element).pointerEvents !== "none" && displayed(element);
+  const editableHost = (element: HTMLElement) => element.isContentEditable ? element :
+    element.closest<HTMLElement>('[contenteditable="true"],[contenteditable="plaintext-only"]') ??
+    [...element.querySelectorAll<HTMLElement>('[contenteditable="true"],[contenteditable="plaintext-only"]')].find(writable) ?? null;
+  function onScreen(element: HTMLElement) {
+    return displayed(element) && [...element.getClientRects()].some(rect =>
+      rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 && rect.left < window.innerWidth && rect.top < window.innerHeight);
+  }
   function inspect() {
     const writing = /PostWriteForm\.naver|\/postwrite(?:\?|$|\/)/i.test(location.href);
-    const titles = [...document.querySelectorAll<HTMLElement>(".se-title-text")].filter(visible);
-    const paragraphs = [...document.querySelectorAll<HTMLElement>(".se-component.se-text .se-text-paragraph")].filter(visible);
+    const allTitles = [...document.querySelectorAll<HTMLElement>(".se-title-text")];
+    const allParagraphs = [...document.querySelectorAll<HTMLElement>(".se-component.se-text .se-text-paragraph")];
+    const titles = allTitles.filter(visible);
+    const paragraphs = allParagraphs.filter(visible);
     const title = titles.length === 1 ? titles[0] : undefined;
     const body = paragraphs[0];
-    const frameReady = writing && !!title && !!body;
+    const frameReady = writing && document.readyState === "complete" && !!title && !!body;
+    const visibleEditor = !!title && !!body && displayed(title) && displayed(body);
+    const frameActive = activeFrame();
+    const activeEditor = visibleEditor && frameActive;
+    const writableEditor = writable(title) && writable(body);
+    if (editorNodes[0] !== title || editorNodes[1] !== body) { editorNodes = [title, body]; editorRevision++; }
+    const publishRootSelector = '[data-focus-lock="publishLayer"]';
+    const publishRoots = [...document.querySelectorAll<HTMLElement>(publishRootSelector)];
+    // The root is normally rendered even when settings are closed. Only its visible semantic controls prove open state.
+    const publishControls = ['[data-testid="nowTimeRadioBtn"]', '[data-testid="preTimeRadioBtn"]', '[data-testid="seOnePublishBtn"]'];
+    const publishPanelCandidates = [publishRootSelector, '[role="dialog"]', '[aria-modal="true"]'].flatMap(selector =>
+      [...document.querySelectorAll<HTMLElement>(selector)].map(element => ({ selector, tag: element.tagName, displayed: displayed(element), onScreen: onScreen(element), isPublishPanel: false })));
+    const controlCandidates = publishRoots.flatMap(root => publishControls.flatMap(selector =>
+      [...root.querySelectorAll<HTMLElement>(selector)].map(element => ({ selector, tag: element.tagName, displayed: displayed(element),
+        onScreen: element.getAttribute("data-click-area") !== "tpb.publish" && onScreen(element), isPublishPanel: true }))));
+    publishPanelCandidates.push(...controlCandidates);
+    const publishPanelOpen = controlCandidates.some(candidate => candidate.onScreen);
+    const publishPanelState = { rootFound: publishRoots.length > 0, rootDisplayed: publishRoots.some(displayed),
+      nowRadioVisible: controlCandidates.some(candidate => candidate.selector === publishControls[0] && candidate.onScreen),
+      preRadioVisible: controlCandidates.some(candidate => candidate.selector === publishControls[1] && candidate.onScreen),
+      finalButtonVisible: controlCandidates.some(candidate => candidate.selector === publishControls[2] && candidate.onScreen), publishPanelOpen };
+    // A generic role=dialog is not necessarily an open modal or the publish layer.
+    const blockingDialogOpen = [...document.querySelectorAll<HTMLElement>('[aria-modal="true"],dialog[open]')].some(onScreen);
+    const baseReady = frameReady && visibleEditor && activeEditor && writableEditor && !publishPanelOpen && !blockingDialogOpen;
+    const ready = baseReady && activeEditor;
+    const fieldState = (element: HTMLElement | undefined): EditorFieldState | null => element ? {
+      rects: [...element.getClientRects()].map(rect => ({ x: rect.x, y: rect.y, width: rect.width, height: rect.height })),
+      contenteditable: element.getAttribute("contenteditable"), isContentEditable: element.isContentEditable,
+      parentContenteditable: element.parentElement?.getAttribute("contenteditable") ?? null,
+      editableDescendants: element.querySelectorAll('[contenteditable="true"],[contenteditable="plaintext-only"]').length,
+      editableHostTag: editableHost(element)?.tagName ?? null,
+      editableHostContenteditable: editableHost(element)?.getAttribute("contenteditable") ?? null,
+      displayed: displayed(element),
+    } : null;
     const existingTitle = editorText(title).length > 0;
     const existingBody = paragraphs.some(paragraph => editorText(paragraph).length > 0);
     const imageCount = existingImageCount();
     const diagnostic: EditorDiagnostic = {
-      url: `${location.origin}${location.pathname}`, writing, ready: frameReady, frameReady,
-      titleFound: !!title, bodyFound: !!body,
+      url: `${location.origin}${location.pathname}`, writing, ready, frameReady, visibleEditor, activeEditor,
+      publishPanelOpen, publishPanelCandidates, publishPanelState, blockingDialogOpen, writableEditor, stableEditor: false, editorId: `${editorSession}-${editorRevision}`,
+      baseReady, documentReadyState: document.readyState, activeEditorReason,
+      titleState: fieldState(title ?? allTitles[0]), bodyState: fieldState(body ?? allParagraphs[0]),
+      titleFound: allTitles.length > 0, bodyFound: allParagraphs.length > 0,
       existing: existingTitle || existingBody || imageCount > 0,
       iframeCount: document.querySelectorAll("iframe").length, paragraphs: paragraphs.length,
       titleTag: title?.tagName, bodyTag: body?.tagName,
       title: { matchedSelector: ".se-title-text", target: describe(title) },
       body: { matchedSelector: ".se-component.se-text .se-text-paragraph", target: describe(body) },
-      reason: frameReady ? "SmartEditor 글쓰기 화면 확인 완료" : `글쓰기=${writing}, 제목=${titles.length}, 본문 문단=${paragraphs.length}`,
+      reason: ready ? "활성 SmartEditor 글쓰기 화면 확인 완료" : `writing=${writing}, document=${document.readyState}, frameReady=${frameReady}, visible=${visibleEditor}, active=${activeEditor}(${activeEditorReason}), writable=${writableEditor}, publishPanel=${publishPanelOpen}, modal=${blockingDialogOpen}`,
     };
     return { title, body, paragraphs, diagnostic, existingTitle, existingBody, imageCount };
   }
@@ -50,7 +135,7 @@
     const current = inspect();
     if (current.diagnostic.ready !== true) throw new Error(current.diagnostic.reason);
     if (!allowImages && current.imageCount > 0) throw new Error("이미 사진이 있는 글에는 입력하지 않습니다. 새 글을 열어 주세요.");
-    if ([...document.querySelectorAll<HTMLElement>('[role="dialog"]')].some(visible)) throw new Error("열린 모달을 직접 처리한 뒤 다시 시도해 주세요.");
+    if (current.diagnostic.blockingDialogOpen) throw new Error("열린 모달을 직접 처리한 뒤 다시 시도해 주세요.");
     return current;
   }
 
@@ -125,7 +210,7 @@
   }
 
   async function verifyInput(task: ExtensionTask, field: "title" | "body") {
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + (field === "title" ? 2000 : 5000);
     let titleMatches = false;
     let comparison = compareBody(task.bodyText, []);
     while (Date.now() < deadline) {
@@ -415,8 +500,18 @@
   }
 
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
-    if (sender.id !== chrome.runtime.id || !["EDITOR_SCHEDULE_FINAL_TARGET", "EDITOR_SCHEDULE", "EDITOR_DIAGNOSE", "EDITOR_TARGET", "EDITOR_VERIFY", "EDITOR_PHOTO_TARGET", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY", "EDITOR_PHOTO_UPLOAD_CARET", "EDITOR_PHOTO_BUTTON", "EDITOR_PHOTO_VERIFY", "EDITOR_PHOTO_BODY_VERIFY", "EDITOR_BLOCK_START", "EDITOR_BLOCK_CARET", "EDITOR_BLOCK_TEXT_VERIFY", "EDITOR_BLOCK_VERIFY", "EDITOR_BLOCK_NEXT_TEXT", "EDITOR_BLOCK_IMAGE_TARGET", "EDITOR_BLOCK_TEXT_END"].includes(message.type)) return;
+    if (sender.id !== chrome.runtime.id || !["EDITOR_TITLE_FOCUS", "EDITOR_SCHEDULE_FINAL_TARGET", "EDITOR_SCHEDULE", "EDITOR_DIAGNOSE", "EDITOR_TARGET", "EDITOR_VERIFY", "EDITOR_PHOTO_TARGET", "EDITOR_PHOTO_CARET", "EDITOR_PHOTO_EMPTY", "EDITOR_PHOTO_UPLOAD_CARET", "EDITOR_PHOTO_BUTTON", "EDITOR_PHOTO_VERIFY", "EDITOR_PHOTO_BODY_VERIFY", "EDITOR_BLOCK_START", "EDITOR_BLOCK_CARET", "EDITOR_BLOCK_TEXT_VERIFY", "EDITOR_BLOCK_VERIFY", "EDITOR_BLOCK_NEXT_TEXT", "EDITOR_BLOCK_IMAGE_TARGET", "EDITOR_BLOCK_TEXT_END"].includes(message.type)) return;
     void (async (): Promise<ExtensionReply> => {
+      if (message.type === "EDITOR_TITLE_FOCUS") {
+        const deadline = Date.now() + 1500;
+        while (Date.now() < deadline) {
+          const current = inspect(), title = current.title, selection = window.getSelection();
+          if (current.diagnostic.ready && title && writable(title) &&
+            (title.contains(document.activeElement) || (!!selection?.rangeCount && title.contains(selection.anchorNode) && title.contains(selection.focusNode)))) return {};
+          await new Promise(resolve => setTimeout(resolve, 75));
+        }
+        throw new Error("제목 입력 focus를 확인하지 못했습니다.");
+      }
       if (message.type === "EDITOR_SCHEDULE_FINAL_TARGET") {
         if (!message.task) throw new Error("예약 Job이 없습니다.");
         const button = NaverSchedule.finalTarget(message.task);

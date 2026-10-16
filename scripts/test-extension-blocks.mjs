@@ -8,7 +8,7 @@ source = source.replace("  chrome.runtime.onMessage.addListener", "  globalThis.
 let paragraphs = [], images = [], selection, clock = 0;
 function paragraph(value, order) {
   const node = { nodeType: 3, textContent: value };
-  const p = { nodeType: 1, order, innerText: value, textContent: value, tagName: "P", node,
+  const p = { isContentEditable: true, nodeType: 1, order, innerText: value, textContent: value, tagName: "P", node,
     getClientRects: () => [{ width: 100, height: 20 }],
     getBoundingClientRect: () => { throw new Error("Block caret must not query screen coordinates"); },
     getAttribute: () => "se-text-paragraph", scrollIntoView() {},
@@ -22,6 +22,8 @@ function paragraph(value, order) {
 }
 const title = { ...paragraph("", 0), tagName: "DIV" };
 const document = {
+  visibilityState: "visible",
+  readyState: "complete",
   querySelectorAll(selector) {
     if (selector === ".se-title-text") return [title];
     if (selector === ".se-component.se-image") return images;

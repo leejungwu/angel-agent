@@ -6,9 +6,10 @@ import ts from "typescript";
 const compile = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
 const contentCode = compile(await readFile("extension/content.ts", "utf8"));
 const panelCode = compile(await readFile("extension/sidepanel/index.ts", "utf8"));
-function editorDiagnostic({ title = "", body = [""], helper = "", image = false, emptyImage = false, uiIcon = false }) {
+async function editorDiagnostic({ title = "", body = [""], helper = "", image = false, emptyImage = false, uiIcon = false, hidden = false, zeroRect = false, frameHidden = false, covered = false, ancestorStyle = {}, ariaHidden = false, editable = true, readyState = "complete" }) {
   const field = value => {
-    const root = { innerText: value + helper, getClientRects: () => [{}], getAttribute: () => "", tagName: "P" };
+    const root = { isContentEditable: editable, closest: () => null, innerText: value + helper, getClientRects: () => [{ width: zeroRect ? 0 : 100, height: 20 }], getAttribute: () => "", tagName: "P", parentElement: { hidden, getAttribute: name => name === "aria-hidden" && ariaHidden ? "true" : "", parentElement: null, style: ancestorStyle } };
+    root.querySelectorAll = () => [];
     const parent = { closest: () => null };
     root.nodes = [{ textContent: value, parentElement: parent }, { textContent: helper, parentElement: { closest: () => ({ tagName: "SPAN", className: "se-placeholder" }) } }];
     return root;
@@ -17,8 +18,15 @@ function editorDiagnostic({ title = "", body = [""], helper = "", image = false,
   const img = { currentSrc: "https://fixture.test/photo.jpg", getAttribute: () => "https://fixture.test/photo.jpg", closest: () => null };
   const components = image || emptyImage ? [{ querySelectorAll: () => image ? [img] : [] }] : [];
   let listener;
+  const style = node => ({ visibility: "visible", display: "block", ...node.style });
+  const frame = { hidden: frameHidden, getAttribute: () => "", parentElement: null, getBoundingClientRect: () => ({ left: 0, top: 0, right: 1000, bottom: 800 }) };
+  const top = { innerWidth: 1000, innerHeight: 800, getComputedStyle: style, document: { elementFromPoint: () => covered ? {} : frame } };
+  top.top = top;
+  const window = { top, parent: top, frameElement: frame };
   vm.runInNewContext(contentCode, {
     document: {
+      visibilityState: "visible",
+      readyState,
       querySelectorAll(selector) {
         if (selector === ".se-title-text") return [titleNode];
         if (selector === ".se-component.se-text .se-text-paragraph") return paragraphs;
@@ -30,11 +38,25 @@ function editorDiagnostic({ title = "", body = [""], helper = "", image = false,
       querySelector: selector => selector === ".se-component.se-image" ? components[0] ?? null : null,
       createTreeWalker(root) { let index = 0; return { nextNode: () => root.nodes[index++] ?? null }; },
     },
-    NodeFilter: { SHOW_TEXT: 4 }, getComputedStyle: () => ({ visibility: "visible" }),
+    window, NodeFilter: { SHOW_TEXT: 4 }, getComputedStyle: style,
     location: { href: "https://blog.naver.com/PostWriteForm.naver", origin: "https://blog.naver.com", pathname: "/PostWriteForm.naver" },
     chrome: { runtime: { id: "fixture", onMessage: { addListener(handler) { listener = handler; } } } },
   });
   return new Promise(resolve => listener({ type: "EDITOR_DIAGNOSE" }, { id: "fixture" }, reply => resolve(reply.diagnostic)));
+}
+
+assert.equal((await editorDiagnostic({})).ready, true);
+assert.equal((await editorDiagnostic({ editable: false })).ready, true);
+assert.equal((await editorDiagnostic({ readyState: "interactive" })).ready, false);
+for (const state of [{ hidden: true }, { zeroRect: true }, { frameHidden: true }, { covered: true },
+  { ancestorStyle: { display: "none" } }, { ancestorStyle: { visibility: "hidden" } }, { ariaHidden: true }]) {
+  const diagnostic = await editorDiagnostic(state);
+  assert.equal(diagnostic.ready, false, JSON.stringify(state));
+  assert.equal(diagnostic.activeEditor, false);
+  assert.ok(diagnostic.titleState);
+  assert.ok(diagnostic.bodyState);
+  assert.equal(diagnostic.documentReadyState, "complete");
+  assert.match(diagnostic.reason, /visible=|active=/);
 }
 
 async function confirmFlow(diagnostic) {

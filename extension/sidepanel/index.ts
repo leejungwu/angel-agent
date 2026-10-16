@@ -122,13 +122,20 @@
   }
   tasks.addEventListener("change", () => { void loadSelectedJob(); });
   async function diagnose() {
-    const reply = await request({ type: "DIAGNOSE" });
-    element("diagnostic").textContent = JSON.stringify(reply.diagnostics, null, 2);
-    return reply.diagnostic;
+    try {
+      const reply = await chrome.runtime.sendMessage({ type: "DIAGNOSE" });
+      element("diagnostic").textContent = JSON.stringify(reply.diagnostics ?? [{ reason: reply.error ?? "frame 진단 응답 없음" }], null, 2);
+      if (reply.error) throw new Error(reply.error);
+      return reply.diagnostic;
+    } catch (error) {
+      element("diagnostic").textContent = JSON.stringify({ reason: error instanceof Error ? error.message : "진단 통신 실패" }, null, 2);
+      throw error;
+    }
   }
   element("diagnose").addEventListener("click", () => { void run(async () => {
     const diagnostic = await diagnose();
-    result.textContent = diagnostic?.ready === true ? "네이버 글쓰기 화면을 확인했습니다." : diagnostic?.reason ?? "입력 영역을 확정하지 못했습니다. 프레임별 DOM 진단을 확인해 주세요.";
+    result.textContent = !diagnostic?.baseReady ? "글쓰기 화면을 확인했지만 입력 가능한 상태가 아닙니다." :
+      diagnostic.stableEditor ? "네이버 글쓰기 화면을 확인했습니다." : "글쓰기 화면은 확인됐지만 아직 안정화 중입니다.";
   }); });
   insert.addEventListener("click", () => {
     if (busy || selectionLoading) return;
@@ -150,7 +157,10 @@
     const publisher = element<HTMLSelectElement>("publisher").value === "legacy" ? "legacy" : "blocks";
     if (publisher === "legacy" && selected.images.length > 3) throw new Error("사진 3장 초과 Job은 V3 순차 입력을 사용하세요.");
     selected = undefined;
-    const reply = await request({ type: "INSERT", jobId: jobId, overwrite, publisher }); result.textContent = reply.message ?? "입력 결과를 확인해 주세요.";
+    const reply = await request({ type: "INSERT", jobId: jobId, overwrite, publisher });
+    const completedMessage = reply.message ?? "입력 결과를 확인해 주세요.";
+    try { await loadJobs(); result.textContent = completedMessage; }
+    catch { result.textContent = `${completedMessage} Job 목록 갱신에 실패했습니다. 목록을 새로고침하세요.`; }
   }); });
   void chrome.storage.local.get(["appUrl", "extensionToken", "baseUrl"]).then((saved) => {
     savedSettings = { appUrl: saved.appUrl ?? saved.baseUrl ?? "http://localhost:3000", extensionToken: saved.extensionToken ?? "" };

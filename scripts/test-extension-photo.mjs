@@ -5,8 +5,9 @@ import ts from "typescript";
 const code = ts.transpileModule((await readFile("extension/schedule.ts", "utf8")) + "\n" + (await readFile("extension/background.ts", "utf8")), { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
 const task = { id: 1, title: "제목", bodyText: "abcdefghij", images: [2, 6, 8].map((insertOffset, index) => ({ id: index, index, insertOffset, insertPrefix: "abcdefghij".slice(0, insertOffset), signedUrl: `https://fixture.test/${index}.png` })) };
 const jobId = "00000000-0000-4000-8000-000000000001";
-async function scenario(input = task, failure = "", publisher = "legacy") {
-  let listener, intercepted = false, sequence = 0, uploadVerified = 0;
+async function scenario(input = task, failure = "", publisher = "legacy", diagnoseOnly = false) {
+  let listener, intercepted = false, sequence = 0, uploadVerified = 0, navigated = false, freshPolls = 0;
+  const navigations = [];
   const deleteAttempts = new Map(), cleanupDelays = [], cleanupUploadCounts = [];
   const handlers = new Set(), commands = [], messages = [], downloads = [], removed = [], erased = [];
   const timeline = [], outcomes = [];
@@ -15,19 +16,23 @@ async function scenario(input = task, failure = "", publisher = "legacy") {
 
   const chrome = {
     storage: { local: { setAccessLevel: async () => {}, get: async () => ({ appUrl: "http://localhost:3000", extensionToken: "fixture-secret" }) } }, sidePanel: { setPanelBehavior: async () => {} },
-    tabs: { query: async () => [{ id: 1, url: "https://blog.naver.com/postwrite" }], sendMessage: async (_tab, message) => {
+    tabs: { update: async (_tab, options) => { navigations.push(options.url); if (failure === "freshNavigation") throw new Error("navigation failure"); navigated = true; },
+      query: async () => [{ id: 1, url: "https://blog.naver.com/postwrite" }], sendMessage: async (_tab, message) => {
       messages.push(message);
       timeline.push(message.type);
       if (failure === "nextParagraph" && message.type === "EDITOR_BLOCK_NEXT_TEXT" && !messages.some((m) => m.type === "EDITOR_BLOCK_NEXT_TEXT" && m !== message)) return { needsParagraph: true, position: { x: 10, y: 20 } };
       if (message.type === failure) return { error: "fixture failure" };
-      if (message.type === "EDITOR_DIAGNOSE") return { diagnostic: { frameReady: true, ready: true, titleFound: true, bodyFound: true } };
+      if (message.type === "EDITOR_DIAGNOSE") {
+        if (navigated) freshPolls++;
+        return { diagnostic: { baseReady: !["inactive", "notWritable"].includes(failure), editorId: failure === "unstable" ? String(messages.length) : navigated ? "fresh" : "original", writableEditor: failure !== "notWritable" && !(failure === "delayedInitialization" && navigated && freshPolls <= 2), writing: true, activeEditor: failure !== "inactive", visibleEditor: failure !== "inactive", frameReady: true, ready: failure !== "inactive" && !(navigated && failure === "freshTimeout"), titleFound: true, bodyFound: true, existing: false, publishPanelOpen: failure === "transitionTimeout" && outcomes.length > 0, reason: `raw:${failure || "ready"}` } };
+      }
       if (message.type === "EDITOR_SCHEDULE") return { scheduleReady: true };
       if (message.type === "EDITOR_SCHEDULE_FINAL_TARGET") return failure.startsWith("final:") ? { error: failure } : { position: { x: 777, y: 55 } };
       if (message.type === "EDITOR_PHOTO_VERIFY") uploadVerified++;
       if (message.type === "EDITOR_VERIFY") return { verification: { titleMatches: true, bodyMatches: true } };
       return { position: { x: message.type === "EDITOR_PHOTO_BUTTON" ? 99 : 10, y: 20 }, imageReady: true };
     } },
-    webNavigation: { getAllFrames: async () => [{ frameId: 2, url: "https://blog.naver.com/PostWriteForm.naver" }] },
+    webNavigation: { getAllFrames: async () => [{ frameId: 2, url: "https://blog.naver.com/PostWriteForm.naver?blogId=fixture_blog&postNo=123" }] },
     debugger: { attach: async () => {}, detach: async () => {}, onDetach: { addListener() {}, removeListener() {} },
       onEvent: { addListener: (handler) => handlers.add(handler), removeListener: (handler) => handlers.delete(handler) },
       sendCommand: async (_target, method, params) => {
@@ -59,9 +64,10 @@ async function scenario(input = task, failure = "", publisher = "legacy") {
     assert.equal(options.headers.Authorization, "Bearer fixture-secret");
     assert.equal(url.origin, "http://localhost:3000");
     if (url.pathname.endsWith("/claim")) {
-      assert.equal(commands.length, 0, "claim must precede CDP input");
+      timeline.push("claim");
+      if (timeline.filter(item => item === "claim").length === 1) assert.equal(commands.length, 0, "claim must precede CDP input");
       if (publisher === "legacy" && input.images.length > 3) return { ok: false, json: async () => ({ error: "사진 3장 초과 Job은 V3 순차 입력을 사용하세요." }) };
-      return { ok: true, json: async () => ({ ...input, jobId, attemptNo: 1 }) };
+      return { ok: true, json: async () => ({ ...input, jobId: url.pathname.split("/").at(-2), attemptNo: 1 }) };
     }
     if (url.pathname.endsWith("/result")) {
       outcomes.push(JSON.parse(options.body));
@@ -85,15 +91,19 @@ async function scenario(input = task, failure = "", publisher = "legacy") {
     return { ok: true, json: async () => ({ ok: true }) };
   }, setTimeout: (fn, ms) => { if ([500, 1500, 3000].includes(ms)) { cleanupDelays.push(ms); return setTimeout(fn, 0); } return setTimeout(fn, ms === 250 ? 0 : failure === "timeout" && ms === 15000 ? 5 : ms); }, clearTimeout, Date,
     console: { info: (...args) => logs.push(args), warn: (...args) => logs.push(args) } });
-  const reply = await new Promise((resolve) => listener({ type: "INSERT", jobId, publisher, task: { title: "untrusted", finalizeMode: "auto" } }, { id: "fixture" }, resolve));
+  const reply = await new Promise((resolve) => listener({ type: diagnoseOnly ? "DIAGNOSE" : "INSERT", jobId, publisher, task: { title: "untrusted", finalizeMode: "auto" } }, { id: "fixture" }, resolve));
+  let nextReply;
+  if (["consecutive", "delayedInitialization"].includes(failure)) nextReply = await new Promise(resolve => listener({ type: "INSERT", jobId: "00000000-0000-4000-8000-000000000002", publisher }, { id: "fixture" }, resolve));
   assert.equal(handlers.size, 0); assert.equal(intercepted, false);
   if (["", "cleanup", "cleanupRetry", "cleanupOne"].includes(failure)) assert.ok(cleanupUploadCounts.every((count) => count === expectedUploads));
-  return { reply, commands, messages, downloads, removed, erased, cleanupDelays, timeline, logs, outcomes };
+  return { reply, nextReply, commands, messages, downloads, removed, erased, cleanupDelays, timeline, logs, outcomes, navigations, freshPolls };
 }
 const success = await scenario();
 assert.equal(success.reply.error, undefined);
 assert.equal(success.outcomes[0].outcome, "inserted");
 assert.equal(success.outcomes[0].attemptNo, 1);
+assert.ok(success.timeline.indexOf("EDITOR_TITLE_FOCUS") < success.timeline.indexOf(task.title), "Verify title focus before a single title insertion");
+assert.equal(success.commands.filter(command => command.method === "Input.insertText" && command.params.text === task.title).length, 1);
 const tooMany = await scenario({ ...task, images: [...task.images, task.images[0]] });
 assert.match(tooMany.reply.error, /3장 초과/); assert.equal(tooMany.commands.length, 0);
 const lostResult = await scenario(task, "result");
@@ -207,6 +217,34 @@ assert.equal(finalClicks(scheduledSuccess), 0, "Missing finalizeMode defaults to
 assert.equal(scheduledSuccess.messages.some(message => message.type === "EDITOR_SCHEDULE_FINAL_TARGET"), false);
 const autoInput = { ...scheduledInput, finalizeMode: "auto" };
 const autoSuccess = await scenario(autoInput, "", "blocks");
+assert.deepEqual(autoSuccess.navigations, ["https://blog.naver.com/PostWriteForm.naver?blogId=fixture_blog"]);
+assert.match(autoSuccess.reply.message, /다음 글쓰기 화면을 준비/);
+const consecutive = await scenario(autoInput, "consecutive", "blocks");
+assert.equal(consecutive.nextReply.error, undefined);
+assert.equal(consecutive.timeline.filter(item => item === "claim").length, 2);
+assert.deepEqual(consecutive.outcomes.map(result => result.outcome), ["inserted", "inserted"]);
+assert.equal(consecutive.navigations.length, 2);
+const delayed = await scenario(autoInput, "delayedInitialization", "blocks");
+assert.equal(delayed.nextReply.error, undefined);
+assert.ok(delayed.freshPolls >= 11, "Two unready polls, three stable polls, next claim preflight and second fresh preparation");
+assert.deepEqual(delayed.outcomes.map(result => result.outcome), ["inserted", "inserted"]);
+const notWritable = await scenario(autoInput, "notWritable", "blocks");
+assert.equal(notWritable.timeline.includes("claim"), false);
+assert.match(notWritable.reply.error, /아직 준비되지/);
+for (const failure of ["freshNavigation", "freshTimeout", "transitionTimeout"]) {
+  const recovered = await scenario(autoInput, failure, "blocks");
+  assert.equal(recovered.reply.error, undefined);
+  assert.match(recovered.reply.message, /새 글쓰기를 직접/);
+  assert.deepEqual(recovered.outcomes.map(result => result.outcome), ["inserted"]);
+  if (failure === "transitionTimeout") assert.equal(recovered.navigations.length, 0);
+}
+const inactive = await scenario(autoInput, "inactive", "blocks");
+assert.match(inactive.reply.error, /새 글쓰기/);
+assert.equal(inactive.outcomes.length, 0);
+assert.equal(inactive.commands.length, 0);
+assert.equal(inactive.timeline.includes("claim"), false, "Inactive editor must leave Job queued without claim/result");
+assert.equal(scheduledSuccess.navigations.length, 0);
+assert.equal(success.navigations.length, 0);
 assert.equal(autoSuccess.reply.error, undefined); assert.equal(finalClicks(autoSuccess), 1);
 assert.equal(autoSuccess.outcomes[0].outcome, "inserted");
 assert.match(autoSuccess.reply.message, /予約|예약 발행 등록을 요청/);
@@ -230,3 +268,22 @@ assert.equal(manualReview.reply.error, undefined); assert.equal(finalClicks(manu
 assert.equal(manualReview.messages.some(message => message.type === "EDITOR_SCHEDULE"), false);
 const explicitReview = await scenario({ ...scheduledInput, finalizeMode: "review" }, "", "blocks");
 assert.equal(explicitReview.reply.error, undefined); assert.equal(finalClicks(explicitReview), 0);
+
+for (const failure of ["inactive", "notWritable", "unstable", ""]) {
+  const diagnosed = await scenario(task, failure, "legacy", true);
+  assert.equal(diagnosed.reply.error, undefined, "DIAGNOSE never requires execution readiness");
+  const raw = diagnosed.reply.diagnostics[0].diagnostic;
+  assert.ok(raw);
+  assert.equal(raw.reason, `raw:${failure || "ready"}`, "Raw reason must not be overwritten");
+  assert.equal(raw.stableEditor, failure === "");
+  assert.equal(diagnosed.timeline.includes("claim"), false);
+  if (failure) {
+    const blocked = await scenario(task, failure);
+    assert.equal(blocked.timeline.includes("claim"), false);
+    assert.equal(blocked.outcomes.length, 0);
+  }
+}
+const unavailable = await scenario(task, "EDITOR_DIAGNOSE", "legacy", true);
+assert.equal(unavailable.reply.error, undefined);
+assert.match(unavailable.reply.diagnostics[0].reason, /fixture failure/);
+console.log("PASS: raw diagnostics survive hidden/unwritable/unstable/missing content replies; stable observation only; INSERT alone gates claim.");

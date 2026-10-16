@@ -91,6 +91,8 @@ Angel Agent의 전체 기능 지도. `[x]`는 명시한 범위의 구현 완료,
 - [x] Naver 예약 설정 실제 운영 검증 — 사용자 확인
 - [x] 최종 예약 등록 자동화 — scheduled Job의 명시적 auto 선택 / 안전 검증 후 CDP 클릭 요청
 - [x] 최종 예약 등록 자동 클릭 실제 Chrome/Naver 운영 검증 — scheduled+auto 실행 후 예약 발행 글 목록 등록 확인
+- [x] 활성 editor claim 전 검사 / scheduled+auto 이후 새 빈 글쓰기 자동 복귀·다음 Job 준비 — 실제 Chrome/Naver 검증 완료
+- [x] 입력 가능 editor 연속 안정성 검사 / 제목 focus·DOM 검증 / 성공 후 Job 목록 자동 갱신 — 동일 세션 scheduled+auto Job 2건 연속 예약 등록 실검증 완료
 - [ ] 일반 발행 최종 버튼 자동 실행 — 미구현 / 후순위
 - [ ] 중간 실패 재개
 - [ ] 장시간 signed URL 갱신 / 비정상 종료 cleanup

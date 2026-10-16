@@ -17,7 +17,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 async function openPanel(fail = false, selectionTask, options = {}) {
   const elements = new Map();
   const requests = [];
-  let taskRequests = 0;
+  let taskRequests = 0, completed = false;
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, { value: "", textContent: "", hidden: true, listeners: {},
       options: [], addEventListener(event, handler) { this.listeners[event] = handler; }, replaceChildren() { this.options = []; }, add(option) { this.options.push(option); } });
@@ -30,7 +30,12 @@ async function openPanel(fail = false, selectionTask, options = {}) {
       taskRequests++;
       return options.revoke && taskRequests > 1 ? { error: "초안 승인이 취소되었습니다." } : { task: selectionTask };
     }
-      if (message.type === "DIAGNOSE") return { diagnostic: { ready: true, existing: false } };
+      if (message.type === "DIAGNOSE") {
+        const diagnostic = options.diagnostic ?? { ready: true, existing: false };
+        return { diagnostic, diagnostics: [{ frameId: 2, diagnostic }] };
+      }
+      if (message.type === "INSERT" && options.refreshAfterInsert) { completed = true; return { message: "예약 등록 요청을 완료했고 다음 글쓰기 화면을 준비했습니다." }; }
+      if (message.type === "JOBS" && completed && options.refreshAfterInsert) return { jobs: options.tasks.slice(1) };
       return fail ? { error: "fixture failure" } : { jobs: options.tasks ?? (selectionTask ? [{ id: 1, draftId: 2, title: "제목", status: "queued" }] : []) }; } },
   } });
   await settle();
@@ -198,3 +203,27 @@ invalidSchedulePanel.element("insert").listeners.click(); await settle();
 assert.match(invalidSchedulePanel.element("result").textContent, /10분/);
 assert.equal(invalidSchedulePanel.requests.some(message => ["DIAGNOSE", "INSERT"].includes(message.type)), false);
 console.log("PASS: Side Panel KST schedule label and invalid-schedule preflight.");
+
+const refreshedJobs = await openPanel(false, approvedTask, { refreshAfterInsert: true, tasks: [
+  { id: "1", draftId: 2, title: "Job A", status: "queued" },
+  { id: "2", draftId: 3, title: "Job B", status: "queued" },
+] });
+refreshedJobs.element("tasks").value = "1"; refreshedJobs.element("tasks").listeners.change(); await settle();
+assert.equal(refreshedJobs.element("tasks").options.length, 2);
+refreshedJobs.element("insert").listeners.click(); await settle();
+assert.deepEqual(refreshedJobs.element("tasks").options.map(option => option.value), ["2"]);
+assert.match(refreshedJobs.element("result").textContent, /다음 글쓰기 화면을 준비했습니다/);
+assert.equal(refreshedJobs.requests.filter(request => request.type === "JOBS").length, 2);
+
+for (const [diagnostic, message] of [
+  [{ baseReady: false, writableEditor: false, stableEditor: false, reason: "not writable" }, /입력 가능한 상태가 아닙니다/],
+  [{ baseReady: true, writableEditor: true, stableEditor: false }, /아직 안정화 중/],
+  [{ baseReady: true, writableEditor: true, stableEditor: true }, /화면을 확인했습니다/],
+]) {
+  const panel = await openPanel(false, undefined, { diagnostic });
+  panel.element("diagnose").listeners.click(); await settle();
+  assert.equal(JSON.parse(panel.element("diagnostic").textContent)[0].diagnostic.stableEditor, diagnostic.stableEditor);
+  assert.match(panel.element("result").textContent, message);
+  assert.equal(panel.requests.some(request => request.type === "INSERT"), false);
+}
+console.log("PASS: Side Panel always shows raw diagnostics with unavailable/stabilizing/ready messages.");

@@ -19,32 +19,80 @@
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !tab.url || new URL(tab.url).origin !== "https://blog.naver.com") throw new Error("현재 탭을 네이버 블로그 글쓰기 화면으로 전환해 주세요.");
     const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
-    const found: { frameId: number; diagnostic: EditorDiagnostic }[] = [];
+    const found: { frameId: number; url: string; diagnostic: EditorDiagnostic }[] = [];
     const diagnostics: NonNullable<ExtensionReply["diagnostics"]> = [];
     for (const frame of frames ?? []) {
       if (!frame.url.startsWith("https://blog.naver.com/")) continue;
       try {
         const reply = await chrome.tabs.sendMessage(tab.id, { type: "EDITOR_DIAGNOSE" }, { frameId: frame.frameId });
-        if (reply.diagnostic) {
-          const ready = reply.diagnostic.frameReady === true && reply.diagnostic.titleFound === true && reply.diagnostic.bodyFound === true;
-          reply.diagnostic = { ...reply.diagnostic, ready,
-            reason: ready ? "SmartEditor 글쓰기 화면 확인 완료" : "SmartEditor 글쓰기 frame/제목/본문을 모두 확인하지 못했습니다.",
-          };
-        }
-        diagnostics.push({ frameId: frame.frameId, diagnostic: reply.diagnostic });
-        if (reply.diagnostic?.ready === true) found.push({ frameId: frame.frameId, diagnostic: reply.diagnostic });
+        const ready = reply.diagnostic && reply.diagnostic.ready === true && reply.diagnostic.writing === true && reply.diagnostic.frameReady === true &&
+            reply.diagnostic.titleFound === true && reply.diagnostic.bodyFound === true &&
+            reply.diagnostic.visibleEditor === true && reply.diagnostic.activeEditor === true && reply.diagnostic.writableEditor === true && !reply.diagnostic.publishPanelOpen;
+        diagnostics.push({ frameId: frame.frameId, diagnostic: reply.diagnostic, reason: reply.diagnostic ? undefined : reply.error ?? "frame 진단 응답 없음" });
+        if (ready && reply.diagnostic) found.push({ frameId: frame.frameId, url: frame.url, diagnostic: reply.diagnostic });
       } catch { diagnostics.push({ frameId: frame.frameId, reason: "content script 접근 불가: 탭 새로고침 또는 프레임 URL을 확인하세요." }); }
     }
     return { tabId: tab.id, found, diagnostics };
   }
 
   let inputRunning = false;
+  let freshEditorRequired = false;
+
+  async function stableEditor(requireEmpty = false, attempts = 20, expectedTabId?: number) {
+    let lastKey = "", consecutive = 0;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        const editor = await scanEditorFrames();
+        expectedTabId ??= editor.tabId;
+        if (editor.tabId !== expectedTabId) throw new Error("현재 탭이 변경되었습니다.");
+        const target = editor.found.length === 1 ? editor.found[0] : undefined;
+        const key = target?.diagnostic.editorId ? `${editor.tabId}:${target.frameId}:${target.url}:${target.diagnostic.editorId}` : "";
+        if (key && target && (!requireEmpty || !target.diagnostic.existing)) {
+          consecutive = key === lastKey ? consecutive + 1 : 1;
+          lastKey = key;
+          if (consecutive >= 3) {
+            target.diagnostic.stableEditor = true;
+            return editor;
+          }
+        } else { lastKey = ""; consecutive = 0; }
+      } catch { lastKey = ""; consecutive = 0; }
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    throw new Error("새 글쓰기 화면이 아직 준비되지 않았습니다. 잠시 후 다시 실행하세요.");
+  }
 
   async function assertCurrentTab(tabId: number) {
     const [current] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (current?.id !== tabId || !current.url || new URL(current.url).origin !== "https://blog.naver.com") {
       throw new Error("현재 탭이 변경되어 입력을 중단했습니다. Naver 글쓰기 탭에서 다시 시도하세요.");
     }
+  }
+
+  async function prepareFreshEditor(tabId: number, previous: { frameId: number; url: string }) {
+    const url = new URL(previous.url);
+    const blogId = url.searchParams.get("blogId");
+    if (url.origin !== "https://blog.naver.com" || !/^\/(?:PostWriteForm\.naver|postwrite\/?$)/i.test(url.pathname) ||
+      !blogId || !/^[A-Za-z0-9_-]{1,100}$/.test(blogId)) throw new Error("새 글쓰기 URL 확인 실패");
+    // Reuse the known write route, but never carry draft/post identifiers into a fresh editor.
+    const fresh = new URL(url.pathname, url.origin);
+    fresh.searchParams.set("blogId", blogId);
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    let transitioned = false;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      await assertCurrentTab(tabId);
+      const frames = await chrome.webNavigation.getAllFrames({ tabId });
+      const old = frames?.find(frame => frame.frameId === previous.frameId && frame.url === previous.url);
+      if (!old) { transitioned = true; break; }
+      try {
+        const reply = await chrome.tabs.sendMessage(tabId, { type: "EDITOR_DIAGNOSE" }, { frameId: previous.frameId });
+        if (reply.diagnostic && (!reply.diagnostic.activeEditor || !reply.diagnostic.publishPanelOpen)) { transitioned = true; break; }
+      } catch { /* Navigation may temporarily remove the content script; wait for observable state. */ }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    if (!transitioned) throw new Error("예약 화면 전환 대기 timeout");
+    await assertCurrentTab(tabId);
+    await chrome.tabs.update(tabId, { url: fresh.href });
+    await stableEditor(true, 120, tabId);
   }
 
   async function insertWithDebugger(tabId: number, frameId: number, task: ExtensionTask, overwrite: boolean, publisher: "blocks" | "legacy" = "legacy") {
@@ -101,6 +149,10 @@
       await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
       // 눌림 상태가 남지 않도록 같은 탭의 mouse release는 active-tab 검사 없이 즉시 보냅니다.
       await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 });
+      if (field === "title") {
+        stage = "title focus";
+        await frameRequest({ type: "EDITOR_TITLE_FOCUS" });
+      }
       if (reply.existing) {
         stage = `${field} select existing text`;
         await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65 });
@@ -349,7 +401,29 @@
           if (!message.id || !jobIdPattern.test(message.id)) throw new Error("Job ID를 확인해 주세요.");
           return { task: await api(`/api/extension/publication-jobs/${message.id}`) };
         case "DIAGNOSE": {
-          const editor = await scanEditorFrames();
+          // Diagnostics must survive every failed execution gate. Observe stability, never require it.
+          let editor: Awaited<ReturnType<typeof scanEditorFrames>> | undefined;
+          let previous = new Map<string, number>();
+          for (let poll = 0; poll < 3; poll++) {
+            try {
+              editor = await scanEditorFrames();
+              const next = new Map<string, number>();
+              for (const frame of editor.diagnostics) {
+                const diagnostic = frame.diagnostic;
+                if (!diagnostic) continue;
+                const key = `${editor.tabId}:${frame.frameId}:${diagnostic.editorId}`;
+                const count = diagnostic.baseReady === true && diagnostic.activeEditor && diagnostic.editorId ? (previous.get(key) ?? 0) + 1 : 0;
+                next.set(key, count);
+                diagnostic.stableEditor = count >= 3;
+              }
+              previous = next;
+            } catch (error) {
+              previous.clear();
+              editor = { tabId: -1, found: [], diagnostics: [{ frameId: 0, reason: error instanceof Error ? error.message : "frame 진단 실패" }] };
+            }
+            if (poll < 2) await new Promise(resolve => setTimeout(resolve, 250));
+          }
+          if (!editor) return { diagnostics: [] };
           const writingFrames = editor.diagnostics.filter((frame) => frame.diagnostic?.writing);
           return { diagnostics: editor.diagnostics, diagnostic: editor.found.length === 1 ? editor.found[0].diagnostic
             : editor.found.length === 0 && writingFrames.length === 1 ? writingFrames[0].diagnostic : undefined };
@@ -359,10 +433,13 @@
           if (jobRunning) throw new Error("Job 입력 작업이 이미 진행 중입니다.");
           jobRunning = true;
           try {
-          const editor = await scanEditorFrames();
-          if (editor.found.length !== 1) throw new Error(`SmartEditor 입력 프레임을 확정하지 못했습니다 (${editor.found.length}개). DOM 진단을 확인해 주세요.`);
+          const editor = await stableEditor(freshEditorRequired);
+          if (editor.found.length !== 1) throw new Error("새 글쓰기 화면을 준비한 뒤 다시 실행하세요.");
           const target = editor.found[0];
+          if (freshEditorRequired && (target.diagnostic.existing || target.diagnostic.publishPanelOpen)) throw new Error("새 글쓰기 화면을 준비한 뒤 다시 실행하세요.");
+          freshEditorRequired = false;
           if (target.diagnostic.existing && !message.overwrite) throw new Error("기존 글이 있습니다. 덮어쓰기 확인이 필요합니다.");
+          await assertCurrentTab(editor.tabId);
           // Only the claimed server snapshot supplies executable data; ignore client task fields.
           const task: ExtensionTask = await api(`/api/extension/publication-jobs/${message.jobId}/claim`, "POST", { publisher: message.publisher === "legacy" ? "legacy" : "blocks" });
           if (task.jobId !== message.jobId || !Number.isSafeInteger(task.attemptNo) || (task.attemptNo ?? 0) < 1) throw new Error("Job 실행 응답을 확인하지 못했습니다. 재입력 전에 대기열 상태를 확인하세요.");
@@ -378,8 +455,18 @@
             catch { throw new Error(`${reason} JOB_RESULT: 실패 상태 기록을 확인하지 못했습니다. 재실행 전에 대기열을 확인하세요.`); }
             throw error;
           }
+          if (task.publishMode === "scheduled" && task.finalizeMode === "auto") freshEditorRequired = true;
           try { await record("inserted"); }
           catch { return { message: `${reply.message} JOB_RESULT: 입력은 완료됐지만 상태 기록을 확인하지 못했습니다. 재입력하지 말고 대기열과 네이버를 직접 확인하세요.` }; }
+          if (task.publishMode === "scheduled" && task.finalizeMode === "auto") {
+            try {
+              await prepareFreshEditor(editor.tabId, target);
+              freshEditorRequired = false;
+              return { message: `${reply.message} 다음 글쓰기 화면을 준비했습니다.` };
+            } catch {
+              return { message: `${reply.message} 예약 등록 요청은 완료했지만 다음 글쓰기 화면을 자동으로 준비하지 못했습니다. 새 글쓰기를 직접 열어 주세요. 이 Job을 재실행하지 마세요.` };
+            }
+          }
           return reply;
           } finally { jobRunning = false; }
         }

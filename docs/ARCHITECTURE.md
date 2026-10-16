@@ -219,6 +219,10 @@ review는 최종 버튼을 누르지 않는다. scheduled+auto만 예약 상태�
 content script는 `[data-testid="seOnePublishBtn"]`의 검증된 좌표만 반환하고 background가 CDP trusted 클릭 1회를 보낸다. 상단 `tpb.publish` trigger와 구분하며 최종 클릭을 재시도하지 않는다.
 scheduled+auto는 실제 Chrome/Naver에서 V3 입력, 예약 날짜/시간 설정, 안전 검증, 최종 버튼 자동 클릭 후 예약 발행 글 목록 등록까지 사용자 검증을 완료했다.
 예약 등록 성공을 확인하는 DOM/URL 신호는 아직 없으므로 클릭 후에도 inserted만 기록하고 예약 목록에서 확인하도록 안내한다. 자동으로 published 처리하지 않는다.
+Extension은 claim 전에 active/visible/writable/stable editor preflight를 수행한다. document 로드 완료, SmartEditor 제목·본문 target의 표시·크기·비활성 상태, 상위 iframe의 화면 노출·가림 상태와 실제 화면 안에 열린 발행 패널/모달을 검사한다. Naver target wrapper 자체의 contenteditable은 필수 조건이 아니며, 편집 host를 찾지 못해도 기존 trusted 입력 target을 후보로 인정한다. 일반 role=dialog와 평상시에도 표시되는 publishLayer root만으로 발행 패널이 열렸다고 판단하지 않는다. root 내부의 즉시/예약 radio 또는 최종 발행 버튼이 실제 화면에 보일 때 열린 상태로 판정한다. 같은 document·제목·본문과 frame이 250ms 간격으로 3회 연속 준비 상태를 유지해야 claim한다. 숨겨진 잔여 editor나 초기화 중인 editor는 claim하지 않는다. 제목 클릭 후 실제 focus/selection을 확인하고 한 번만 입력하며, 제목 DOM 반영을 최대 2초 polling한다.
+scheduled+auto는 inserted 기록 후 예약 패널/활성 editor 또는 frame URL의 전환을 기다린다. 기존 글쓰기 frame URL의 blogId로 새 글쓰기를 열고 빈 활성 editor 준비를 확인한다. 이 후처리 실패는 inserted를 failed로 바꾸지 않으며 직접 새 글쓰기를 열도록 안내한다. 복귀 성공은 예약 등록 성공의 증거가 아니며 다음 Job은 사용자가 별도로 실행한다. review와 manual은 자동 이동하지 않는다.
+Side Panel은 입력 성공 후 Job 목록을 자동 재조회해 실행이 끝난 Job을 제거하고 결과 메시지는 유지한다. 다음 실행에는 남은 Job을 다시 선택해야 한다.
+동일 Chrome/Naver 세션에서 scheduled+auto Job 2건의 연속 예약 등록을 사용자 실검증했다. 첫 Job 이후 새 빈 글쓰기 자동 복귀·목록 갱신·ready/baseReady/stableEditor 확인과 다음 Job의 제목 검증·예약 등록까지 통과했으며, 중간에 사용자가 글쓰기 화면을 다시 열 필요가 없었다.
 상세에서 승인된 Draft를 등록하고 queued Job만 제거할 수 있다.
 Extension 입력 성공은 Job을 inserted로 기록한다. scheduled-auto도 실제 예약 등록 성공이나 공개 여부를 자동 판정하지 않으며 published로 변경하지 않는다.
 
