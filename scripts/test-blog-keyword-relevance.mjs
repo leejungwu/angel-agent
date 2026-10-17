@@ -78,11 +78,17 @@ const provider = {
     assert.ok(!input.systemInstructions.includes("90~100"), "Configurable rubric is not duplicated in code");
     assert.ok(context.keywords.length <= 50);
     assert.ok(!input.input.includes("search_volume") && !input.input.includes("ad_count") && !input.input.includes("competition"));
-    assert.ok(context.keywords.every(row => Object.keys(row).sort().join(",") === "id,keyword"));
-    const evaluations = context.keywords.map(row => ({ keywordId: row.id, score: 80, reason: "수면 습관 관점에서 자연스럽게 연결 가능" }));
+    assert.ok(context.keywords.every(row => Object.keys(row).join(",") === "keyword"));
+    assert.deepEqual(input.schema.properties.evaluations.items.required, ["score", "reason"]);
+    assert.equal(input.schema.properties.evaluations.items.additionalProperties, false);
+    assert.equal(input.schema.properties.evaluations.minItems, context.keywords.length);
+    assert.equal(input.schema.properties.evaluations.maxItems, context.keywords.length);
+    assert.equal(Object.hasOwn(input.schema.properties.evaluations.items.properties, "keywordId"), false);
+    assert.ok(input.systemInstructions.includes("입력 순서를 그대로 유지"));
+    const evaluations = context.keywords.map((row, index) => ({ score: 80, reason: `순서 ${index}: ${row.keyword}` }));
     if (invalidMode === "missing") evaluations.pop();
-    if (invalidMode === "duplicate") evaluations[1] = evaluations[0];
-    if (invalidMode === "unknown") evaluations[0].keywordId = rows[0].id;
+    if (invalidMode === "excess") evaluations.push(evaluations[0]);
+    if (invalidMode === "keywordId") evaluations[0].keywordId = rows[0].id;
     if (invalidMode === "score") evaluations[0].score = 101;
     if (invalidMode === "fraction") evaluations[0].score = 80.5;
     if (invalidMode === "extra") evaluations[0].keyword = "생성 금지";
@@ -90,9 +96,14 @@ const provider = {
   },
 };
 const relevance = load("lib/blog-keywords/relevance.ts", { "@/lib/supabase": { supabase: db }, "@/lib/ai/provider": provider, "@/lib/blog-generation/models": { BLOG_DEFAULT_MODELS: { openai: "existing-default" } }, "./shared": shared, "./ai-settings": settingsMock, "./relevance-filter": filtersModule });
-for (const score of [0, 100]) assert.equal(relevance.validateRelevanceOutput({ evaluations: [{ keywordId: rows[3].id, score, reason: "설명" }] }, [rows[3]])[0].score, score);
-for (const score of [-1, 101, NaN, null, "80", 80.5]) assert.throws(() => relevance.validateRelevanceOutput({ evaluations: [{ keywordId: rows[3].id, score, reason: "설명" }] }, [rows[3]]));
-for (const reason of [" ", "x".repeat(501), null]) assert.throws(() => relevance.validateRelevanceOutput({ evaluations: [{ keywordId: rows[3].id, score: 80, reason }] }, [rows[3]]));
+for (const score of [0, 100]) assert.equal(relevance.validateRelevanceOutput({ evaluations: [{ score, reason: "설명" }] }, [rows[3]])[0].score, score);
+for (const score of [-1, 101, NaN, null, "80", 80.5]) assert.throws(() => relevance.validateRelevanceOutput({ evaluations: [{ score, reason: "설명" }] }, [rows[3]]));
+for (const reason of ["", " ", "x".repeat(501), null, 42]) assert.throws(() => relevance.validateRelevanceOutput({ evaluations: [{ score: 80, reason }] }, [rows[3]]));
+const orderedBatch = rows.slice(3, 53).reverse();
+const orderedScores = orderedBatch.map((_, index) => ({ score: index * 2, reason: "순서별 이유 " + index }));
+assert.deepEqual(relevance.validateRelevanceOutput({ evaluations: orderedScores }, orderedBatch), orderedScores.map((evaluation, index) => ({ keywordId: orderedBatch[index].id, ...evaluation })));
+for (const evaluations of [orderedScores.slice(1), [...orderedScores, orderedScores[0]], orderedScores.map((row, index) => index === 0 ? { ...row, keywordId: orderedBatch[0].id } : row)]) assert.throws(() => relevance.validateRelevanceOutput({ evaluations }, orderedBatch));
+assert.deepEqual(relevance.validateRelevanceOutput({ evaluations: [{ score: 80, reason: "같은 평가" }, { score: 80, reason: "같은 평가" }] }, orderedBatch.slice(0, 2)).map(row => row.keywordId), orderedBatch.slice(0, 2).map(row => row.id), "Identical scores/reasons still receive distinct server IDs");
 const selectionSnapshot = rows.map(row => ({ ...row }));
 settingsVersion = 2;
 rows.forEach(row => { row.product_relevance_score = 90; row.product_relevance_criteria_version = 2; });
@@ -116,6 +127,14 @@ const beforeSettingsReads = settingsReads;
 const first = await relevance.evaluateProductRelevance(1, 200);
 assert.equal(settingsReads - beforeSettingsReads, 1, "All four batches share one criteria snapshot");
 assert.ok(saves.every(save => save.p_rows.every(result => rows.find(row => row.id === result.keywordId).product_relevance_model === "openai:mock-model")), "Persist actual response model, not requested model");
+for (let batchIndex = 0; batchIndex < 4; batchIndex++) {
+  const keywords = JSON.parse(requests[batchIndex].input).keywords;
+  assert.equal(keywords.length, 50); assert.equal(saves[batchIndex].p_rows.length, 50);
+  saves[batchIndex].p_rows.forEach((saved, index) => {
+    assert.equal(saved.keywordId, rows.find(row => row.keyword === keywords[index].keyword && row.product_id === 1).id);
+    assert.equal(saved.reason, "순서 " + index + ": " + keywords[index].keyword);
+  });
+}
 assert.equal(first.evaluated, 200); assert.equal(first.selected, 200); assert.equal(requests.length, 4); assert.equal(saves.length, 4);
 assert.ok(!saves.flatMap(batch => batch.p_rows).some(row => [rows[0].id, rows[1].id, rows[2].id].includes(row.keywordId)));
 assert.equal(rows[0].product_relevance_score, null); assert.equal(rows[1].product_relevance_score, 95);
@@ -137,7 +156,7 @@ for (const size of [0, 25, 51, 201, 500, "50", null, NaN, 50.5]) {
   await assert.rejects(() => relevance.evaluateProductRelevance(1, size));
   assert.equal(requests.length, count);
 }
-for (invalidMode of ["missing", "duplicate", "unknown", "score", "fraction", "extra", "json"]) {
+for (invalidMode of ["missing", "excess", "keywordId", "score", "fraction", "extra", "json"]) {
   const before = JSON.stringify(rows), saved = saves.length;
   const result = await relevance.evaluateProductRelevance(1, 200);
   assert.ok(result.error); assert.equal(result.evaluated, 0); assert.equal(saves.length, saved); assert.equal(JSON.stringify(rows), before);
@@ -318,4 +337,4 @@ try {
   assert.equal(repeatButton().props.disabled, true);
   await chooseProduct(""); assert.equal(repeatButton().props.disabled, true);
 } finally { cleanup?.(); globalThis.fetch = oldFetch; }
-console.log("PASS: stored evaluation model / in-flight model snapshot / actual response model persistence, unevaluated default / stale / combined targets and counts, API target validation, strict intent rubric contract, explicit reevaluation/oldest-first/partial failure preservation, Product isolation, default 50 and selectable 50/100/200 limits / 1/2/4 calls, volume priority without metric scoring, complete strict validation, partial failure/save safety, retry skips evaluated, status preservation, API/migration contracts; no real AI or DB calls.");
+console.log("PASS: ordered score/reason-only output and server UUID mapping, strict keywordId/extra/length rejection, stored evaluation model / in-flight model snapshot / actual response model persistence, unevaluated default / stale / combined targets and counts, API target validation, strict intent rubric contract, explicit reevaluation/oldest-first/partial failure preservation, Product isolation, default 50 and selectable 50/100/200 limits / 1/2/4 calls, volume priority without metric scoring, complete strict validation, partial failure/save safety, retry skips evaluated, status preservation, API/migration contracts; no real AI or DB calls.");
