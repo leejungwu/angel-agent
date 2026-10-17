@@ -239,7 +239,15 @@ MCP는 비즈니스 로직을 다시 만드는 곳이 아닌 기존 Angel Agent 
 ### 키워드 / 운영 분석
 
 - [x] Task별 keyword 입력
-- [ ] 키워드 목록 관리 / 검색량 / 연관 키워드 / 경쟁도
+- [x] Keyword Pool v1 — Product별 목록·검색·상태 필터·검색량/등록일 양방향·가나다/광고수 정렬·50개 서버 pagination과 페이지 이동 UI
+- [x] XLSX/CSV 열 매핑·빈 헤더 보존·Preview·500개 batch import / metrics·raw 보존
+- [x] Product별 정규화 중복 방지·재import metric 갱신·used/excluded 상태 보존
+- [x] Keyword → 기존 새 Task prefill·출처 FK / Task 저장·삭제 transaction 내 상태 연동
+- [ ] Keyword Pool migration 적용 / 실제 수집 파일 import·Task 상태 연동 운영 검증
+- [ ] keyword rank snapshots — 순위 history는 별도 테이블
+- [ ] SEO opportunity scoring
+- [ ] AI keyword recommendation
+- [ ] Agent keyword selection
 - [ ] 검색 순위 추적 / 발행 이력 기반 성과 분석
 - [ ] 경쟁글 / 기존 콘텐츠 분석
 - [ ] 블로그 분석 / 다음 콘텐츠 추천

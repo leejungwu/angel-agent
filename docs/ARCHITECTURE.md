@@ -123,6 +123,44 @@ Task 상세는 같은 blog_task_id의 draft를 최신순으로 조회한다. 과
 소제목·키워드 수는 생성 목표이며 의미적 준수를 강제하는 schema 변경은 없다.
 Draft 저장과 Task 상태 변경은 별도 DB 요청이다. Draft 편집 저장은 승인·반려를 무효화하고 draft 상태로 되돌린다. 기존 Publication Job snapshot은 유지한다.
 
+## Blog Keyword Pool v1
+
+`/content/blog/keywords`는 Product별 SEO 키워드 목록·검색·상태·정렬·50개 단위 서버 pagination을 제공한다.
+Blog 작업 목록의 Keyword Pool 링크로 접근하며, 모든 키워드를 client에 내려보내지 않는다.
+
+`KeywordImport.tsx → POST /api/blog/keywords/import`는 파일 읽기, 열 매핑 확인, Preview, Import로 진행한다.
+`lib/blog-keywords/import.ts`는 기존 csv-parse/read-excel-file로 CSV 또는 XLSX 첫 sheet를 읽는다.
+첫 행을 헤더로 쓰며 빈 헤더·중복 헤더를 열 위치별 label로 구분해 보존한다. 자동 alias 매핑은 제안일 뿐이며
+사용자가 헤더 없는 C열도 keyword로 선택할 수 있다. B/C 중 특정 열을 정답으로 하드코딩하지 않는다.
+10MB·10,000 데이터 행·100열 제한이며 CSV는 UTF-8, 실패하면 EUC-KR로 읽는다.
+
+표준 필드는 keyword, 총/PC/모바일 검색량, PC/모바일 클릭·CTR, 경쟁도, 광고수다.
+숫자는 쉼표와 말미 %를 제거해 저장하며 CTR의 숫자 단위는 입력 그대로다. 빈/잘못된 metric은 null로 처리한다.
+빈 키워드와 500자 초과 키워드는 건너뛰고, 원본 열은 raw_data에 보존한다.
+Preview는 행 수·유효/제외 수·파일 내 중복·기존 중복·신규/update 예정 수와 실제 선택 keyword 20개를 표시한다.
+
+`blog_keywords`는 Product FK, keyword/normalized_keyword, 선택적 metrics·출처·파일명·raw_data,
+unused/used/excluded 상태와 생성/수정 시각을 가진다. Product + normalized_keyword UNIQUE로 중복을 막는다.
+정규화는 NBSP→space, 공백·탭·개행 정리와 소문자화이며 붙여쓰기/띄어쓰기가 다른 한국어를 임의로 합치지 않는다.
+같은 파일 내 중복은 마지막 행을 사용한다. `store.ts`는 기존 행을 최대 100개씩 조회하며,
+한글 URL 인코딩으로 PostgREST 요청이 길어지지 않도록 필터 길이도 5,500자 이내로 나눈다.
+`import_blog_keywords` RPC를 500개 단위로 호출한다. 각 batch는 transaction이며 전체 파일은 하나의 transaction이 아니다.
+재import는 metric·출처/raw를 갱신하고 기존 keyword 표기·used/excluded 상태는 유지한다.
+빈 metric은 기존 값을 덮어쓰지 않는다. 중간 실패 시 완료 개수를 알리고 같은 파일을 재import할 수 있다.
+
+`KeywordActions.tsx → PATCH /api/blog/keywords/[id]`는 unused/excluded만 조건부 전환하며 used 수동 복구는 제공하지 않는다.
+작업 만들기는 기존 `/content/blog/new?keywordId=...&productId=...` 화면을 재사용한다.
+폼은 keywordId로 DB를 다시 읽어 실제 Product·keyword를 고정하고 주제·추가 지시는 기존처럼 입력한다.
+Task는 기존 `blog_tasks` INSERT에 nullable blog_keyword_id만 추가한다. 별도 Task 생성 API는 없다.
+DB BEFORE INSERT trigger가 키워드 row를 잠그고 unused·Product·keyword 일치를 검사한 뒤 used로 바꾼다.
+Task INSERT 실패 시 같은 transaction에서 상태 변경도 rollback된다. 기존 직접 생성 Task는 source가 null이다.
+
+기존 Job/발행 초안/사진 보호를 통과해 Task DELETE가 성공했을 때만 AFTER DELETE trigger가 실행된다.
+같은 keyword를 참조하는 다른 Task가 없고 현재 상태가 used일 때 unused로 복구한다. 제외 상태는 덮어쓰지 않는다.
+`202610170002_blog_keyword_pool.sql`은 위 테이블·nullable FK·인덱스·RPC·trigger·기존 내부 도구 방식의 RLS를 추가한다.
+원격 migration은 별도 적용해야 하며 실제 DB trigger 운영 검증도 필요하다.
+Blog 생성·Publication Job snapshot·Extension 입력은 변경하지 않는다. rank/recommendation 데이터는 현재 저장하지 않는다.
+
 ## Blog 이미지 흐름
 
 ```text
@@ -307,6 +345,7 @@ kin_prompt_settings → 모든 KIN 생성의 공통 prompt
 | `products` / `product_assets` | 상품 사실과 제품 사진. Blog Task 사진과 별개 |
 | `ad_references` | 독립 광고 Reference. optional Product FK, 플랫폼·소재 유형·URL·태그·메모·전용 Storage 파일 경로 |
 | `blog_tasks` | 제품·keyword/topic/instructions·preset_id. 같은 Task에서 여러 draft 생성 가능 |
+| `blog_keywords` | Product별 Keyword Pool·metrics·raw_data·운영 상태. blog_tasks.blog_keyword_id는 선택적 출처 FK |
 | `blog_drafts` | 제목·intro·sections·closing·검수 상태·provider/model·generation_snapshot. 새 Job은 approved만 등록하며 실행은 고정 snapshot 사용 |
 | `blog_prompt_presets` | 사용자 편집 prompt 4개와 분량·소제목·키워드 범위 |
 | `blog_task_assets` | Task 사진 경로·파일명·sort_order. 실제 bytes는 Storage에 저장 |

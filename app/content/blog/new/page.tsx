@@ -2,7 +2,9 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { KEYWORD_ID } from "@/lib/blog-keywords/shared";
 
 type Product = {
   id: string | number;
@@ -20,6 +22,27 @@ export default function NewBlogTaskPage() {
   const [topic, setTopic] = useState("");
   const [instructions, setInstructions] = useState("");
   const [saving, setSaving] = useState(false);
+  const [sourceKeywordId, setSourceKeywordId] = useState("");
+  const [sourceKeywordLoading, setSourceKeywordLoading] = useState(true);
+  const [sourceKeywordError, setSourceKeywordError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    const params = new URL(window.location.href).searchParams;
+    const id = params.get("keywordId");
+    void Promise.resolve().then(async () => {
+      try {
+        if (!active || !id) return;
+        if (!KEYWORD_ID.test(id)) throw new Error("Keyword ID를 확인하세요.");
+        const { data, error } = await supabase.from("blog_keywords").select("id,product_id,keyword,status").eq("id", id).maybeSingle();
+        if (!active) return;
+        if (error || !data || data.status !== "unused") throw new Error("사용 가능한 키워드를 찾지 못했습니다. Keyword Pool에서 다시 선택하세요.");
+        setSourceKeywordId(data.id); setProductId(String(data.product_id)); setKeyword(data.keyword);
+      } catch (error) { if (active) setSourceKeywordError(error instanceof Error ? error.message : "키워드 조회 실패"); }
+      finally { if (active) setSourceKeywordLoading(false); }
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -55,7 +78,7 @@ export default function NewBlogTaskPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving) return;
+    if (saving || sourceKeywordLoading || sourceKeywordError) return;
 
     const product = products.find((item) => String(item.id) === productId);
     if (!product || !topic.trim()) {
@@ -71,6 +94,7 @@ export default function NewBlogTaskPage() {
         topic: topic.trim(),
         instructions: instructions.trim(),
         status: "pending",
+        ...(sourceKeywordId ? { blog_keyword_id: sourceKeywordId } : {}),
       });
 
       if (error) {
@@ -92,11 +116,13 @@ export default function NewBlogTaskPage() {
       <h1 className="text-3xl font-bold">새 블로그 작업</h1>
 
       <form onSubmit={handleSubmit} className="mt-8 max-w-2xl rounded-xl border bg-white p-6">
-        <fieldset disabled={saving} className="flex flex-col gap-5">
+        <fieldset disabled={saving || sourceKeywordLoading || !!sourceKeywordError} className="flex flex-col gap-5">
+          {sourceKeywordLoading && <p role="status">키워드 출처 확인 중…</p>}
+          {sourceKeywordId && <p className="text-sm text-zinc-500">Keyword Pool의 Product·키워드를 사용합니다. 작업 저장 성공 시 사용완료로 변경됩니다.</p>}
           <select
             aria-label="상품 선택"
             required
-            disabled={productsLoading || !!productsError || !products.length}
+            disabled={!!sourceKeywordId || productsLoading || !!productsError || !products.length}
             className="rounded-lg border px-4 py-3"
             value={productId}
             onChange={(event) => setProductId(event.target.value)}
@@ -118,6 +144,7 @@ export default function NewBlogTaskPage() {
             aria-label="키워드"
             className="rounded-lg border px-4 py-3"
             placeholder="키워드"
+            readOnly={!!sourceKeywordId}
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
           />
@@ -145,6 +172,7 @@ export default function NewBlogTaskPage() {
           </button>
         </fieldset>
       </form>
+      {sourceKeywordError && <p role="alert" className="mt-4 text-red-600">{sourceKeywordError} <Link href="/content/blog/keywords" className="underline">Keyword Pool</Link></p>}
     </main>
   );
 }

@@ -11,6 +11,7 @@
     "build:extension": "node scripts/build-extension.mjs",
     "test:blog-body": "tsx scripts/test-blog-body.ts",
     "test:blog-generation": "tsx scripts/test-blog-generation.ts",
+    "test:blog-keywords": "node scripts/test-blog-keywords.mjs",
     "test:blog-task-assets": "node scripts/test-blog-task-assets.mjs",
     "test:ai-providers": "node scripts/test-ai-providers.mjs"
   },
