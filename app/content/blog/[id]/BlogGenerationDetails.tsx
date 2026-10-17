@@ -11,7 +11,7 @@ export default function BlogGenerationDetails({ snapshot: value }: { snapshot: u
       <summary className="cursor-pointer">당시 프리셋 전체 보기</summary>
       {([
         ["system_prompt", "기본/시스템 지시"], ["strategy_prompt", "콘텐츠 전략"],
-        ["style_prompt", "문체/카피라이팅"], ["article_prompt", "글 구조/목적"],
+        ["style_prompt", "문체/카피라이팅"], ["title_prompt", "Title Prompt"], ["article_prompt", "글 구조/목적"],
       ] as const).map(([key, label]) => <label key={key} className="mt-4 block">{label}
         <textarea readOnly rows={10} value={preset[key]} className="mt-2 w-full rounded-lg border bg-zinc-50 px-3 py-2" />
       </label>)}

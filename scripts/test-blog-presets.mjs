@@ -45,7 +45,7 @@ const item = load("app/api/blog/presets/[id]/route.ts", mocks);
 const duplicate = load("app/api/blog/presets/[id]/duplicate/route.ts", mocks);
 const request = (body) => new Request("http://localhost/api/blog/presets", { method: "POST", body: JSON.stringify(body) });
 const context = (id) => ({ params: Promise.resolve({ id }) });
-const input = { name: "원본", description: "설명", system_prompt: "시스템", strategy_prompt: "전략", style_prompt: "문체", article_prompt: "전개",
+const input = { name: "원본", description: "설명", system_prompt: "시스템", strategy_prompt: "전략", style_prompt: "문체", title_prompt: "제목 기준", article_prompt: "전개",
   target_chars: 1500, min_chars: 1200, max_chars: 1800, section_count: 3, keyword_min: 0, keyword_max: 3, is_default: true };
 assert.equal((await list.POST(request({ ...input, min_chars: 1700 }))).status, 400);
 const original = (await (await list.POST(request(input))).json()).preset;
@@ -53,7 +53,7 @@ assert.equal((await (await list.GET()).json()).presets.length, 1);
 assert.equal((await item.PATCH(request({ ...input, name: "편집" }), context(original.id))).status, 200);
 const copy = (await (await duplicate.POST(request({ name: "무시할 클라이언트 값" }), context(original.id))).json()).preset;
 assert.equal(copy.name, "편집 복사본"); assert.equal(copy.is_default, false);
-for (const key of ["system_prompt", "strategy_prompt", "style_prompt", "article_prompt", "min_chars", "max_chars", "target_chars", "section_count", "keyword_min", "keyword_max"]) assert.equal(copy[key], input[key]);
+for (const key of ["system_prompt", "strategy_prompt", "style_prompt", "title_prompt", "article_prompt", "min_chars", "max_chars", "target_chars", "section_count", "keyword_min", "keyword_max"]) assert.equal(copy[key], input[key]);
 assert.equal((await item.DELETE(request({}), context(original.id))).status, 200);
 assert.equal((await item.DELETE(request({}), context(original.id))).status, 404);
 assert.equal((await duplicate.POST(request({}), context(original.id))).status, 404);
@@ -88,12 +88,14 @@ try {
   let tree = render();
   assert.equal(nodes(tree).some(node => node.type === "textarea"), false);
   button(tree, "편집").props.onClick(); tree = render();
-  assert.equal(nodes(tree).filter(node => node.type === "textarea").length, 4);
+  assert.equal(nodes(tree).filter(node => node.type === "textarea").length, 5);
   assert.ok(nodes(tree).filter(node => node.type === "textarea").every(node => node.props.rows >= 16));
   nodes(tree).find(node => node.type === "textarea" && node.props.value === "문체").props.onChange({ target: { value: "새 문체" } });
+  tree = render(); nodes(tree).find(node => node.type === "textarea" && node.props.value === "제목 기준").props.onChange({ target: { value: "새 제목 기준" } });
   tree = render(); nodes(tree).find(node => node.type === "form").props.onSubmit({ preventDefault() {} });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(rows.find(row => row.id === selectedId).style_prompt, "새 문체");
+  assert.equal(rows.find(row => row.id === selectedId).title_prompt, "새 제목 기준");
   tree = render(); button(tree, "복제").props.onClick(); await new Promise(resolve => setImmediate(resolve));
   assert.equal(rows.find(row => row.id === selectedId).is_default, false);
   tree = render(); button(tree, "새 프리셋").props.onClick(); tree = render();

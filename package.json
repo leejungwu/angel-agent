@@ -10,7 +10,7 @@
     "test:ad-references": "node scripts/test-ad-references.mjs",
     "build:extension": "node scripts/build-extension.mjs",
     "test:blog-body": "tsx scripts/test-blog-body.ts",
-    "test:blog-generation": "tsx scripts/test-blog-generation.ts",
+    "test:blog-generation": "tsx scripts/test-blog-generation.ts && node scripts/test-blog-topic.mjs && node scripts/test-blog-settings.mjs && node scripts/test-blog-presets.mjs",
     "test:blog-keywords": "node scripts/test-blog-keywords.mjs && node scripts/test-blog-keyword-recommendation.mjs && node scripts/test-blog-keyword-relevance.mjs && node scripts/test-blog-keyword-import-settings.mjs && node scripts/test-blog-keyword-ai-settings.mjs",
     "test:blog-task-assets": "node scripts/test-blog-task-assets.mjs",
     "test:ai-providers": "node scripts/test-ai-providers.mjs"

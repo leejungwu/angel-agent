@@ -153,10 +153,12 @@ MCP는 비즈니스 로직을 다시 만드는 곳이 아닌 기존 Angel Agent 
 
 - [x] 제품 기반 Task 생성 / 목록 / 수정 / 삭제 보호
 - [x] keyword / topic / 추가 지시 입력
+- [x] Blog 전역 AI 설정 — Topic 모델·생성 기준 편집 / 기존 Task 주제 유지 / 새 자동 생성에만 적용
+- [x] Topic 확정 — 직접 입력·추천 주제 재사용 / Keyword만 있으면 전역 OpenAI 모델/기준으로 자동 주제 생성(기본 Luna)·Task 저장 / 기존 빈 주제 생성 시 보완 / 재생성 주제 유지
 - [x] 제품 정보 기반 AI draft 생성 / 재생성 / 저장
 - [x] OpenAI / Claude / Grok 제공자 및 모델 선택
 - [x] 구조화된 제목 / 도입 / 섹션 / 마무리 생성
-- [x] 사용자 편집 Blog Prompt Preset 4영역 / Task별 keyword·instructions 분리
+- [x] 사용자 편집 Blog Prompt Preset 5영역(System/Strategy/Style/Title/Article) / Task별 keyword·instructions 분리
 - [x] 기존 사실성·문체 규칙을 초기 프리셋으로 보존 / 명시적인 최소·목표·최대 분량
 - [x] Draft 편집 / 승인 / 반려
 - [x] 최신 생성 결과 식별 / 같은 Task의 생성 이력·이전 draft 선택

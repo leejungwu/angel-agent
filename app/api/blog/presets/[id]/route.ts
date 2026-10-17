@@ -6,12 +6,16 @@ type Context = { params: Promise<{ id: string }> };
 export async function PATCH(request: Request, context: Context) {
   const { id } = await context.params;
   let input;
+  let hasTitle = false;
   try {
     if (!BLOG_PRESET_UUID.test(id)) throw new Error("InvalidId");
-    input = parseBlogPreset(await request.json());
+    const body = await request.json();
+    input = parseBlogPreset(body);
+    hasTitle = Object.hasOwn(body, "title_prompt");
   } catch { return Response.json({ error: "프리셋 ID, 이름, 시스템 지시와 숫자 범위를 확인해 주세요." }, { status: 400 }); }
+  const { title_prompt, ...otherFields } = input;
   const { data, error } = await supabase.from("blog_prompt_presets")
-    .update({ ...input, updated_at: new Date().toISOString() }).eq("id", id).select(BLOG_PRESET_FIELDS).maybeSingle();
+    .update({ ...otherFields, ...(hasTitle ? { title_prompt } : {}), updated_at: new Date().toISOString() }).eq("id", id).select(BLOG_PRESET_FIELDS).maybeSingle();
   if (error) {
     console.error("Blog preset update failed", { code: error.code });
     return Response.json({ error: "프리셋을 수정하지 못했습니다." }, { status: 500 });

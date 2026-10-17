@@ -4,6 +4,7 @@ export type BlogPresetInput = {
   system_prompt: string;
   strategy_prompt: string;
   style_prompt: string;
+  title_prompt: string;
   article_prompt: string;
   target_chars: number;
   min_chars: number;
@@ -14,7 +15,7 @@ export type BlogPresetInput = {
   is_default: boolean;
 };
 export type BlogPreset = BlogPresetInput & { id: string; created_at: string; updated_at: string };
-export const BLOG_PRESET_FIELDS = "id, name, description, system_prompt, strategy_prompt, style_prompt, article_prompt, target_chars, min_chars, max_chars, section_count, keyword_min, keyword_max, is_default, created_at, updated_at";
+export const BLOG_PRESET_FIELDS = "id, name, description, system_prompt, strategy_prompt, style_prompt, title_prompt, article_prompt, target_chars, min_chars, max_chars, section_count, keyword_min, keyword_max, is_default, created_at, updated_at";
 export const BLOG_PRESET_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function parseBlogPreset(value: unknown): BlogPresetInput {
@@ -44,7 +45,7 @@ export function parseBlogPreset(value: unknown): BlogPresetInput {
   return {
     name: text("name", 100, true).trim(), description: text("description", 500).trim() || null,
     system_prompt: text("system_prompt", 30000, true), strategy_prompt: text("strategy_prompt", 30000),
-    style_prompt: text("style_prompt", 30000), article_prompt: text("article_prompt", 30000),
+    style_prompt: text("style_prompt", 30000), title_prompt: text("title_prompt", 30000), article_prompt: text("article_prompt", 30000),
     target_chars, min_chars, max_chars, section_count: integer("section_count", false, 1, 8),
     keyword_min, keyword_max, is_default: item.is_default === true,
   };

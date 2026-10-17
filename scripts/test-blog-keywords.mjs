@@ -148,10 +148,13 @@ const uiDb = { from() { return {
     return { error: null };
   },
 }; } };
-const newTask = load("app/content/blog/new/page.tsx", { react: hooks, "next/navigation": { useRouter: () => ({ push() {}, refresh() {} }) }, "next/link": { default: "a", __esModule: true }, "@/lib/blog-keywords/shared": shared, "@/lib/supabase": { supabase: uiDb } }).default;
+const topicRequest = load("lib/blog-generation/topic-request.ts");
+const newTask = load("app/content/blog/new/page.tsx", { react: hooks, "next/navigation": { useRouter: () => ({ push() {}, refresh() {} }) }, "next/link": { default: "a", __esModule: true }, "@/lib/blog-generation/topic-request": topicRequest, "@/lib/blog-keywords/shared": shared, "@/lib/supabase": { supabase: uiDb } }).default;
 const walk = node => !node || typeof node !== "object" ? [] : [node, ...React.Children.toArray(node.props?.children).flatMap(walk)];
 const render = () => { cursor = 0; return newTask(); };
-const oldWindow = globalThis.window, oldAlert = globalThis.alert; globalThis.alert = () => {};
+const oldWindow = globalThis.window, oldAlert = globalThis.alert, oldTopicFetch = globalThis.fetch; globalThis.alert = () => {};
+let topicCalls = 0, topicFailure = false; const autoTopic = "키워드 검색 의도에 맞춘 구체적인 주제";
+globalThis.fetch = async (url, options) => { assert.equal(url, "/api/blog/topics/generate"); assert.equal(JSON.parse(options.body).keyword, target.keyword); topicCalls++; return topicFailure ? Response.json({ error: "Topic AI 실패" }, { status: 502 }) : Response.json({ topic: autoTopic, model: "mock-luna" }); };
 async function ready(url) {
   state = []; effects = []; globalThis.window = { location: { href: url } }; render(); const callbacks = effects; effects = []; callbacks.forEach(effect => effect()); await new Promise(resolve => setImmediate(resolve));
 }
@@ -159,6 +162,11 @@ try {
   await ready(`http://fixture/content/blog/new?keywordId=${target.id}&productId=1`);
   let tree = render(); assert.equal(walk(tree).find(node => node.props?.["aria-label"] === "키워드").props.value, target.keyword);
   assert.equal(walk(tree).find(node => node.props?.["aria-label"] === "상품 선택").props.value, "1");
+  assert.equal(walk(tree).find(node => node.props?.["aria-label"] === "주제").props.required, undefined);
+  const beforeTopicFailure = submissions.length; topicFailure = true;
+  await walk(render()).find(node => node.type === "form").props.onSubmit({ preventDefault() {} });
+  assert.equal(submissions.length, beforeTopicFailure); assert.equal(target.status, "unused");
+  topicFailure = false;
   const suggestedTopic = "옆잠과 얼굴 압박을 줄이는 수면 습관";
   const recommendationUrl = shared.recommendationTaskUrl(1, { keywordId: target.id, keyword: target.keyword, suggestedTopic });
   await ready(`http://fixture${recommendationUrl}`); tree = render();
@@ -168,6 +176,7 @@ try {
   assert.equal(new URL(recommendationUrl, "http://fixture").searchParams.has("instructions"), false);
   taskFailure = true; await walk(render()).find(node => node.type === "form").props.onSubmit({ preventDefault() {} }); assert.equal(target.status, "unused"); assert.equal(tasks.length, 0);
   taskFailure = false; await walk(render()).find(node => node.type === "form").props.onSubmit({ preventDefault() {} }); assert.equal(target.status, "used"); assert.equal(tasks[0].blog_keyword_id, target.id); assert.equal(tasks[0].keyword, target.keyword);
+  assert.equal(topicCalls, 1, "Suggested topic skips extra AI calls, including insert retry");
   assert.equal(tasks[0].topic, suggestedTopic); assert.equal(tasks[0].instructions, "");
   await ready(`http://fixture/content/blog/new?keywordId=${target.id}`);
   assert.ok(walk(render()).some(node => node.props?.role === "alert"));
@@ -175,7 +184,17 @@ try {
   walk(tree).find(node => node.props?.["aria-label"] === "상품 선택").props.onChange({ target: { value: "1" } });
   walk(tree).find(node => node.props?.["aria-label"] === "주제").props.onChange({ target: { value: "일반 작업" } });
   await walk(render()).find(node => node.type === "form").props.onSubmit({ preventDefault() {} }); assert.equal(submissions.at(-1).blog_keyword_id, undefined);
-} finally { globalThis.window = oldWindow; globalThis.alert = oldAlert; }
+  const beforeBlank = submissions.length;
+  await ready("http://fixture/content/blog/new");
+  walk(render()).find(node => node.props?.["aria-label"] === "상품 선택").props.onChange({ target: { value: "1" } });
+  await walk(render()).find(node => node.type === "form").props.onSubmit({ preventDefault() {} });
+  assert.equal(submissions.length, beforeBlank); assert.equal(topicCalls, 1);
+  target.status = "unused";
+  await ready(`http://fixture/content/blog/new?keywordId=${target.id}`);
+  await walk(render()).find(node => node.type === "form").props.onSubmit({ preventDefault() {} });
+  assert.equal(topicCalls, 2); assert.equal(tasks.at(-1).topic, autoTopic); assert.equal(target.status, "used");
+  assert.equal(walk(render()).find(node => node.props?.["aria-label"] === "주제").props.value, autoTopic);
+} finally { globalThis.window = oldWindow; globalThis.alert = oldAlert; globalThis.fetch = oldTopicFetch; }
 const sql = readFileSync("supabase/migrations/202610170002_blog_keyword_pool.sql", "utf8");
 assert.match(sql, /UNIQUE\(product_id, normalized_keyword\)/);
 assert.match(sql, /BEFORE INSERT ON public.blog_tasks/); assert.match(sql, /AFTER DELETE ON public.blog_tasks/);

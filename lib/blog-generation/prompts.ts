@@ -11,7 +11,7 @@ export function buildBlogPrompt(product: BlogPromptProduct, task: BlogPromptTask
     systemInstructions: preset.system_prompt,
     input: JSON.stringify({
       preset: {
-        strategyPrompt: preset.strategy_prompt, stylePrompt: preset.style_prompt, articlePrompt: preset.article_prompt,
+        strategyPrompt: preset.strategy_prompt, stylePrompt: preset.style_prompt, titlePrompt: preset.title_prompt ?? "", articlePrompt: preset.article_prompt,
         target_chars: preset.target_chars, min_chars: preset.min_chars, max_chars: preset.max_chars,
         section_count: preset.section_count, keyword_min: preset.keyword_min, keyword_max: preset.keyword_max,
       },

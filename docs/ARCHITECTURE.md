@@ -80,13 +80,14 @@ Task + selected Preset + Product
 
 | 단계 | 핵심 코드 | 입력 / 결과 |
 |---|---|---|
-| Task 생성·수정 | `app/content/blog/new/page.tsx`, `[id]/EditBlogTask.tsx` | 제품과 keyword/topic/instructions 저장 |
-| 프리셋 UI | `[id]/BlogPresetControl.tsx` | 프리셋 선택·생성·편집·복제·삭제. 편집 시 4개 prompt와 분량·소제목·키워드 범위를 표시 |
+| Task 생성·수정 | `app/content/blog/new/page.tsx`, `[id]/EditBlogTask.tsx` | 제품과 keyword/topic/instructions 저장. 주제가 없으면 키워드 기반 Topic 확정 후 저장 |
+| Topic 확정 | `lib/blog-generation/topic.ts`, `topic-request.ts`, `app/api/blog/topics/generate/route.ts` | 서버 조회 Product와 keyword·추가 지시로 전역 모델·기준에 따른 주제 1개 생성·검증. 직접 입력/추천 Topic은 AI 생략 |
+| 프리셋 UI | `[id]/BlogPresetControl.tsx` | 프리셋 선택·생성·편집·복제·삭제. 편집 시 5개 prompt와 분량·소제목·키워드 범위를 표시 |
 | 프리셋 관리 | `app/api/blog/presets/`, `lib/blog-generation/presets.ts` | KIN과 같은 CRUD 패턴, 입력 검증, updated_at 갱신 |
 | 생성 요청 | `[id]/GenerateBlogDraft.tsx` | taskId/presetId/provider/model만 전송. 제품이나 prompt는 클라이언트에서 받지 않음 |
 | 생성·저장 | `app/api/blog/generate/route.ts` | Task·제품·프리셋 조회, 선택 저장, AI 호출, draft·snapshot 저장, Task를 generated로 갱신 |
 | Prompt 조립 | `lib/blog-generation/prompts.ts` | system_prompt 원문과 preset 설정/Product/Task JSON만 전달. 숨은 자연어 안내를 덧붙이지 않음 |
-| 생성 기록 | `lib/blog-generation/snapshot.ts`, `[id]/BlogGenerationDetails.tsx` | 생성 당시 prompt 4개·숫자 설정·Task·제품·provider·요청/응답 model의 독립 복사 및 이력 표시 |
+| 생성 기록 | `lib/blog-generation/snapshot.ts`, `[id]/BlogGenerationDetails.tsx` | 생성 당시 prompt 5개·숫자 설정·Task·제품·provider·요청/응답 model의 독립 복사 및 이력 표시 |
 | 출력 계약 | `lib/blog-generation/schema.ts` | title/intro/sections/closing과 section imageAssetId=null. 모든 필수 문자열은 trim 후 비어 있으면 실패 |
 | 모델·분량 | `models.ts`, `body.ts` | 모델 허용 목록·기본값, 프리셋 min/max를 그대로 사용한 본문 분량 판정 |
 | AI 호출 | `lib/ai/provider.ts` | OpenAI Responses / Anthropic Messages / xAI Chat Completions → outputText/provider/model |
@@ -101,10 +102,16 @@ presetId를 생략하면 Task의 preset_id, 그다음 is_default 프리셋을 �
 정보형만 기본값이다. 이후 글쓰기 규칙은 DB 프리셋에서 편집하며 Markdown이나 코드 상수를 추가 로딩하지 않는다.
 키워드는 Task의 keyword, 이번 글 지시는 Task의 instructions 한 곳만 사용한다. 역사적 purpose는 생성에 사용하지 않는다.
 
+Task 저장은 Keyword 또는 Topic 중 하나가 있어야 한다. 직접 입력한 Topic은 trim 후 1~300자로 그대로 사용하고, 빈 Topic에 Keyword가 있으면 전역 blog_generation_settings의 topic_model/topic_prompt를 매번 읽고 공용 OpenAI provider로 주제 하나를 생성한다(기본 GPT-6 Luna). Product는 보조 context이며 판매를 위해 검색 의도를 비틀거나 효능·의료 효과·경험을 지어내지 않도록 지시한다. Topic API는 Product를 DB에서 조회하고 AI output의 topic 단일 필드와 길이를 엄격히 검증한다. UUID/DB id는 AI에 반환시키지 않는다. 실패하면 작업을 저장하지 않으며 raw keyword fallback은 없다. 생성된 Topic은 폼 state와 blog_tasks.topic에 저장된다. Keyword Pool 직접 진입은 빈 Topic을 저장할 때 생성하고, AI 추천의 suggestedTopic prefill은 추가 호출 없이 저장한다. 수정 화면도 같은 규칙이며 기존 Draft/Job은 바꾸지 않는다.
+
+초안 생성 API는 과거 빈 Topic 작업을 같은 모듈로 한 번 보완한 뒤 DB에 저장한다. 최초 조회한 Topic·Keyword·Product가 달라졌으면 덮어쓰지 않고 409로 재시도를 안내한다. 저장 실패나 Topic 생성 실패면 본문 생성을 시작하지 않는다. 두 입력이 모두 비면 400으로 중단한다. 저장한 Topic을 현재 buildBlogPrompt와 generation_snapshot에 넣고 이후 초안 재생성에서 재사용한다. Topic 모델은 본문 provider/model 및 Keyword AI 모델 설정과 독립적이다. /content/blog/settings와 GET/PUT /api/blog/settings에서 전역 모델·생성 기준을 관리한다. 허용 모델과 label은 BLOG_MODEL_OPTIONS.openai를 재사용하며 저장은 updated_at 비교로 동시 편집 충돌을 409로 반환한다. 설정이 없거나 잘못되면 명확한 오류를 내며 긴 runtime fallback은 없다. 기준 변경은 앞으로 새로 자동 생성되는 Topic에만 적용하고 기존 Task를 변경하지 않는다. 별도 version/stale은 없다.
+
+Topic의 10~50자 권장·내부 기획 방향·간결한 표현은 DB prompt 책임이다. 코드에는 단일 topic structured output·추가 필드 거부·trim 후 1~300자·provider 오류·Product 처리와 사실성 안전 규칙만 남는다. 실제 제목 규칙은 Preset별 title_prompt이며 System/Strategy/Style/Title/Article 순으로 편집한다. Keyword는 검색 타깃, Topic은 확정된 내부 기획 방향, title은 실제 발행 제목, instructions는 이번 글 추가 지시다. buildBlogPrompt는 preset.titlePrompt를 실제 입력에 포함하며 DRAFT_SCHEMA는 그대로다. 생성 snapshot에는 당시 title_prompt를 독립 복사한다. version 1 snapshot reader는 과거 title_prompt가 없는 기록을 빈 문자열로 읽어 현재 제목 규칙을 과거 기록에 덧씌우지 않는다.
+
 `docs/CONTENT_STRATEGY.md`와 `docs/COPYWRITING_SKILLS.md`는 참고/보관 문서다.
 현재 생성 코드에서 읽거나 prompt에 합치지 않는다.
 
-새 생성에는 `202610150001_create_blog_prompt_presets.sql` 적용이 필요하다. migration은 자동 실행하지 않는다.
+새 생성에는 `202610150001_create_blog_prompt_presets.sql`과 `202610170009_blog_topic_and_title_settings.sql` 적용이 필요하다. 009는 전역 Topic singleton과 Preset title_prompt를 추가하며 기존 prompt를 바꾸지 않고 새 필드에만 공통 제목 기준을 초기화한다. 앱 rollback 시 추가 테이블·컬럼을 보존할 수 있다. migration은 자동 실행하지 않는다.
 기존 `blog_tasks.generation_settings` 컬럼과 값은 호환성·롤백을 위해 보존하지만 앱에서는 읽거나 쓰지 않는다.
 구형 Settings UI와 전용 API는 제거했다. 롤백 시 코드를 이전 버전으로 되돌리고 새 테이블/컬럼은 보존한다.
 기존 행을 재작성하거나 컬럼을 DROP하지 않는다.

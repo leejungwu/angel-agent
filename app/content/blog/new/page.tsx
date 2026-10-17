@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { KEYWORD_ID } from "@/lib/blog-keywords/shared";
+import { resolveTaskTopic } from "@/lib/blog-generation/topic-request";
 
 type Product = {
   id: string | number;
@@ -82,17 +83,23 @@ export default function NewBlogTaskPage() {
     if (saving || sourceKeywordLoading || sourceKeywordError) return;
 
     const product = products.find((item) => String(item.id) === productId);
-    if (!product || !topic.trim()) {
-      alert("상품과 주제를 입력해 주세요.");
+    if (!product) {
+      alert("상품을 선택해 주세요.");
+      return;
+    }
+    if (!keyword.trim() && !topic.trim()) {
+      alert("키워드 또는 주제를 입력해 주세요.");
       return;
     }
 
     setSaving(true);
     try {
+      const finalTopic = await resolveTaskTopic(product.id, keyword, topic, instructions);
+      setTopic(finalTopic);
       const { error } = await supabase.from("blog_tasks").insert({
         product_id: product.id,
         keyword: keyword.trim(),
-        topic: topic.trim(),
+        topic: finalTopic,
         instructions: instructions.trim(),
         status: "pending",
         ...(sourceKeywordId ? { blog_keyword_id: sourceKeywordId } : {}),
@@ -151,12 +158,13 @@ export default function NewBlogTaskPage() {
           />
           <input
             aria-label="주제"
-            required
+            maxLength={300}
             className="rounded-lg border px-4 py-3"
             placeholder="주제"
             value={topic}
             onChange={(event) => setTopic(event.target.value)}
           />
+          <p className="text-sm text-zinc-500">비워두면 키워드의 검색 의도를 바탕으로 AI가 주제를 자동 생성합니다.</p>
           <textarea
             aria-label="이번 글 추가 지시"
             className="min-h-24 rounded-lg border px-4 py-3"

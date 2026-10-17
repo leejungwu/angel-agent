@@ -112,6 +112,7 @@ export default async function BlogTaskDetailPage({
             <EditBlogTask
               key={task.id}
               taskId={task.id}
+              productId={task.product_id}
               initialFields={{
                 keyword: task.keyword,
                 topic: task.topic,

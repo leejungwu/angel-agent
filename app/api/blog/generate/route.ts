@@ -8,6 +8,7 @@ import { resolveBlogModel } from "@/lib/blog-generation/models";
 import { BLOG_PRESET_FIELDS, BLOG_PRESET_UUID, parseBlogPreset, type BlogPreset } from "@/lib/blog-generation/presets";
 import { createBlogGenerationSnapshot } from "@/lib/blog-generation/snapshot";
 import { supabase } from "@/lib/supabase";
+import { generateBlogTopic, TopicError } from "@/lib/blog-generation/topic";
 
 function serverError(message: string) {
   return Response.json({ error: message }, { status: 500 });
@@ -94,6 +95,9 @@ export async function POST(request: Request) {
     if (task.product_id == null) {
       return Response.json({ error: "연결된 상품을 찾을 수 없습니다." }, { status: 404 });
     }
+    if (!task.topic?.trim() && !task.keyword?.trim()) {
+      return Response.json({ error: "키워드 또는 주제를 입력해 주세요." }, { status: 400 });
+    }
 
     stage = "product lookup";
     const { data: product, error: productError } = await supabase
@@ -122,6 +126,18 @@ export async function POST(request: Request) {
     }
     if (!storedPreset) return Response.json({ error: presetId ? "선택한 프리셋을 찾을 수 없습니다." : "기본 프리셋이 없습니다. 프리셋을 선택하거나 생성해 주세요." }, { status: presetId ? 400 : 409 });
     const preset: BlogPreset = { ...storedPreset, ...parseBlogPreset(storedPreset) };
+    if (!task.topic?.trim()) {
+      stage = "topic generation";
+      const generated = await generateBlogTopic(product, task.keyword, task.instructions ?? "");
+      stage = "topic save";
+      let topicQuery = supabase.from("blog_tasks").update({ topic: generated.topic })
+        .eq("id", task.id).eq("product_id", task.product_id).eq("keyword", task.keyword);
+      topicQuery = task.topic == null ? topicQuery.is("topic", null) : topicQuery.eq("topic", task.topic);
+      const { data: savedTopic, error: topicError } = await topicQuery.select("topic").maybeSingle();
+      if (topicError) return serverError("생성한 주제를 저장하지 못했습니다. 초안을 생성하지 않았습니다.");
+      if (!savedTopic) return Response.json({ error: "작업이 변경되어 주제를 저장하지 않았습니다. 새로고침 후 다시 시도해 주세요." }, { status: 409 });
+      task.topic = savedTopic.topic;
+    }
     stage = "preset selection save";
     const { data: selectedTask, error: selectionError } = await supabase.from("blog_tasks")
       .update({ preset_id: preset.id }).eq("id", task.id).select("id").maybeSingle();
@@ -182,6 +198,7 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, taskId, draftId: savedDraft.id, createdAt: savedDraft.created_at, draft, generationSnapshot,
       bodyLength: checkBlogBodyLength(draft, preset), provider: response.provider, model: response.model });
   } catch (error) {
+    if (error instanceof TopicError) return Response.json({ error: error.message }, { status: error.status });
     if (error instanceof ProviderOutputError) stage = `${provider} output validation: ${error.reason}`;
     logFailure(stage, error);
     return serverError("블로그 초안 생성 처리 중 오류가 발생했습니다.");

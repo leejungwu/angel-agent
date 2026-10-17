@@ -52,6 +52,7 @@ export default async function BlogPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">AI Blog</h1>
         <div className="flex gap-2">
+          <Link href="/content/blog/settings" className="button-link rounded-lg border bg-white px-4 py-2 text-sm font-medium">Blog AI 설정</Link>
           <Link href="/content/blog/keywords" className="button-link rounded-lg border bg-white px-4 py-2 text-sm font-medium">Keyword Pool</Link>
           <Link
             href="/content/blog/publishing"

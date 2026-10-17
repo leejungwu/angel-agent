@@ -46,7 +46,7 @@ const blogModels = load("lib/blog-generation/models.ts");
 const blogPresets = load("lib/blog-generation/presets.ts");
 const snapshots = load("lib/blog-generation/snapshot.ts", { "./presets": blogPresets });
 const prompts = load("lib/blog-generation/prompts.ts");
-const blogPreset = { ...blogPresets.parseBlogPreset({ name: "프리셋", system_prompt: "편집한 시스템", strategy_prompt: "전략", style_prompt: "문체", article_prompt: "전개", target_chars: 1600, min_chars: 1400, max_chars: 1900, section_count: 3, keyword_min: 0, keyword_max: 3, is_default: true }), id: "12345678-1234-1234-1234-123456789abc", created_at: "", updated_at: "" };
+const blogPreset = { ...blogPresets.parseBlogPreset({ name: "프리셋", system_prompt: "편집한 시스템", strategy_prompt: "전략", style_prompt: "문체", title_prompt: "발행 제목 기준", article_prompt: "전개", target_chars: 1600, min_chars: 1400, max_chars: 1900, section_count: 3, keyword_min: 0, keyword_max: 3, is_default: true }), id: "12345678-1234-1234-1234-123456789abc", created_at: "", updated_at: "" };
 const kin = load("lib/kin/generate.ts");
 const presets = load("lib/kin/presets.ts", { "./generate": kin });
 const kinPrompts = load("lib/kin/prompts.ts");
@@ -92,7 +92,9 @@ const database = {
     };
   },
 };
+const topicModule = load("lib/blog-generation/topic.ts", { "@/lib/ai/provider": provider, "./settings": { readBlogSettings: async () => ({ topic_model: "gpt-6-luna", topic_prompt: "Topic 기준" }), BlogSettingsError: class extends Error {} } });
 const route = load("app/api/blog/generate/route.ts", {
+  "@/lib/blog-generation/topic": topicModule,
   ...sdkMocks, "@/lib/ai/provider": provider, "@/lib/blog-generation/schema": schema,
   "@/lib/blog-generation/prompts": prompts, "@/lib/supabase": { supabase: database },
   "@/lib/blog-generation/body": blogBody,
@@ -223,6 +225,7 @@ try {
   }
   assert.equal(prompt.systemInstructions, blogPreset.system_prompt);
   assert.equal(JSON.parse(prompt.input).preset.stylePrompt, blogPreset.style_prompt);
+  assert.equal(JSON.parse(prompt.input).preset.titlePrompt, blogPreset.title_prompt);
   for (const kind of ["openai", "anthropic", "xai"]) {
     writes.length = 0;
     reply = success(kind, draft);

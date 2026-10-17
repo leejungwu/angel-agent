@@ -3,6 +3,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { resolveTaskTopic } from "@/lib/blog-generation/topic-request";
 
 type TaskFields = {
   keyword: string | null;
@@ -20,9 +21,11 @@ function formValues(fields: TaskFields) {
 
 export default function EditBlogTask({
   taskId,
+  productId,
   initialFields,
 }: {
   taskId: string | number;
+  productId: string | number | null;
   initialFields: TaskFields;
 }) {
   const router = useRouter();
@@ -49,18 +52,16 @@ export default function EditBlogTask({
   async function saveTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (inFlight.current) return;
-    if (!form.topic.trim()) {
-      alert("주제를 입력해 주세요.");
+    if (!form.keyword.trim() && !form.topic.trim()) {
+      alert("키워드 또는 주제를 입력해 주세요.");
       return;
     }
-    const changes = {
-      keyword: form.keyword.trim(),
-      topic: form.topic.trim(),
-      instructions: form.instructions.trim(),
-    };
     inFlight.current = true;
     setSaving(true);
     try {
+      const topic = await resolveTaskTopic(productId, form.keyword, form.topic, form.instructions);
+      setForm({ ...form, topic });
+      const changes = { keyword: form.keyword.trim(), topic, instructions: form.instructions.trim() };
       // Update this task only. Product, task status and all drafts remain unchanged.
       const { data, error } = await supabase
         .from("blog_tasks")
@@ -78,8 +79,8 @@ export default function EditBlogTask({
       setEditing(false);
       setSaved(true);
       router.refresh();
-    } catch {
-      alert("작업을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "작업을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       inFlight.current = false;
       setSaving(false);
@@ -100,14 +101,15 @@ export default function EditBlogTask({
               />
             </label>
             <label className="flex flex-col gap-2">
-              주제 (필수)
+              주제
               <input
-                required
+                maxLength={300}
                 className="rounded-lg border px-4 py-3"
                 value={form.topic}
                 onChange={(event) => setForm({ ...form, topic: event.target.value })}
               />
             </label>
+            <p className="text-sm text-zinc-500">주제를 비워두고 저장하면 현재 키워드를 기준으로 AI가 새 주제를 생성합니다.</p>
             <label className="flex flex-col gap-2">
               이번 글 추가 지시
               <textarea

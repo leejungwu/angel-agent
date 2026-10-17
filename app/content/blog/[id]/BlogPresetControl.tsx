@@ -5,13 +5,13 @@ import { parseBlogPreset, type BlogPreset, type BlogPresetInput } from "@/lib/bl
 
 const prompts = [
   ["system_prompt", "기본/시스템 지시"], ["strategy_prompt", "콘텐츠 전략"],
-  ["style_prompt", "문체/카피라이팅"], ["article_prompt", "글 구조/목적"],
+  ["style_prompt", "문체/카피라이팅"], ["title_prompt", "Title Prompt"], ["article_prompt", "글 구조/목적"],
 ] as const;
 const numbers = [
   ["target_chars", "목표 글자 수"], ["min_chars", "최소 글자 수"], ["max_chars", "최대 글자 수"],
   ["section_count", "소제목 수"], ["keyword_min", "키워드 최소 사용 횟수"], ["keyword_max", "키워드 최대 사용 횟수"],
 ] as const;
-const emptyPreset: BlogPresetInput = { name: "", description: null, system_prompt: "", strategy_prompt: "", style_prompt: "", article_prompt: "",
+const emptyPreset: BlogPresetInput = { name: "", description: null, system_prompt: "", strategy_prompt: "", style_prompt: "", title_prompt: "", article_prompt: "",
   target_chars: 1500, min_chars: 1200, max_chars: 1800, section_count: 3, keyword_min: 0, keyword_max: 3, is_default: false };
 
 export default function BlogPresetControl({ initialPresets, selectedId, disabled, onSelect, onBusy }: {
@@ -81,7 +81,8 @@ export default function BlogPresetControl({ initialPresets, selectedId, disabled
         <label className="block text-sm">이름<input required maxLength={100} className={field} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
         <label className="block text-sm">설명<input maxLength={500} className={field} value={form.description ?? ""} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
         {prompts.map(([key, label]) => <label key={key} className="block text-sm">{label}
-          <textarea rows={16} maxLength={30000} required={key === "system_prompt"} className={field} value={form[key]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} />
+          <textarea rows={16} maxLength={30000} required={key === "system_prompt"} className={field} value={form[key] ?? ""} onChange={(event) => setForm({ ...form, [key]: event.target.value })} />
+          {key === "title_prompt" && <span className="mt-1 block text-xs text-zinc-500">최종 Draft의 실제 블로그 제목(title)을 만드는 규칙입니다. Topic은 글의 내부 기획 방향이고, Title은 실제 발행 제목입니다.</span>}
         </label>)}
         <div className="grid gap-4 sm:grid-cols-2">
           {numbers.map(([key, label]) => <label key={key} className="block text-sm">{label}

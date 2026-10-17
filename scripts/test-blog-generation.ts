@@ -7,7 +7,7 @@ import { buildBlogPrompt } from "../lib/blog-generation/prompts";
 import { createBlogGenerationSnapshot, readBlogGenerationSnapshot } from "../lib/blog-generation/snapshot";
 import { checkBlogBodyLength } from "../lib/blog-generation/body";
 
-const input = { name: " 프리셋 ", description: "설명", system_prompt: "\n사용자 시스템 지시\n", strategy_prompt: "전략", style_prompt: "문체", article_prompt: "전개", target_chars: 1600, min_chars: 1430, max_chars: 1870, section_count: 3, keyword_min: 0, keyword_max: 3 };
+const input = { name: " 프리셋 ", description: "설명", system_prompt: "\n사용자 시스템 지시\n", strategy_prompt: "전략", style_prompt: "문체", title_prompt: "제목 기준", article_prompt: "전개", target_chars: 1600, min_chars: 1430, max_chars: 1870, section_count: 3, keyword_min: 0, keyword_max: 3 };
 const preset = { ...parseBlogPreset(input), id: "12345678-1234-1234-1234-123456789abc", created_at: "", updated_at: "" };
 assert.equal(preset.name, "프리셋");
 assert.equal(preset.system_prompt, input.system_prompt);
@@ -18,7 +18,7 @@ const task = { keyword: "단일 키워드", topic: "주제", instructions: "이�
 const prompt = buildBlogPrompt(product, task, preset);
 assert.equal(prompt.systemInstructions, preset.system_prompt);
 assert.deepEqual(JSON.parse(prompt.input), {
-  preset: { strategyPrompt: preset.strategy_prompt, stylePrompt: preset.style_prompt, articlePrompt: preset.article_prompt,
+  preset: { strategyPrompt: preset.strategy_prompt, stylePrompt: preset.style_prompt, titlePrompt: preset.title_prompt, articlePrompt: preset.article_prompt,
     target_chars: 1600, min_chars: 1430, max_chars: 1870, section_count: 3, keyword_min: 0, keyword_max: 3 },
   product: { name: product.name, brand: null, usp: null, target_customer: null, customer_problem: null, notes: null }, task,
 });
@@ -32,11 +32,18 @@ assert.equal(snapshot.preset.style_prompt, "문체");
 assert.equal(snapshot.task.instructions, "이번 글 지시");
 assert.equal(snapshot.product.name, "제품");
 assert.equal(readBlogGenerationSnapshot(snapshot)?.responseModel, "returned-model");
+assert.equal(snapshot.preset.title_prompt, "제목 기준");
+preset.title_prompt = "나중 제목 수정"; assert.equal(snapshot.preset.title_prompt, "제목 기준");
+const oldPreset = Object.fromEntries(Object.entries(snapshot.preset).filter(([key]) => key !== "title_prompt"));
+assert.equal(readBlogGenerationSnapshot({ ...snapshot, preset: oldPreset })?.preset.title_prompt, "");
+assert.equal(parseBlogPreset({ ...input, title_prompt: undefined }).title_prompt, "");
+assert.throws(() => parseBlogPreset({ ...input, title_prompt: "x".repeat(30001) }));
 for (const old of [null, undefined, {}, { version: 99 }]) assert.equal(readBlogGenerationSnapshot(old), null);
 assert.equal(checkBlogBodyLength({ intro: "가".repeat(1430), sections: [] }, snapshot.preset).status, "ok");
 assert.equal(checkBlogBodyLength({ intro: "가".repeat(1429), sections: [] }, snapshot.preset).status, "too_short");
 assert.equal(checkBlogBodyLength({ intro: "가".repeat(1871), sections: [] }, snapshot.preset).status, "too_long");
-const sql = readFileSync("supabase/migrations/202610150001_create_blog_prompt_presets.sql", "utf8");
+// Git may check out CRLF on Windows; seed hashes describe the canonical LF source.
+const sql = readFileSync("supabase/migrations/202610150001_create_blog_prompt_presets.sql", "utf8").replace(/\r\n/g, "\n");
 const [, columnsText, values] = sql.match(/INSERT INTO public.blog_prompt_presets \(([^)]+)\)\s*VALUES\s*([\s\S]*);\s*COMMIT;/)!;
 const columns = columnsText.split(",").map(s => s.trim());
 const rows = [...values.matchAll(/\('(?:[^']|'')*'[\s\S]*?,\s*(?:true|false)\)/g)].map(match => {
