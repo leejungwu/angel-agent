@@ -48,7 +48,7 @@ export default async function PublishingQueuePage() {
                   ? <a href={job.published_url} target="_blank" rel="noopener noreferrer" className="mt-3 block break-all text-sm underline">{job.published_url}</a>
                   : <p className="mt-3 break-all text-sm text-zinc-500">{job.published_url}</p>
               )}
-              {job.status === "queued" && <RemovePublicationJob jobId={job.id} />}
+              {(job.status === "queued" || job.status === "inserted") && <RemovePublicationJob jobId={job.id} status={job.status} scheduledAuto={job.publish_mode === "scheduled" && job.finalize_mode === "auto"} />}
               {(job.status === "inserted" || job.status === "failed") && <PublicationJobTransition jobId={job.id} status={job.status} />}
               {staleInserting && <PublicationJobTransition jobId={job.id} status="inserting" />}
             </article>;

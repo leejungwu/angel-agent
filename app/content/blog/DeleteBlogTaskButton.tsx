@@ -16,7 +16,7 @@ export default function DeleteBlogTaskButton({
 
   async function deleteTask() {
     if (inFlight.current) return;
-    if (!confirm("이 블로그 작업과 연결된 초안을 모두 삭제하시겠습니까?")) return;
+    if (!confirm("이 블로그 작업과 연결된 초안을 모두 삭제하시겠습니까?\n업로드한 블로그 사진도 함께 삭제됩니다. 발행 Job 기록이 남아 있으면 삭제할 수 없습니다.")) return;
     inFlight.current = true;
     setDeleting(true);
 

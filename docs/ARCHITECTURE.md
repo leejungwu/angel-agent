@@ -264,7 +264,7 @@ Extension은 claim 전에 active/visible/writable/stable editor preflight를 수
 예약 목록 확인 시도 뒤에는 기존 글쓰기 frame URL의 blogId로 새 글쓰기를 열고 빈 활성 editor 준비를 확인한다. 예약 확인/서버 기록 실패와 fresh editor 실패는 독립적인 후처리이며 어느 쪽도 inserted를 failed로 바꾸지 않는다. 사용자에게는 예약 등록 요청 완료와 다음 글쓰기 준비 결과만 안내한다. 복귀 성공은 예약 등록 성공의 증거가 아니며 다음 Job은 사용자가 별도로 실행한다. review와 manual은 예약 자동 확인과 자동 이동을 하지 않는다.
 Side Panel은 입력 성공 후 Job 목록을 자동 재조회해 실행이 끝난 Job을 제거하고 결과 메시지는 유지한다. 다음 실행에는 남은 Job을 다시 선택해야 한다.
 동일 Chrome/Naver 세션에서 scheduled+auto Job 2건의 연속 예약 등록을 사용자 실검증했다. 첫 Job 이후 새 빈 글쓰기 자동 복귀·목록 갱신·ready/baseReady/stableEditor 확인과 다음 Job의 제목 검증·예약 등록까지 통과했으며, 중간에 사용자가 글쓰기 화면을 다시 열 필요가 없었다.
-상세에서 승인된 Draft를 등록하고 queued Job만 제거할 수 있다.
+상세에서 승인된 Draft를 등록하고 Queue에서는 queued/inserted Job 기록을 삭제할 수 있다.
 Extension 입력 성공은 Job을 inserted로 기록한다. scheduled+auto의 예약 목록 일치는 reservation_confirmed_at으로만 기록하고 실제 공개 여부를 자동 판정하거나 published로 변경하지 않는다.
 
 ## Extension의 역할 구분
@@ -333,12 +333,22 @@ DB snapshot을 읽을 때 version·본문·block 순서·사진 대응·metadata
 상세의 `AddPublicationJob`은 현재 선택한 승인 Draft ID를 `POST /api/blog/publication-jobs`에 전달한다.
 API는 현재 승인·Task 소속을 확인한 뒤 등록 함수를 호출하고, 중복이면 기존 Job을 안내한다.
 Queue 화면은 snapshot의 제목·사진 수와 Job의 상태·시간·오류를 최신 등록순으로 보여준다.
-`DELETE /api/blog/publication-jobs/[id]`는 DELETE 자체에 queued 조건을 걸며 Draft·사진을 삭제하지 않는다.
+`DELETE /api/blog/publication-jobs/[id]`는 DELETE 자체에 status IN (queued, inserted) 조건을 걸며 Draft·사진을 삭제하지 않는다.
+`202610170001_publication_job_delete_policy.sql`은 기존 DELETE policy만 같은 조건으로 변경한다. 원격 적용은 별도다.
+inserted 삭제는 Angel Agent 내부 기록만 지우며 네이버 입력·예약·게시글을 취소하거나 삭제하지 않는다.
+UI는 명시적 confirmation을 요구하고 scheduled+auto에는 예약 등록이 이미 요청됐을 수 있음을 안내한다.
+Task는 다른 Job이 하나라도 남으면 계속 삭제를 거부한다. Job이 없어도 기존 발행 초안 보호는 유지한다.
+Task 삭제는 Job·발행 초안 검사 후 기존 `removeAllBlogTaskAssets`를 직접 호출한다.
+사진 백업·Storage/metadata 삭제·실패 복구는 사진 전체 삭제와 동일하다. 실패하면 Task는 삭제하지 않으며,
+부분 완료 수를 포함한 helper 오류를 사용자에게 전달한다. 사진별 복구이므로 앞서 삭제 완료한 사진까지 전체 롤백하지 않는다.
+Job 참조로 보존된 파일이나 정리 후 남은 metadata가 있으면 Task 삭제를 중단한다.
+사용자는 별도의 사진 전체 삭제를 먼저 실행할 필요가 없다.
 Extension의 Job 선점·입력 결과 API와 웹의 수동 완료 기록·재대기 API를 제공한다. `/prepare`는 기존 동작 그대로다.
 `PATCH /api/blog/publication-jobs/[id]`는 `transitionPublicationJob`에서 inserted→published, failed→queued 및 10분 이상 지난 inserting→queued만 조건부 UPDATE한다.
 발행 완료는 사용자가 네이버 발행을 직접 확인한 기록이며 자동 검증이 아니다. URL은 선택이며 입력 시 http/https만 허용한다.
 published_at은 기록 시각으로 저장한다. 재대기는 동일 snapshot·원본 연결·attempt_no를 유지하고 오류·started_at·inserted_at만 초기화한다.
-queued는 제거, inserted는 발행 완료 기록, failed는 다시 대기열로 표시한다. 정상 inserting/published는 액션이 없다.
+queued는 대기열에서 제거, inserted는 발행 완료 기록·Job 기록 삭제, failed는 다시 대기열로 표시한다.
+inserting/published/failed Job의 직접 삭제는 허용하지 않는다. 정상 inserting/published는 액션이 없다.
 `isStalePublicationInserting`은 started_at 기준 10분 경과를 판단한다. 시각이 없거나 유효하지 않으면 복구하지 않는다.
 Queue를 새로 조회하면 오래된 inserting에 중단 추정 안내와 수동 복구 버튼을 표시한다. 서버는 클라이언트 시각 대신 DB의 시작 시각을 검사한다.
 복구 UPDATE에는 inserting·읽은 started_at·attempt_no 조건을 함께 걸어 완료 결과나 새 claim을 덮어쓰지 않는다.

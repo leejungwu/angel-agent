@@ -175,6 +175,7 @@ MCP는 비즈니스 로직을 다시 만드는 곳이 아닌 기존 Angel Agent 
 - [x] Blog 사진 개별 삭제 / 위·아래 순서 변경 / 작은 미리보기
 - [x] 사진 순서 즉시 반영 / 연속 클릭 직렬 저장 / 저장 실패 시 복원
 - [x] Task 사진 제거와 Job 원본 보존 분리 — 개별/전체 제거 시 참조 Storage 유지
+- [x] Job 없는 Task 삭제 시 사진 전체 정리 자동 실행 / 사진 정리 실패 시 Task 보존
 - [x] Product 사진의 Blog Task 독립 복사·재사용 / Task별 원본 중복 방지
 - [x] Blog 이미지 crop / 밝기 / 텍스트 워터마크 / 사각 영역 Blur
 - [x] Blog 이미지 기본 보정 — 밝기 / 대비 / 채도 / 색온도 / 선명도
@@ -205,7 +206,8 @@ MCP는 비즈니스 로직을 다시 만드는 곳이 아닌 기존 Angel Agent 
 - [x] 수동 발행 준비 / 본문 복사 / 사진 미리보기·번호순 다운로드·ZIP
 - [x] 서버 임시 사진 준비 / 종료 cleanup / 실패 단계 표시
 - [x] Publication Job 기반 — 테이블 migration / 승인 Draft 등록 함수 / immutable 실행 snapshot / runtime parser / 중복 등록 방지
-- [x] 웹 Queue — 승인 Draft 등록 / Job 목록·snapshot 사진 수 / queued 제거
+- [x] 웹 Queue — 승인 Draft 등록 / Job 목록·snapshot 사진 수 / queued 제거 / inserted 내부 기록 삭제 confirmation
+- [ ] queued/inserted DELETE policy migration 적용 / inserted 기록 삭제 운영 검증
 - [x] 모든 상태 Job의 Storage 원본 보존 / Job이 있는 Task 전체 삭제 차단
 - [x] Publication Job migration 적용 / 실제 웹 운영 검증
 - [ ] 등록·사진 삭제 동시 요청의 원자성 / DB·Storage 직접 삭제 보호

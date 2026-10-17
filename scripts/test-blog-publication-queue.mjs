@@ -23,7 +23,8 @@ const rows = {
   blog_publication_jobs: [],
 };
 const writes = [], orders = [];
-let nextId = 0, storageRemoves = 0, dbError = false, beforeUpdate;
+let nextId = 0, storageRemoves = 0, dbError = false, beforeUpdate, beforeDelete, photoRemoveError = false, photoMetadataError = false, photoBackupError = false;
+let photoRestores = 0; const deletionOrder = [];
 const db = { from(table) {
   assert.ok(table in rows);
   let operation = "read", input, max = Infinity;
@@ -45,6 +46,7 @@ const db = { from(table) {
   function run(single) {
     if (dbError) return { error: { code: "fixture" }, data: null };
     if (operation === "update" && beforeUpdate) { const change = beforeUpdate; beforeUpdate = undefined; change(); }
+    if (operation === "delete" && beforeDelete) { const change = beforeDelete; beforeDelete = undefined; change(); }
     if (operation === "insert") {
       if (rows[table].some(row => row.blog_draft_id === input.blog_draft_id)) return { error: { code: "23505" }, data: null };
       const row = { ...structuredClone(input), id: `${String(++nextId).padStart(8, "0")}-1234-1234-1234-123456789abc`, status: "queued", attempt_no: 0, created_at: "2026-10-15T00:00:00Z", inserted_at: null, published_at: null };
@@ -58,6 +60,8 @@ const db = { from(table) {
       return 0;
     }).slice(0, max);
     if (operation === "update") { matches.forEach(row => Object.assign(row, input)); writes.push([table, operation]); }
+    if (operation === "delete" && table === "blog_task_assets" && photoMetadataError) return { error: { message: "metadata failure" }, data: null };
+    if (operation === "delete") deletionOrder.push(table);
     if (operation === "delete") { matches.forEach(row => rows[table].splice(rows[table].indexOf(row), 1)); writes.push([table, operation]); }
     return { data: structuredClone(single ? matches[0] ?? null : matches), error: null };
   }
@@ -68,8 +72,8 @@ const db = { from(table) {
   args.p_asset_ids.forEach((id, index) => { rows.blog_task_assets.find(asset => String(asset.id) === String(id)).sort_order = index; });
   return { error: null };
 }, storage: { from: () => ({
-  download: async () => ({ data: new Blob(["image"], { type: "image/png" }) }),
-  remove: async () => { storageRemoves++; return {}; }, upload: async () => ({}),
+  download: async () => photoBackupError ? { error: { message: "backup failure" } } : ({ data: new Blob(["image"], { type: "image/png" }) }),
+  remove: async () => { storageRemoves++; deletionOrder.push("storage"); return photoRemoveError ? { error: { message: "storage failure" } } : {}; }, upload: async () => { photoRestores++; return {}; },
 }) } };
 const schedule = load("lib/blog-publishing/schedule.ts");
 const assetsModule = load("lib/blog-task-assets.ts");
@@ -92,7 +96,7 @@ const create = load("app/api/blog/publication-jobs/route.ts", common);
 const remove = load("app/api/blog/publication-jobs/[id]/route.ts", common);
 const deletion = load("lib/blog-task-assets/delete.ts", { ...common, "@/lib/blog-task-assets": assetsModule });
 const assetRoute = load("app/api/blog/tasks/[id]/assets/route.ts", { "@/lib/blog-task-assets/delete": deletion });
-const taskRoute = load("app/api/blog/tasks/[id]/route.ts", common);
+const taskRoute = load("app/api/blog/tasks/[id]/route.ts", { ...common, "@/lib/blog-task-assets/delete": deletion });
 const request = input => new Request("http://localhost/api", { method: "POST", body: JSON.stringify(input) });
 const context = id => ({ params: Promise.resolve({ id }) });
 for (const status of ["draft", "rejected"]) {
@@ -110,6 +114,7 @@ const repeated = await create.POST(request({ taskId: 1, draftId: 2 }));
 assert.equal(repeated.status, 200);
 assert.equal((await repeated.json()).alreadyExists, true);
 assert.equal(rows.blog_publication_jobs.length, 1);
+assert.equal(rows.blog_drafts.length, 1, "Job deletion itself never deletes Drafts");
 rows.blog_drafts[0].status = "rejected";
 assert.equal((await create.POST(request({ taskId: 1, draftId: 2 }))).status, 403);
 rows.blog_drafts[0].status = "approved";
@@ -117,7 +122,7 @@ const job = rows.blog_publication_jobs[0];
 const frozen = JSON.stringify(job.execution_snapshot);
 const Link = ({ href, children, ...props }) => React.createElement("a", { href, ...props }, children);
 const page = load("app/content/blog/publishing/page.tsx", { ...common, "next/link": Link,
-  "./RemovePublicationJob": ({ jobId }) => React.createElement("button", { "data-job": jobId }, "대기열에서 제거"),
+  "./RemovePublicationJob": ({ jobId, status }) => React.createElement("button", { "data-job": jobId }, status === "inserted" ? "Job 기록 삭제" : "대기열에서 제거"),
   "./PublicationJobTransition": ({ status }) => React.createElement("button", {}, status === "inserted" ? "발행 완료 기록" : "다시 대기열로"),
 }).default;
 rows.blog_task_assets.push({ id: 9, blog_task_id: 1, storage_path: "tasks/1/new.png", file_name: "new.png", sort_order: 1 });
@@ -129,6 +134,7 @@ for (const [status, label] of [["queued", "발행 대기"], ["inserting", "입�
   assert.ok(html.includes("고정 제목") && !html.includes("나중 제목"));
   assert.ok(html.includes("사진 1장") && html.includes(label));
   assert.equal(html.includes("대기열에서 제거"), status === "queued");
+  assert.equal(html.includes("Job 기록 삭제"), status === "inserted");
   assert.equal(html.includes("발행 완료 기록"), status === "inserted");
   assert.equal(html.includes("다시 대기열로"), status === "failed");
   assert.equal(html.includes("/prepare"), false);
@@ -142,7 +148,7 @@ for (const [status, label] of [["queued", "발행 대기"], ["inserting", "입�
   assert.equal(rows.blog_task_assets.length, 0);
   assert.equal(JSON.stringify(job), frozenJob);
   rows.blog_task_assets = structuredClone(taskPhotoFixture); storageRemoves = 0;
-  if (status !== "queued") assert.equal((await remove.DELETE(request({}), context(job.id))).status, 409);
+  if (!["queued", "inserted"].includes(status)) assert.equal((await remove.DELETE(request({}), context(job.id))).status, 409);
   assert.equal(JSON.stringify(job.execution_snapshot), frozen);
 }
 assert.ok(orders.some(([table, key, asc]) => table === "blog_publication_jobs" && key === "created_at" && asc === false));
@@ -207,6 +213,32 @@ assert.equal(rows.blog_publication_jobs.length, 0);
 assert.equal(rows.blog_drafts.length, 1); assert.equal(rows.blog_task_assets.length, 2);
 assert.equal((await assetRoute.DELETE(request({}), context("1"))).status, 200);
 assert.equal(storageRemoves, 2);
+// A conditional DELETE must reject a state change at execution time.
+for (const changedStatus of ["inserting", "published", "failed"]) {
+  const candidate = { ...structuredClone(job), status: "inserted" };
+  rows.blog_publication_jobs.push(candidate);
+  beforeDelete = () => { candidate.status = changedStatus; };
+  assert.equal((await remove.DELETE(request({}), context(candidate.id))).status, 409);
+  assert.ok(rows.blog_publication_jobs.includes(candidate));
+  rows.blog_publication_jobs.pop();
+}
+const insertedJob = { ...structuredClone(job), status: "inserted" };
+const otherJob = { ...structuredClone(job), id: "99999999-1234-1234-1234-123456789abc", status: "published" };
+rows.blog_publication_jobs.push(insertedJob, otherJob);
+assert.equal((await remove.DELETE(request({}), context(insertedJob.id))).status, 200);
+assert.equal(rows.blog_publication_jobs.length, 1);
+const blockedTask = await taskRoute.DELETE(request({}), context("1"));
+assert.equal(blockedTask.status, 409);
+assert.match((await blockedTask.json()).error, /기록/);
+rows.blog_publication_jobs.pop();
+const savedTasks = structuredClone(rows.blog_tasks);
+assert.equal((await taskRoute.DELETE(request({}), context("1"))).status, 200);
+assert.equal(rows.blog_tasks.length, 0);
+rows.blog_tasks = savedTasks;
+const policy = readFileSync("supabase/migrations/202610170001_publication_job_delete_policy.sql", "utf8");
+assert.match(policy, /ALTER POLICY blog_publication_jobs_delete ON public\.blog_publication_jobs\s+USING \(status IN \('queued', 'inserted'\)\)/);
+assert.doesNotMatch(policy, /DROP POLICY|DELETE FROM|ALTER TABLE|GRANT/i);
+
 dbError = true;
 assert.equal((await create.POST(request({ taskId: 1, draftId: 2 }))).status, 500);
 assert.equal((await taskRoute.DELETE(request({}), context("1"))).status, 500);
@@ -215,7 +247,7 @@ assert.equal((await assetRoute.DELETE(request({}), context("1"))).status, 409);
 assert.equal(storageRemoves, removesBeforeError);
 assert.ok(renderToStaticMarkup(await page()).includes("조회하지 못했습니다"));
 dbError = false;
-assert.ok(writes.every(([table]) => table === "blog_publication_jobs" || table === "blog_task_assets"));
+assert.ok(writes.every(([table]) => ["blog_publication_jobs", "blog_task_assets", "blog_tasks"].includes(table)));
 
 // Exercise the client request handlers without browser/API side effects.
 let state = [], cursor = 0, refreshes = 0;
@@ -339,7 +371,7 @@ const form = readFileSync("app/content/blog/[id]/GenerateBlogDraft.tsx", "utf8")
 assert.match(form, /draft\.status === "approved" && !editingDraft && !controlsBusy/);
 assert.match(form, /<AddPublicationJob key=\{draft.id\} taskId=\{taskId\} draftId=\{draft.id\}/);
 assert.match(form, /async function generateDraft/); assert.match(form, /async function saveDraft/); assert.match(form, /async function changeStatus/);
-console.log("PASS: Publication Queue API/UI, approval/idempotency, snapshot photo count, queued-only removal, all-state photo/Task protection, client request/refresh.");
+console.log("PASS: Publication Queue API/UI, approval/idempotency, snapshot photo count, queued/inserted removal, all-state photo/Task protection, client request/refresh.");
 
 // Actual create API, repeated Queue renders and client scheduled request wiring.
 rows.blog_publication_jobs.length = 0;
@@ -451,3 +483,77 @@ for (const [mode, finalize] of [["scheduled", "review"], ["manual", "review"]]) 
 scheduledQueueJob.published_at = "2026-10-16T05:00:00Z";
 assert.match(renderToStaticMarkup(await page()), /발행 완료 · /);
 console.log("PASS: contextual inserted label, absent published time hidden, confirmation value has no UI effect.");
+
+// Strong inserted confirmation, cancellation, scheduled-auto notice and surfaced API failure.
+try {
+  for (const scheduledAuto of [false, true]) {
+    state = []; let requests = 0, confirmation = "";
+    globalThis.confirm = message => { confirmation = message; return false; };
+    globalThis.fetch = async () => { requests++; return Response.json({ error: "DB 삭제 권한 확인" }, { status: 409 }); };
+    const props = { jobId: "job", status: "inserted", scheduledAuto };
+    await walk(render(removeControl, props)).find(node => node.type === "button").props.onClick();
+    assert.equal(requests, 0);
+    assert.match(confirmation, /Angel Agent의 발행 Job 기록만 삭제/);
+    assert.match(confirmation, /네이버에 이미 입력되었거나 예약된 글은 취소·삭제되지 않습니다/);
+    assert.equal(confirmation.includes("예약 등록이 이미 요청"), scheduledAuto);
+    globalThis.confirm = () => true;
+    await walk(render(removeControl, props)).find(node => node.type === "button").props.onClick();
+    assert.equal(requests, 1);
+    assert.ok(walk(render(removeControl, props)).some(node => node.props?.role === "alert" && node.props.children.includes("DB 삭제 권한")));
+  }
+} finally { globalThis.fetch = originalFetch; globalThis.confirm = originalConfirm; }
+console.log("PASS: queued/inserted conditional deletion, protected states and races, Task protection after last Job, inserted confirmation and RLS policy migration contract.");
+
+// Task deletion reuses real bulk cleanup, including its backup/recovery paths.
+const taskFixtures = structuredClone(rows);
+function resetTaskDeletion(assetCount = 2) {
+  rows.blog_tasks = [{ id: 1 }]; rows.blog_drafts = [{ id: 2, blog_task_id: 1, publishing_status: null }];
+  rows.blog_task_assets = Array.from({ length: assetCount }, (_, index) => ({ id: index + 1, blog_task_id: 1, sort_order: index, storage_path: "tasks/1/" + index + ".png", file_name: index + ".png" }));
+  rows.blog_publication_jobs = []; storageRemoves = 0; photoRestores = 0; deletionOrder.length = 0;
+  photoRemoveError = false; photoMetadataError = false; photoBackupError = false;
+}
+for (const count of [0, 2]) {
+  resetTaskDeletion(count);
+  assert.equal((await taskRoute.DELETE(request({}), context("1"))).status, 200);
+  assert.equal(storageRemoves, count); assert.equal(rows.blog_task_assets.length, 0); assert.equal(rows.blog_tasks.length, 0);
+  assert.equal(deletionOrder.at(-1), "blog_tasks");
+  if (count) assert.deepEqual(deletionOrder, ["storage", "blog_task_assets", "storage", "blog_task_assets", "blog_tasks"]);
+}
+for (const status of ["queued", "inserted", "inserting", "published", "failed"]) for (const count of [0, 2]) {
+  resetTaskDeletion(count);
+  rows.blog_publication_jobs.push({ ...structuredClone(job), status });
+  assert.equal((await taskRoute.DELETE(request({}), context("1"))).status, 409);
+  assert.equal(storageRemoves, 0); assert.equal(rows.blog_task_assets.length, count); assert.equal(rows.blog_tasks.length, 1);
+}
+for (const failure of ["storage", "metadata", "backup"]) {
+  resetTaskDeletion(); photoRemoveError = failure === "storage"; photoMetadataError = failure === "metadata"; photoBackupError = failure === "backup";
+  const response = await taskRoute.DELETE(request({}), context("1"));
+  assert.equal(response.status, 409); assert.match((await response.json()).error, /사진 정리에 실패해 작업을 삭제하지 않았습니다/);
+  assert.equal(rows.blog_tasks.length, 1); assert.equal(rows.blog_task_assets.length, 2);
+  assert.equal(deletionOrder.includes("blog_tasks"), false);
+  if (failure !== "backup") assert.ok(photoRestores > 0);
+}
+resetTaskDeletion();
+rows.blog_publication_jobs.push({ ...structuredClone(job), status: "inserted" });
+assert.equal((await remove.DELETE(request({}), context(job.id))).status, 200);
+assert.equal((await taskRoute.DELETE(request({}), context("1"))).status, 200);
+assert.equal(rows.blog_tasks.length, 0); assert.equal(rows.blog_task_assets.length, 0); assert.equal(storageRemoves, 2);
+resetTaskDeletion();
+assert.equal((await assetRoute.DELETE(request({}), context("1"))).status, 200);
+assert.equal(rows.blog_tasks.length, 1); assert.equal(rows.blog_task_assets.length, 0);
+Object.assign(rows, taskFixtures);
+const taskDeleteControl = load("app/content/blog/DeleteBlogTaskButton.tsx", { react: hooks, "next/navigation": { useRouter: () => ({ push() {}, refresh() {} }) } }).default;
+state = []; let taskConfirmation = "", taskRequests = 0, taskAlert = "";
+const previousAlert = globalThis.alert;
+try {
+  globalThis.confirm = message => { taskConfirmation = message; return false; };
+  globalThis.fetch = async () => { taskRequests++; return Response.json({ error: "사진 정리 실패" }, { status: 409 }); };
+  globalThis.alert = message => { taskAlert = message; };
+  await render(taskDeleteControl, { taskId: 1 }).props.onClick();
+  assert.equal(taskRequests, 0); assert.match(taskConfirmation, /업로드한 블로그 사진도 함께 삭제/);
+  globalThis.confirm = () => true;
+  await render(taskDeleteControl, { taskId: 1 }).props.onClick();
+  assert.equal(taskRequests, 1); assert.equal(taskAlert, "사진 정리 실패");
+} finally { globalThis.confirm = originalConfirm; globalThis.fetch = originalFetch; globalThis.alert = previousAlert; }
+assert.doesNotMatch(readFileSync("app/api/blog/tasks/[id]/route.ts", "utf8"), /사진을 먼저 전체 삭제/);
+console.log("PASS: Task deletion auto-cleans photos before Task, all Job states guard first, cleanup/backup/metadata failures stop and recover, inserted Job removal unlocks Task, one confirmation and visible errors.");

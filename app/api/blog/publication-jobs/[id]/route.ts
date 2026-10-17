@@ -22,8 +22,8 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   }
   // Keep the status predicate on DELETE itself, including when service credentials are used later.
   const { data, error } = await supabase.from("blog_publication_jobs")
-    .delete().eq("id", id).eq("status", "queued").select("id").maybeSingle();
-  if (error) return Response.json({ error: "대기열에서 제거하지 못했습니다." }, { status: 500 });
-  if (!data) return Response.json({ error: "발행 대기 상태의 Job만 제거할 수 있습니다. 이미 제거됐거나 상태가 변경됐습니다." }, { status: 409 });
+    .delete().eq("id", id).in("status", ["queued", "inserted"]).select("id").maybeSingle();
+  if (error) return Response.json({ error: "Job 기록을 삭제하지 못했습니다." }, { status: 500 });
+  if (!data) return Response.json({ error: "발행 대기 또는 입력 완료 상태의 Job만 삭제할 수 있습니다. 상태 변경 또는 DB 삭제 권한을 확인해 주세요." }, { status: 409 });
   return Response.json({ ok: true });
 }
