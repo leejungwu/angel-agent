@@ -14,8 +14,8 @@ function load(path, mocks = {}) {
 }
 const shared = load("lib/blog-keywords/shared.ts");
 const filtersModule = load("lib/blog-keywords/relevance-filter.ts");
-let settingsVersion = 1, settingsReads = 0;
-const settingsMock = { async readKeywordAISettings() { settingsReads++; return { relevance_version: settingsVersion, relevance_criteria: "DB 연관도 기준" }; } };
+let settingsVersion = 1, settingsReads = 0, relevanceModel = "gpt-6-luna", expectedModel = relevanceModel, changeModelOnAI = false;
+const settingsMock = { async readKeywordAISettings() { settingsReads++; return { relevanceModel, relevance_version: settingsVersion, relevance_criteria: "DB 연관도 기준" }; } };
 const rows = Array.from({ length: 4753 }, (_, i) => ({
   id: `${String(i + 1).padStart(8, "0")}-0000-4000-8000-000000000001`, product_id: i === 0 ? 2 : 1,
   keyword: `키워드 ${i}`, status: ["unused", "used", "excluded"][i % 3], search_volume: i === 2 ? null : 10000 - i,
@@ -69,6 +69,8 @@ const provider = {
   missingProviderKey: () => missingKey ? "OPENAI_API_KEY" : null,
   async generateStructuredWithProvider(input) {
     requests.push(input);
+    assert.equal(input.model, expectedModel);
+    if (changeModelOnAI) { relevanceModel = "gpt-6-astra"; changeModelOnAI = false; }
     if (changeCriteriaOnAI) { settingsVersion++; changeCriteriaOnAI = false; }
     if (failAiAt === requests.length) throw new Error("private upstream text");
     const context = JSON.parse(input.input);
@@ -113,6 +115,7 @@ const statuses = rows.map(row => row.status);
 const beforeSettingsReads = settingsReads;
 const first = await relevance.evaluateProductRelevance(1, 200);
 assert.equal(settingsReads - beforeSettingsReads, 1, "All four batches share one criteria snapshot");
+assert.ok(saves.every(save => save.p_rows.every(result => rows.find(row => row.id === result.keywordId).product_relevance_model === "openai:mock-model")), "Persist actual response model, not requested model");
 assert.equal(first.evaluated, 200); assert.equal(first.selected, 200); assert.equal(requests.length, 4); assert.equal(saves.length, 4);
 assert.ok(!saves.flatMap(batch => batch.p_rows).some(row => [rows[0].id, rows[1].id, rows[2].id].includes(row.keywordId)));
 assert.equal(rows[0].product_relevance_score, null); assert.equal(rows[1].product_relevance_score, 95);
@@ -168,6 +171,13 @@ const partialResponse = await post({ productId: 1, batchSize: 200 }); assert.equ
 rows.filter(row => row.product_id === 1).forEach(row => { row.product_relevance_score = 80; row.product_relevance_criteria_version = settingsVersion; });
 const calls = requests.length;
 assert.equal((await relevance.evaluateProductRelevance(1, 200)).selected, 0); assert.equal(requests.length, calls);
+const modelSnapshot = rows.map(row => ({ ...row }));
+relevanceModel = "gpt-6.1-sol"; expectedModel = relevanceModel; changeModelOnAI = true;
+requests.length = 0;
+assert.equal((await relevance.evaluateProductRelevance(1, 100, true)).evaluated, 100);
+assert.ok(requests.every(request => request.model === "gpt-6.1-sol"), "One run keeps its starting model even if settings change");
+expectedModel = relevanceModel;
+rows.forEach((row, i) => { for (const key of Object.keys(row)) delete row[key]; Object.assign(row, modelSnapshot[i]); });
 const reevaluationBefore = rows.map(row => ({ ...row }));
 invalidMode = "missing";
 const invalidReevaluation = await relevance.evaluateProductRelevance(1, 50, true);
@@ -244,7 +254,7 @@ const ui = load("app/content/blog/keywords/RelevanceEvaluation.tsx", {
   "next/navigation": { useRouter: () => ({ refresh() { refreshes++; } }) }, "@/lib/supabase": { supabase: countDb }, "@/lib/blog-keywords/ai-settings": settingsMock, "@/lib/blog-keywords/relevance-filter": filtersModule,
 }).default;
 const walk = node => !node || typeof node !== "object" ? [] : [node, ...React.Children.toArray(node.props?.children).flatMap(walk)];
-const render = () => { cursor = 0; return ui({ products: [{ id: 1, name: "Pool 상품" }, { id: 2, name: "평가 상품" }] }); };
+const render = () => { cursor = 0; return ui({ products: [{ id: 1, name: "Pool 상품" }, { id: 2, name: "평가 상품" }], modelLabel: "GPT-6 Luna" }); };
 const control = label => walk(render()).find(node => node.props?.["aria-label"] === label);
 async function settle() {
   const callbacks = effects; effects = [];
@@ -258,7 +268,7 @@ globalThis.fetch = async (url, options) => {
   return Response.json({ selected: expectedSize, evaluated: uiFailure ? 50 : expectedSize, skipped: 0, ...(uiFailure ? { error: "두 번째 batch 실패" } : {}) }, { status: uiFailure ? 502 : 200 });
 };
 try {
-  let tree = render(); await settle(); assert.equal(fetchCalls, 0); assert.equal(countQueries.length, 0);
+  let tree = render(); assert.ok(renderToStaticMarkup(tree).includes("현재 평가 모델: GPT-6 Luna")); await settle(); assert.equal(fetchCalls, 0); assert.equal(countQueries.length, 0);
   assert.equal(control("연관도 평가 Product").props.value, "");
   assert.equal(walk(tree).find(node => node.type === "button").props.disabled, true);
   assert.equal(control("연관도 평가 개수").props.value, 50);
@@ -308,4 +318,4 @@ try {
   assert.equal(repeatButton().props.disabled, true);
   await chooseProduct(""); assert.equal(repeatButton().props.disabled, true);
 } finally { cleanup?.(); globalThis.fetch = oldFetch; }
-console.log("PASS: unevaluated default / stale / combined targets and counts, API target validation, strict intent rubric contract, explicit reevaluation/oldest-first/partial failure preservation, Product isolation, default 50 and selectable 50/100/200 limits / 1/2/4 calls, volume priority without metric scoring, complete strict validation, partial failure/save safety, retry skips evaluated, status preservation, API/migration contracts; no real AI or DB calls.");
+console.log("PASS: stored evaluation model / in-flight model snapshot / actual response model persistence, unevaluated default / stale / combined targets and counts, API target validation, strict intent rubric contract, explicit reevaluation/oldest-first/partial failure preservation, Product isolation, default 50 and selectable 50/100/200 limits / 1/2/4 calls, volume priority without metric scoring, complete strict validation, partial failure/save safety, retry skips evaluated, status preservation, API/migration contracts; no real AI or DB calls.");

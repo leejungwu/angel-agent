@@ -13,6 +13,13 @@ function load(path, mocks = {}) {
   return compiled.exports;
 }
 const shared = load("lib/blog-keywords/shared.ts");
+const models = load("lib/blog-generation/models.ts");
+const modelsSql = readFileSync("supabase/migrations/202610170008_blog_keyword_ai_models.sql", "utf8");
+assert.match(modelsSql, /relevance_model text NOT NULL DEFAULT 'gpt-6-luna'/);
+assert.match(modelsSql, /recommendation_model text NOT NULL DEFAULT 'gpt-6.1-sol'/);
+assert.match(modelsSql, /updated_at = p_expected_updated_at/);
+assert.match(modelsSql, /relevance_model = p_relevance_model, recommendation_model = p_recommendation_model/);
+assert.doesNotMatch(modelsSql, /CHECK\s*\(|SET relevance_version|CREATE TRIGGER|DROP\s/i);
 const sql = readFileSync("supabase/migrations/202610170007_blog_keyword_ai_settings.sql", "utf8");
 const seeds = [...sql.matchAll(/\$criteria\$([\s\S]*?)\$criteria\$/g)].map(match => match[1]);
 assert.equal(seeds.length, 2);
@@ -23,36 +30,48 @@ assert.doesNotMatch(sql, /DELETE FROM|DROP TABLE|SET\s+status|SECURITY DEFINER/i
 for (const file of ["relevance", "recommendation"]) {
   const source = readFileSync(`lib/blog-keywords/${file}.ts`, "utf8");
   assert.ok(source.includes("await readKeywordAISettings()"));
-  assert.doesNotMatch(source, /bait-and-switch|90~100|아이크림|대표 하나|검색량은 중요한 signal/);
+  assert.doesNotMatch(source, /bait-and-switch|90~100|아이크림|대표 하나/);
 }
-let row = { id: true, relevance_criteria: seeds[0], recommendation_criteria: seeds[1], relevance_version: 1, created_at: "2026-10-17T00:00:00Z", updated_at: "2026-10-17T00:00:00Z" };
+let row = { relevanceModel: modelsSql.match(/relevance_model text NOT NULL DEFAULT '([^']+)'/)[1], recommendationModel: modelsSql.match(/recommendation_model text NOT NULL DEFAULT '([^']+)'/)[1], id: true, relevance_criteria: seeds[0], recommendation_criteria: seeds[1], relevance_version: 1, created_at: "2026-10-17T00:00:00Z", updated_at: "2026-10-17T00:00:00Z" };
 let missing = false, dbFailure = false, writes = 0;
 const normalize = text => text.replace(/\s+/g, " ").trim();
 const db = {
   from(table) {
     assert.equal(table, "blog_keyword_ai_settings");
-    return { select() { return this; }, eq(key, value) { assert.equal(key, "id"); assert.equal(value, true); return this; }, async maybeSingle() { return { data: missing ? null : { ...row }, error: dbFailure ? {} : null }; } };
+    return { select(fields) { assert.ok(fields.includes("relevanceModel:relevance_model,recommendationModel:recommendation_model")); return this; }, eq(key, value) { assert.equal(key, "id"); assert.equal(value, true); return this; }, async maybeSingle() { return { data: missing ? null : { ...row }, error: dbFailure ? {} : null }; } };
   },
-  async rpc(name, args) {
+  rpc(name, args) { return { async select(fields) {
+    assert.ok(fields.includes("relevanceModel:relevance_model,recommendationModel:recommendation_model"));
     assert.equal(name, "save_blog_keyword_ai_settings");
     if (dbFailure) return { error: {} };
     if (args.p_expected_updated_at !== row.updated_at) return { data: [] };
     writes++;
     const relevance = normalize(args.p_relevance_criteria);
-    row = { ...row, relevance_criteria: relevance, recommendation_criteria: normalize(args.p_recommendation_criteria), relevance_version: row.relevance_version + Number(relevance !== normalize(row.relevance_criteria)), updated_at: new Date(Date.UTC(2026, 9, 17) + writes).toISOString() };
+    row = { ...row, relevanceModel: args.p_relevance_model, recommendationModel: args.p_recommendation_model, relevance_criteria: relevance, recommendation_criteria: normalize(args.p_recommendation_criteria), relevance_version: row.relevance_version + Number(relevance !== normalize(row.relevance_criteria)), updated_at: new Date(Date.UTC(2026, 9, 17) + writes).toISOString() };
     return { data: [{ ...row }] };
-  },
+  } }; },
 };
-const settings = load("lib/blog-keywords/ai-settings.ts", { "@/lib/supabase": { supabase: db }, "./shared": shared });
+const settings = load("lib/blog-keywords/ai-settings.ts", { "@/lib/supabase": { supabase: db }, "./shared": shared, "@/lib/blog-generation/models": models });
 const route = load("app/api/blog/keywords/ai-settings/route.ts", { "@/lib/supabase": { supabase: db }, "@/lib/blog-keywords/ai-settings": settings, "@/lib/blog-keywords/shared": shared });
 let response = await route.GET(); assert.equal(response.status, 200); assert.equal(response.headers.get("Cache-Control"), "no-store");
-assert.equal((await response.json()).settings.relevance_version, 1);
+const defaults = (await response.json()).settings;
+assert.equal(defaults.relevance_version, 1); assert.equal(defaults.relevanceModel, "gpt-6-luna"); assert.equal(defaults.recommendationModel, "gpt-6.1-sol");
 const patch = value => route.PATCH(new Request("http://fixture", { method: "PATCH", body: JSON.stringify(value) }));
 response = await patch(row); assert.equal(response.status, 200); assert.equal(row.relevance_version, 1, "Seed whitespace normalization does not increment version");
 response = await patch({ ...row, relevance_criteria: ` \n${row.relevance_criteria.replaceAll(" ", "  ")}\t` });
 assert.equal(response.status, 200); assert.equal(row.relevance_version, 1);
 response = await patch({ ...row, recommendation_criteria: "  검색량을\n우선한다. " });
 assert.equal(response.status, 200); assert.equal(row.relevance_version, 1); assert.equal(row.recommendation_criteria, "검색량을 우선한다.");
+for (const { value: model } of models.BLOG_MODEL_OPTIONS.openai) {
+  assert.equal((await patch({ ...row, relevanceModel: model })).status, 200);
+  assert.equal(row.relevanceModel, model); assert.equal(row.relevance_version, 1);
+  assert.equal((await patch({ ...row, recommendationModel: model })).status, 200);
+  assert.equal(row.recommendationModel, model); assert.equal(row.relevance_version, 1);
+}
+for (const invalid of ["gpt-unknown", "claude-sonnet-5-5", "grok-4.7", "", null, 1, undefined]) {
+  for (const key of ["relevanceModel", "recommendationModel"]) assert.equal((await patch({ ...row, [key]: invalid })).status, 400);
+}
+assert.equal((await route.PUT(new Request("http://fixture", { method: "PUT", body: JSON.stringify(row) }))).status, 200);
 const before = { ...row };
 response = await patch({ ...row, relevance_criteria: "제품 관련성을 최우선으로 판단한다." });
 assert.equal(response.status, 200); assert.equal(row.relevance_version, 2);
@@ -61,6 +80,8 @@ assert.equal(row.relevance_version, 2);
 for (const value of [null, [], {}, { ...row, relevance_criteria: " \t\n" }, { ...row, recommendation_criteria: "" }, { ...row, relevance_criteria: "x".repeat(30001) }, { ...row, recommendation_criteria: 1 }, { ...row, updated_at: "invalid" }]) assert.equal((await patch(value)).status, 400);
 assert.equal((await route.PATCH(new Request("http://fixture", { method: "PATCH", body: "bad json" }))).status, 400);
 missing = true; assert.equal((await route.GET()).status, 500); await assert.rejects(settings.readKeywordAISettings, /migration/); missing = false;
+const validModel = row.relevanceModel; row.relevanceModel = "invalid-stored-model";
+assert.equal((await route.GET()).status, 500); row.relevanceModel = validModel;
 dbFailure = true; assert.equal((await route.GET()).status, 500); assert.equal((await patch(row)).status, 500); dbFailure = false;
 const filters = load("lib/blog-keywords/relevance-filter.ts");
 assert.equal(filters.isStaleRelevance(null, null, 2), false);
@@ -71,6 +92,7 @@ assert.equal(filters.pendingRelevanceFilter(2), "product_relevance_score.is.null
 
 let state = [], cursor = 0, failUI = false, finish;
 const ui = load("app/content/blog/keywords/settings/SettingsForm.tsx", {
+  "@/lib/blog-generation/models": models,
   react: { useState(initial) { const i = cursor++; if (!(i in state)) state[i] = initial; return [state[i], value => { state[i] = value; }]; } },
 }).default;
 const walk = node => !node || typeof node !== "object" ? [] : [node, ...React.Children.toArray(node.props?.children).flatMap(walk)];
@@ -84,13 +106,19 @@ globalThis.fetch = async (url, options) => {
 try {
   let tree = render(); assert.equal(walk(tree).filter(node => node.type === "textarea").length, 2);
   assert.ok(renderToStaticMarkup(tree).includes("이전 기준으로 표시"));
-  walk(tree).find(node => node.props?.id === "relevance-criteria").props.onChange({ target: { value: "새 연관도 기준" } });
+  const selects = walk(tree).filter(node => node.type === "select");
+  assert.equal(selects.length, 2);
+  for (const select of selects) assert.deepEqual(React.Children.toArray(select.props.children).map(node => ({ value: node.props.value, label: node.props.children })), models.BLOG_MODEL_OPTIONS.openai);
+  selects[0].props.onChange({ target: { value: "gpt-6-luna" } });
+  walk(render()).find(node => node.props?.["aria-label"] === "키워드 추천 모델").props.onChange({ target: { value: "gpt-6.1-sol" } });
+  walk(render()).find(node => node.props?.id === "relevance-criteria").props.onChange({ target: { value: "새 연관도 기준" } });
   const pending = render().props.onSubmit({ preventDefault() {} });
   assert.equal(walk(render()).find(node => node.type === "button").props.disabled, true);
   assert.ok(renderToStaticMarkup(render()).includes("저장 중")); finish(); await pending;
   assert.ok(renderToStaticMarkup(render()).includes("저장 완료"));
+  assert.equal(row.relevanceModel, "gpt-6-luna"); assert.equal(row.recommendationModel, "gpt-6.1-sol");
   assert.equal(row.relevance_criteria, "새 연관도 기준"); assert.equal(row.relevance_version, 3);
   failUI = true; const failed = render().props.onSubmit({ preventDefault() {} }); finish(); await failed;
   assert.ok(walk(render()).some(node => node.props?.role === "alert"));
 } finally { globalThis.fetch = oldFetch; }
-console.log("PASS: settings seed/contracts, GET/PATCH validation, normalized version changes, recommendation-only/no-op saves, concurrent conflict, missing config, stale predicates, settings UI saving/success/failure (mock DB; no remote SQL or AI).");
+console.log("PASS: model defaults / shared allowlist / model-only version preservation / GET-PUT-PATCH validation, settings seed/contracts, normalized version changes, recommendation-only/no-op saves, concurrent conflict, missing config, stale predicates, settings UI saving/success/failure (mock DB; no remote SQL or AI).");

@@ -26,7 +26,7 @@ export default function RecommendationForm({ products, initialProductId }: { pro
   }
 
   return <>
-    <p className="mt-4 text-sm text-zinc-600">미사용 키워드 중 최대 200개 후보를 분석합니다. 추천 점수는 AI의 상대적 기획 평가이며, 검색 순위나 성과를 보장하지 않습니다. 광고 경쟁도는 블로그 SEO 난이도가 아닙니다.</p>
+    <p className="mt-4 text-sm text-zinc-600">AI 추천은 현재 기준으로 연관도 평가가 완료된 키워드를 사용합니다. 미사용·저장 연관도 50점 이상에서 연관도와 검색량을 함께 반영한 최대 200개 후보를 분석합니다. 미평가·이전 기준 키워드는 포함하지 않습니다. 저장된 연관도를 다시 채점하지 않습니다. AI 종합 추천점수는 상대적 기획 평가이며 검색 순위나 성과를 보장하지 않습니다. 광고 경쟁도는 블로그 SEO 난이도가 아닙니다.</p>
     <form onSubmit={recommend} className="my-6">
       <fieldset disabled={busy} className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1">Product<select required aria-label="추천 Product" value={productId} onChange={event => { setProductId(event.target.value); setResult(null); setError(""); }} className="rounded border bg-white p-2"><option value="">Product 선택</option>{products.map(product => <option key={product.id} value={String(product.id)}>{product.name}</option>)}</select></label>
@@ -38,10 +38,10 @@ export default function RecommendationForm({ products, initialProductId }: { pro
     {error && <p role="alert" className="text-red-600">{error}</p>}
     {result && <>
       <p role="status" className="mb-4">후보 {result.candidateCount}개 중 {result.recommendations.length}개 추천. 추천만으로 키워드 상태는 바뀌지 않습니다.</p>
-      {!result.recommendations.length && <p>미사용 키워드가 없습니다. Keyword Pool에서 Product와 키워드를 확인하세요.</p>}
+      {result.recommendations.length < Number(count) && <p className="mb-4 text-sm text-amber-800">현재 기준 평가와 후보 조건을 충족한 키워드가 부족해 가능한 수만 추천했습니다. AI 추천은 현재 기준으로 연관도 평가가 완료된 키워드를 사용합니다. Keyword Pool에서 추가 평가와 저장 점수를 확인하세요.</p>}
       <div className="grid gap-4">{result.recommendations.map(item => <article key={item.keywordId} className="rounded-xl border bg-white p-5">
         <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-semibold">{item.keyword}</h2><Link href={recommendationTaskUrl(productId, item)} className="whitespace-nowrap rounded border px-3 py-2">작업 생성</Link></div>
-        <p className="my-3 text-sm text-zinc-600">검색량 {item.searchVolume === null ? "데이터 없음" : item.searchVolume.toLocaleString("ko-KR")} · 추천 점수 {item.score} · 제품 관련성 {item.relevanceScore} · 기획 기회 {item.opportunityScore}</p>
+        <p className="my-3 text-sm text-zinc-600">검색량 {item.searchVolume === null ? "데이터 없음" : item.searchVolume.toLocaleString("ko-KR")} · 저장된 연관도(현재 기준) {item.relevanceScore} · AI 종합 추천점수 {item.score} · 기획 기회 {item.opportunityScore}</p>
         <dl className="grid gap-2">{[["검색 의도", item.searchIntent], ["추천 이유", item.reason], ["추천 주제", item.suggestedTopic], ["추천 각도", item.suggestedAngle]].map(([label, value]) => <div key={label}><dt className="font-medium">{label}</dt><dd className="whitespace-pre-wrap text-zinc-700">{value}</dd></div>)}</dl>
       </article>)}</div>
     </>}

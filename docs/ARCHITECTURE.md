@@ -174,17 +174,17 @@ Blog 생성·Publication Job snapshot·Extension 입력은 변경하지 않는�
 ### AI Keyword Recommendation v1
 
 Pool의 AI 추천 5개 보기 링크는 `/content/blog/keywords/recommend`로 연결된다. Product와 추천 개수(5/10, 기본 5)를 선택한 뒤 명시적으로 요청할 때만 `POST /api/blog/keywords/recommend`를 호출한다.
-`lib/blog-keywords/recommendation.ts`는 선택 Product의 unused만 읽는다. 검색량이 있는 후보 수를 먼저 센 뒤 검색량 내림차순의 상위·중간·하위 구간 각 최대 50개와 최근 등록 최대 50개를 조회한다. 구간이 겹치면 중복 조회 위치를 줄인다. 후보를 번갈아 합치고 ID와 공백을 제거한 동일 표기를 중복 제거하며, 검색량 NULL은 후순위로 배치한다. 이는 기획 후보 선정에만 적용하며 Pool의 정규화·DB 값은 바꾸지 않는다. 서버가 읽는 키워드 행과 AI 입력 후보는 최대 200개다.
+`lib/blog-keywords/recommendation.ts`는 실행 시작에 현재 AI 설정을 읽고, 선택 Product의 unused 중 product_relevance_score NOT NULL, product_relevance_criteria_version = 현재 relevance_version인 행만 후보로 사용한다. 미평가·버전 미기록·이전 기준은 제외한다. 매우 낮은 연관도가 검색량만으로 유입되지 않도록 후보 하한은 50점이다. 서버는 연관도 75+의 검색량 상위·중간 구간, 90+의 검색량 낮은 롱테일, 50~74의 검색량 상위 검토 후보를 각 최대 50개 조회한다. 모든 순서는 ID로 동률을 고정하며 검색량 NULL은 마지막이다. 묶음을 번갈아 합치고 ID와 공백 제거 동일 표기를 중복 제거하여 최대 200개만 전달한다. HEAD count 외 조회 행도 최대 200개다. 이 표본은 전체 Pool의 모든 관련 주제를 보장하지 않는다.
 
-AI에는 Product의 name/brand/usp/target_customer/customer_problem/notes(문자열 필드당 최대 2,000자), 같은 Product의 최근 Task 30개(keyword/topic 각각 최대 500자), 후보 id/keyword/search_volume/competition와 요청 개수만 전달한다. raw_data나 전체 이력을 보내지 않는다. Product 관련성·검색 의도·주제 중복·목록 다양성을 함께 평가하며, 광고 경쟁도를 블로그 SEO 난이도로 취급하지 않는다. 검색량 구간 표본은 전체 Pool의 모든 관련 주제를 보장하지 않는다.
+AI 입력은 Product의 name/brand/usp/target_customer/customer_problem/notes(문자열당 최대 2,000자), 같은 Product의 최근 Task 30개(keyword/topic 각각 최대 500자), 요청 개수와 후보 id/keyword/searchVolume/competition/productRelevanceScore/productRelevanceReason이다. 연관도 점수와 이유는 DB 저장값을 그대로 사용하며 raw_data나 전체 이력은 보내지 않는다. AI는 Product 의미 적합성을 다시 채점하지 않는다. 별도 평가에서 확정된 연관도를 핵심 입력으로 삼고 검색량·검색 의도·정보성 콘텐츠 적합성·최근 Task 중복·유사 키워드·목록 다양성을 종합한다. 광고 경쟁도는 블로그 SEO 난이도가 아니다.
 
-공유 `lib/ai/provider.ts`와 기존 Blog OpenAI 기본 모델을 사용한다. JSON schema와 runtime 검증은 keywordId/keyword, 0~100의 score/relevanceScore/opportunityScore, searchIntent/reason/suggestedTopic/suggestedAngle을 요구한다. 실제 후보와 ID·keyword가 일치해야 하고, 중복 ID·잘못된 개수·추가 필드·범위 밖 점수는 결과 전체를 거부한다. 서버가 검증한 검색량을 결과에 합친다. 후보가 요청 수보다 적으면 가능한 수만 추천하며, 후보가 없으면 AI를 호출하지 않는다.
+공유 `lib/ai/provider.ts`와 설정의 recommendation_model(OpenAI, 기본 GPT-6.1 Sol)을 사용한다. JSON schema와 runtime 검증은 keywordId/keyword, 0~100의 score/opportunityScore, searchIntent/reason/suggestedTopic/suggestedAngle을 요구한다. 실제 후보와 ID·keyword가 일치해야 하고, 중복 ID·잘못된 개수·추가 필드·범위 밖 점수는 결과 전체를 거부한다. AI schema에는 relevanceScore가 없고 이를 응답하면 추가 필드로 거부한다. 서버는 relevanceScore를 후보의 DB product_relevance_score로만 채우고 검색량을 합친다. 후보가 5/10개보다 적으면 가능한 수만 추천하고 UI에 추가 평가 안내를 표시한다. 후보가 없으면 현재 기준 평가·저장 점수 확인을 안내하는 400 오류를 반환하며 AI를 호출하지 않는다.
 
 결과는 화면 state에만 보관하며 새로고침하면 사라진다. 작업 생성 링크는 Product·blogKeywordId·keyword·추천 topic을 기존 새 Task 폼으로 전달한다. 폼의 DB 재확인과 기존 Task 저장 trigger가 실제 상태를 보장한다. 추천 성공·실패는 DB에 쓰지 않으며 unused 상태를 유지한다. 외부 순위 조회·자동 Draft/발행·추천 history 테이블은 없다.
 
 ### Keyword AI 기준 설정
 
-전역 singleton `blog_keyword_ai_settings`는 relevance_criteria, recommendation_criteria, relevance_version(초기 1), created_at, updated_at을 보관한다. Pool 상단의 AI 기준 설정 링크는 `/content/blog/keywords/settings`로 연결된다. 두 textarea를 한 번에 저장하며 저장 중·성공·실패와 기준 변경에 따른 재평가 안내를 표시한다. `GET/PATCH /api/blog/keywords/ai-settings`는 빈 값·30,000자 초과를 거부하고 공백을 정규화한다. 저장 RPC는 updated_at 비교로 동시 편집 충돌을 409로 반환한다. DB trigger가 정규화한 relevance_criteria의 실제 변경에만 relevance_version을 증가시킨다. 동일 기준 또는 추천 기준만 수정하면 버전은 유지한다.
+전역 singleton `blog_keyword_ai_settings`는 relevance_criteria, recommendation_criteria, relevance_version(초기 1), relevance_model(기본 gpt-6-luna), recommendation_model(기본 gpt-6.1-sol), created_at, updated_at을 보관한다. Pool 상단의 AI 기준 설정 링크는 `/content/blog/keywords/settings`로 연결된다. 두 기준 textarea와 각각의 모델 선택을 한 번에 저장하며 저장 중·성공·실패와 기준 변경에 따른 재평가 안내를 표시한다. `GET/PUT/PATCH /api/blog/keywords/ai-settings`는 빈 값·30,000자 초과를 거부하고 공백을 정규화한다. 저장 RPC는 updated_at 비교로 동시 편집 충돌을 409로 반환한다. DB trigger가 정규화한 relevance_criteria의 실제 변경에만 relevance_version을 증가시킨다. 동일 기준 또는 추천 기준만 수정하면 버전은 유지한다. 모델만 변경해도 version이나 기존 점수의 현재/이전 기준 구분은 바뀌지 않으며, 다른 모델로 비교하려면 명시적 재평가를 사용한다. API는 relevanceModel/recommendationModel로 읽고 저장하며 PostgREST select alias로 DB snake_case 필드와 연결한다. 허용 모델과 label은 `BLOG_MODEL_OPTIONS.openai`를 재사용하고 허용되지 않은 모델 저장은 400으로 거절한다. DB에는 모델 목록 CHECK를 두지 않는다. 실행 화면은 현재 모델을 보조 문구로만 표시하며 변경은 설정 화면에서 한다.
 
 연관도 철학·점수 구간 의미·화장품/시술 해석과 추천 우선순위·검색량 균형·중복/다양성 기준은 DB/UI 책임이다. 현재 엄격한 연관도 기준과 추천 기준은 `202610170007_blog_keyword_ai_settings.sql`의 초기 row에 보존한다. `lib/blog-keywords/ai-settings.ts`는 실행마다 현재 설정을 읽으며 row가 없거나 잘못되면 명시적 설정 오류를 반환한다. 긴 runtime fallback은 없다. JSON schema, 점수 범위·후보 ID·중복 검증, 최대 200개 후보/50개 AI batch, status·transaction·공유 provider·안전 규칙은 코드에 남는다. 추천은 실행마다 recommendation_criteria를 prompt에 넣으며 결과 version은 저장하지 않는다.
 
@@ -194,13 +194,13 @@ Pool의 연관도는 추천 목록의 상대 점수와 별개의 저장 지표�
 
 Pool은 Excel/CSV 가져오기, AI 연관도 평가(데이터 준비), AI 추천(보조), 직접 탐색(메인 목록) 순이다. 평가 Product 선택은 Pool 필터와 독립적이다. `RelevanceEvaluation.tsx`는 현재 설정을 읽고 선택 Product의 현재 기준 완료·이전 기준·미평가를 HEAD count query로 구분한다. 평가 개수는 50/100/200(기본 50)이다. 평가 대상은 미평가만(기본, score NULL), 이전 기준만(score NOT NULL이면서 version NULL/불일치), 미평가 + 이전 기준 중 선택한다. 현재 기준으로 키워드 평가 버튼은 선택한 대상만 조회하며 현재 기준 완료 행은 제외한다. API target은 unevaluated/stale/pending만 허용하며 생략 시 unevaluated다. 평가된 키워드 재평가 버튼은 현재 version의 점수가 있는 행만 오래된 평가 시각(NULL 우선), 검색량 순으로 선택한다. 기본 평가도 검색량 있는 행을 높은 순으로 먼저 고르며, 이는 점수 신호가 아닌 처리 순서다.
 
-`POST /api/blog/keywords/relevance → lib/blog-keywords/relevance.ts`는 실행 시작에 relevance_criteria와 version을 한 번 읽어 모든 batch에 같은 snapshot을 사용한다. AI 입력은 Product 정보(문자열당 최대 2,000자)와 id/keyword만이다. 최대 50개씩 순차 실행하여 50/100/200개 요청은 최대 1/2/4회 호출한다. 전체 Pool 자동 연속 실행은 없다. 공유 provider와 기존 Blog OpenAI 기본 모델을 사용한다. Runtime 검증은 모든 batch ID가 정확히 한 번 포함되고 정수 점수가 0~100인지 검사한다. 누락·중복·외부 ID·추가 필드·잘못된 JSON/값은 해당 batch 전체를 거부한다.
+`POST /api/blog/keywords/relevance → lib/blog-keywords/relevance.ts`는 실행 시작에 relevance_criteria·relevance_model과 version을 한 번 읽어 모든 batch에 같은 snapshot을 사용한다. AI 입력은 Product 정보(문자열당 최대 2,000자)와 id/keyword만이다. 최대 50개씩 순차 실행하여 50/100/200개 요청은 최대 1/2/4회 호출한다. 전체 Pool 자동 연속 실행은 없다. 공유 provider와 시작 시 읽은 relevance_model(OpenAI, 기본 GPT-6 Luna)을 사용한다. 실행 중 모델만 바뀌어도 현재 batch 실행은 시작 모델을 유지한다. product_relevance_model에는 provider 응답의 실제 model을 저장한다. Runtime 검증은 모든 batch ID가 정확히 한 번 포함되고 정수 점수가 0~100인지 검사한다. 누락·중복·외부 ID·추가 필드·잘못된 JSON/값은 해당 batch 전체를 거부한다.
 
 검증 결과는 `save_versioned_blog_keyword_relevance` RPC transaction에서 Product·현재 version·기본/명시적 재평가 대상 조건을 다시 검사하고 version과 함께 저장한다. settings row 공유 잠금으로 기준 저장과 직렬화하며 실행 중 기준이 바뀌면 해당 batch 저장을 거부한다. status는 변경하지 않는다. 성공한 이전 batch는 유지하고 첫 실패에서 중단한다. 기존 unversioned RPC도 보존하되 해당 writer의 갱신은 version을 NULL로 표시하여 현재 기준 점수로 오인하지 않는다. 개별 keyword 지정 재평가·Product 정보 변경에 따른 자동 무효화·별도 history는 제공하지 않는다.
 
-Pool은 점수와 이유 tooltip을 유지하고 이전 점수에 이전 기준으로 평가됨을 표시한다. 전체/현재 기준 평가됨/미평가·기준변경 필요/80 이상/60 이상/40 미만 filter를 제공한다. 평가됨과 점수 임계값 필터는 반드시 현재 version만 대상으로 한다. 전체 목록의 연관도 양방향 정렬은 저장 점수 기준이며 NULL은 마지막이다. relevance URL query와 검색·Product·status·sort·pageSize·pagination은 유지한다. count와 row query는 동일 조건이다. import는 기존 평가 필드를 보존하며 추천기는 저장 연관도를 이용하도록 재설계하지 않는다.
+Pool은 점수와 이유 tooltip을 유지하고 이전 점수에 이전 기준으로 평가됨을 표시한다. 전체/현재 기준 평가됨/미평가·기준변경 필요/80 이상/60 이상/40 미만 filter를 제공한다. 평가됨과 점수 임계값 필터는 반드시 현재 version만 대상으로 한다. 전체 목록의 연관도 양방향 정렬은 저장 점수 기준이며 NULL은 마지막이다. relevance URL query와 검색·Product·status·sort·pageSize·pagination은 유지한다. count와 row query는 동일 조건이다. import는 기존 평가 필드를 보존하며 추천기는 현재 기준 저장 연관도 점수·이유를 입력으로 사용하며 이를 새로 채점하지 않는다.
 
-관련 migration 003~007은 순서대로 별도 적용해야 한다. 007은 전역 설정·기준 버전과 versioned 저장을 추가하며 기존 점수나 상태를 지우지 않는다. 앱 rollback 시 추가 필드·설정은 보존할 수 있다. 이전 앱에서 저장된 점수는 unversioned로 취급하므로 새 앱에서 다시 평가해야 한다.
+관련 migration 003~008은 순서대로 별도 적용해야 한다. 007은 전역 설정·기준 버전과 versioned 저장을 추가하며 기존 점수나 상태를 지우지 않는다. 008은 기존 singleton row에도 기본 모델을 적용하고 모델·기준을 원자적으로 저장하는 RPC를 추가한다. 기존 criteria-only RPC와 version trigger는 유지한다. 앱 rollback 시 추가 필드·설정은 보존할 수 있다. 이전 앱에서 저장된 점수는 unversioned로 취급하므로 새 앱에서 다시 평가해야 한다.
 
 ## Blog 이미지 흐름
 
@@ -387,7 +387,7 @@ kin_prompt_settings → 모든 KIN 생성의 공통 prompt
 | `ad_references` | 독립 광고 Reference. optional Product FK, 플랫폼·소재 유형·URL·태그·메모·전용 Storage 파일 경로 |
 | `blog_tasks` | 제품·keyword/topic/instructions·preset_id. 같은 Task에서 여러 draft 생성 가능 |
 | `blog_keywords` | Product별 Keyword Pool·metrics·raw_data·운영 상태. blog_tasks.blog_keyword_id는 선택적 출처 FK |
-| `blog_keyword_ai_settings` | 전역 AI 연관도·추천 기준, relevance_version, 동시 편집 확인 시각 |
+| `blog_keyword_ai_settings` | 전역 AI 연관도·추천 기준과 각 OpenAI 모델, relevance_version, 동시 편집 확인 시각 |
 | `blog_keyword_import_presets` | Product와 분리된 header signature별 column mapping·source 기본값 |
 | `blog_keyword_import_runs` | 성공 import의 Product/파일명/행 수·실제 신규/update 수·시각. 파일/Preview 미저장 |
 | `blog_drafts` | 제목·intro·sections·closing·검수 상태·provider/model·generation_snapshot. 새 Job은 approved만 등록하며 실행은 고정 snapshot 사용 |

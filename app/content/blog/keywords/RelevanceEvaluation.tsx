@@ -17,7 +17,7 @@ async function readCounts(productId: string) {
   if (evaluated.error || pending.error || scored.error) throw new Error("평가 현황 조회 실패. relevance migration과 연결 상태를 확인하세요.");
   return { evaluated: evaluated.count ?? 0, pending: pending.count ?? 0, stale: Math.max(0, (scored.count ?? 0) - (evaluated.count ?? 0)) };
 }
-export default function RelevanceEvaluation({ products }: { products: { id: string | number; name: string }[] }) {
+export default function RelevanceEvaluation({ products, modelLabel }: { products: { id: string | number; name: string }[]; modelLabel: string }) {
   const router = useRouter();
   const [productId, setProductId] = useState("");
   const [counts, setCounts] = useState<{ evaluated: number; pending: number; stale: number } | null>(null);
@@ -52,6 +52,7 @@ export default function RelevanceEvaluation({ products }: { products: { id: stri
   }
   return <section aria-label="AI 연관도 평가" className="my-6 rounded-xl border bg-white p-5">
     <h2 className="text-lg font-semibold">AI 연관도 평가</h2>
+    <p className="mt-2 text-xs text-zinc-500">현재 평가 모델: {modelLabel}</p>
     <p className="my-2 text-sm text-zinc-600">탐색을 위한 데이터 준비 단계입니다. 검색 의도를 만족하는 글에서 Product가 핵심 또는 의미 있는 보조 해결책이 되는지 평가합니다. AI 기준 설정에 저장한 기준을 사용합니다. 아래 목록 필터와 별도로 상품을 선택하세요. 검색량은 평가 순서에만 씁니다.</p>
     <label className="mb-3 inline-flex items-center gap-2">평가 Product<select aria-label="연관도 평가 Product" value={productId} disabled={busy} onChange={event => {
       setProductId(event.target.value); setCounts(null); setCountError(""); setError(""); setResult(null); setReevaluating(false);

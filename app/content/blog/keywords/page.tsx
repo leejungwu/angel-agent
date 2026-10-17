@@ -7,6 +7,7 @@ import PageSizeSelect from "./PageSizeSelect";
 import RelevanceEvaluation from "./RelevanceEvaluation";
 import { readKeywordAISettings } from "@/lib/blog-keywords/ai-settings";
 import { pendingRelevanceFilter, isStaleRelevance } from "@/lib/blog-keywords/relevance-filter";
+import { BLOG_MODEL_OPTIONS } from "@/lib/blog-generation/models";
 export const dynamic = "force-dynamic";
 type Params = Record<string, string | string[] | undefined>;
 const sorts = {
@@ -20,8 +21,13 @@ const sorts = {
 };
 export default async function BlogKeywordsPage({ searchParams }: { searchParams: Promise<Params> }) {
   const params = await searchParams;
-  let criteriaVersion = 0, settingsError = "";
-  try { criteriaVersion = (await readKeywordAISettings()).relevance_version; }
+  let criteriaVersion = 0, settingsError = "", relevanceModelLabel = "-", recommendationModelLabel = "-";
+  try {
+    const settings = await readKeywordAISettings();
+    criteriaVersion = settings.relevance_version;
+    relevanceModelLabel = BLOG_MODEL_OPTIONS.openai.find(model => model.value === settings.relevanceModel)?.label ?? "-";
+    recommendationModelLabel = BLOG_MODEL_OPTIONS.openai.find(model => model.value === settings.recommendationModel)?.label ?? "-";
+  }
   catch (cause) { settingsError = cause instanceof Error ? cause.message : "AI 기준 설정 조회 실패"; }
   const text = (key: string) => typeof params[key] === "string" ? params[key] as string : "";
   const productId = /^\d+$/.test(text("product")) && Number.isSafeInteger(Number(text("product"))) ? text("product") : "";
@@ -66,10 +72,11 @@ export default async function BlogKeywordsPage({ searchParams }: { searchParams:
   return <main className="p-10"><div className="flex items-center justify-between"><h1 className="text-3xl font-bold">Blog Keyword Pool</h1><div className="flex gap-4"><Link href="/content/blog/keywords/settings" className="underline">AI 기준 설정</Link><Link href="/content/blog" className="underline">블로그 작업</Link></div></div>
     {settingsError && <p role="alert" className="my-3 text-red-600">{settingsError}</p>}
     <KeywordImport products={products.data ?? []} />
-    <RelevanceEvaluation products={products.data ?? []} />
+    <RelevanceEvaluation products={products.data ?? []} modelLabel={relevanceModelLabel} />
     <section aria-label="AI 추천" className="my-6 rounded-xl border bg-white p-5">
       <h2 className="text-lg font-semibold">AI 추천</h2>
-      <p className="my-2 text-sm text-zinc-600">직접 탐색할 때 참고할 보조 기능입니다. 미사용 후보 중 블로그 주제로 쓸 만한 키워드와 추천 이유를 확인하세요.</p>
+      <p className="mt-2 text-xs text-zinc-500">현재 추천 모델: {recommendationModelLabel}</p>
+      <p className="my-2 text-sm text-zinc-600">직접 탐색할 때 참고할 보조 기능입니다. AI 추천은 현재 기준으로 연관도 평가가 완료된 키워드를 사용합니다. 미사용 후보의 저장된 연관도와 검색량·검색 의도·기존 글 중복·다양성을 종합해 추천합니다.</p>
       <Link href={`/content/blog/keywords/recommend${productId ? `?productId=${productId}` : ""}`} className="inline-block rounded border px-4 py-2">AI 추천 5개 보기</Link>
     </section>
     <section aria-label="Keyword Pool 직접 탐색" className="mt-8 rounded-xl border bg-white p-5">

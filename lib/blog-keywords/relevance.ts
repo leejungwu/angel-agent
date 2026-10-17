@@ -1,6 +1,5 @@
 import { supabase } from "@/lib/supabase";
 import { generateStructuredWithProvider, missingProviderKey } from "@/lib/ai/provider";
-import { BLOG_DEFAULT_MODELS } from "@/lib/blog-generation/models";
 import { KeywordError } from "./shared";
 import { readKeywordAISettings } from "./ai-settings";
 import { pendingRelevanceFilter, staleRelevanceFilter, isRelevanceTarget, type RelevanceTarget } from "./relevance-filter";
@@ -63,7 +62,7 @@ export async function evaluateProductRelevance(productId: number, batchSize = 50
     let stage = "AI";
     try {
       const response = await generateStructuredWithProvider({
-        provider: "openai", model: BLOG_DEFAULT_MODELS.openai, schemaName: "blog_keyword_relevance",
+        provider: "openai", model: settings.relevanceModel, schemaName: "blog_keyword_relevance",
         schema: relevanceSchema(batch.length), systemInstructions: `${INSTRUCTIONS}\n제품 연관도 평가 기준:\n${settings.relevance_criteria}`,
         input: JSON.stringify({ product: context, keywords: batch.map(({ id, keyword }) => ({ id, keyword })) }), maxOutputTokens: 10000,
       });

@@ -228,8 +228,10 @@ const pageDb = { from(table) {
 } };
 const importPlaceholder = () => null, evaluationPlaceholder = () => null;
 const relevanceFilters = load("lib/blog-keywords/relevance-filter.ts");
-const poolPage = load("app/content/blog/keywords/page.tsx", { "@/lib/blog-keywords/ai-settings": { async readKeywordAISettings() { return { relevance_version: 2 }; } }, "@/lib/blog-keywords/relevance-filter": relevanceFilters, "next/navigation": { redirect(url) { throw new Error(`REDIRECT:${url}`); } }, "@/lib/supabase": { supabase: pageDb }, "next/link": { default: "a", __esModule: true }, "./RelevanceEvaluation": { default: evaluationPlaceholder, __esModule: true }, "./PageSizeSelect": { default: () => null, __esModule: true }, "./KeywordImport": { default: importPlaceholder, __esModule: true }, "./KeywordActions": { default: () => null, __esModule: true } }).default;
+const blogModels = load("lib/blog-generation/models.ts");
+const poolPage = load("app/content/blog/keywords/page.tsx", { "@/lib/blog-generation/models": blogModels, "@/lib/blog-keywords/ai-settings": { async readKeywordAISettings() { return { relevance_version: 2, relevanceModel: "gpt-6-luna", recommendationModel: "gpt-6.1-sol" }; } }, "@/lib/blog-keywords/relevance-filter": relevanceFilters, "next/navigation": { redirect(url) { throw new Error(`REDIRECT:${url}`); } }, "@/lib/supabase": { supabase: pageDb }, "next/link": { default: "a", __esModule: true }, "./RelevanceEvaluation": { default: evaluationPlaceholder, __esModule: true }, "./PageSizeSelect": { default: () => null, __esModule: true }, "./KeywordImport": { default: importPlaceholder, __esModule: true }, "./KeywordActions": { default: () => null, __esModule: true } }).default;
 const poolHtml = renderToStaticMarkup(await poolPage({ searchParams: Promise.resolve({ product: "1", status: "unused", q: "눈가", sort: "volume", page: "2", pageSize: "50" }) }));
+assert.ok(poolHtml.includes("현재 추천 모델: GPT-6.1 Sol"));
 assert.ok(poolHtml.includes("4,753")); assert.ok(poolHtml.includes("keyword99")); assert.ok(!poolHtml.includes("keyword100"));
 assert.ok(queries.some(([key, value]) => key === "order" && value === "search_volume")); assert.ok(queries.some(([key, value]) => key === "status" && value === "unused"));
 const filters = { product: "1", status: "unused", q: "눈가", sort: "search_volume_desc", pageSize: "50", relevance: "80" };
@@ -240,6 +242,7 @@ for (const product of ["", "1", "2"]) {
   assert.ok(!walk(tree).some(node => node.type === "th" && node.props.children === "광고수"));
   assert.ok(!walk(tree).some(node => node.type === "option" && node.props.value === "ad_count_desc"));
   const evaluation = children.find(node => node.type === evaluationPlaceholder);
+  assert.equal(evaluation.props.modelLabel, "GPT-6 Luna");
   assert.equal("productId" in evaluation.props, false, "Pool Product is not passed to evaluation");
   assert.equal(evaluation.key, null, "Changing Pool Product does not remount evaluation");
   const importIndex = children.findIndex(node => node.type === importPlaceholder);
