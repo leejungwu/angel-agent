@@ -29,7 +29,7 @@ export default function NewBlogTaskPage() {
   useEffect(() => {
     let active = true;
     const params = new URL(window.location.href).searchParams;
-    const id = params.get("keywordId");
+    const id = params.get("blogKeywordId") ?? params.get("keywordId");
     void Promise.resolve().then(async () => {
       try {
         if (!active || !id) return;
@@ -38,6 +38,7 @@ export default function NewBlogTaskPage() {
         if (!active) return;
         if (error || !data || data.status !== "unused") throw new Error("사용 가능한 키워드를 찾지 못했습니다. Keyword Pool에서 다시 선택하세요.");
         setSourceKeywordId(data.id); setProductId(String(data.product_id)); setKeyword(data.keyword);
+        setTopic((params.get("topic") ?? "").trim().slice(0, 300));
       } catch (error) { if (active) setSourceKeywordError(error instanceof Error ? error.message : "키워드 조회 실패"); }
       finally { if (active) setSourceKeywordLoading(false); }
     });

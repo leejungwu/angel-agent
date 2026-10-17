@@ -29,6 +29,9 @@ for (const [value, expected] of [["1,200", 1200], ["0.35%", 0.35], ["", null], [
 assert.throws(() => parser.parseKeywordMapping({ search_volume: 3 }, 5));
 assert.throws(() => parser.parseKeywordMapping({ keyword: 2, search_volume: 2 }, 5));
 assert.throws(() => parser.parseKeywordMapping({ keyword: 999 }, 5));
+assert.equal("ad_count" in shared.KEYWORD_FIELDS, false);
+assert.deepEqual(parser.parseKeywordMapping({ keyword: 2, search_volume: 3, ad_count: 999 }, 5), { keyword: 2, search_volume: 3 });
+assert.throws(() => parser.parseKeywordMapping({ keyword: 2, unknown_metric: 3 }, 5));
 const shuffled = parser.keywordSheet([["경쟁도", "keyword", "총검색량"], ["중간", "테스트", "3,000"]]);
 assert.deepEqual(parser.suggestKeywordMapping(shuffled), { keyword: 1, search_volume: 2, competition: 0 });
 const csv = new File(["\uFEFF,키워드,,총검색량\n1,,실제 키워드,3000\n"], "keywords.csv");
@@ -54,11 +57,16 @@ const xlsx = zip({
   "_rels/.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
   "xl/workbook.xml": '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>',
   "xl/_rels/workbook.xml.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
-  "xl/worksheets/sheet1.xml": '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="B1" t="inlineStr"><is><t>키워드</t></is></c><c r="D1" t="inlineStr"><is><t>총검색량</t></is></c></row><row r="2"><c r="C2" t="inlineStr"><is><t>눈가주름</t></is></c><c r="D2"><v>1234</v></c></row></sheetData></worksheet>',
+  "xl/worksheets/sheet1.xml": '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="B1" t="inlineStr"><is><t>키워드</t></is></c><c r="D1" t="inlineStr"><is><t>총검색량</t></is></c><c r="L1" t="inlineStr"><is><t>월평균 노출 광고수</t></is></c></row><row r="2"><c r="C2" t="inlineStr"><is><t>눈가주름</t></is></c><c r="D2"><v>1234</v></c><c r="L2"><v>6</v></c></row></sheetData></worksheet>',
 });
 const excel = await parser.parseKeywordFile(new File([xlsx], "주름키워드.xlsx"));
 assert.match(excel.columns[2].label, /열 C/); assert.equal(excel.rows[0][2], "눈가주름");
-assert.equal(parser.prepareKeywordRows(excel, { keyword: 2, search_volume: 3 }).rows[0].search_volume, 1234);
+const legacyExcelMapping = parser.parseKeywordMapping({ keyword: 2, search_volume: 3, ad_count: 11 }, excel.columns.length);
+const legacyExcelRow = parser.prepareKeywordRows(excel, legacyExcelMapping).rows[0];
+assert.equal(legacyExcelRow.search_volume, 1234);
+assert.equal(Object.hasOwn(legacyExcelRow, "ad_count"), false);
+assert.equal(Object.hasOwn(parser.suggestKeywordMapping(excel), "ad_count"), false);
+assert.equal(legacyExcelRow.raw_data["열 L · 월평균 노출 광고수"], 6);
 
 const pool = new Map(); let calls = 0, failBatch = false;
 const lookupSizes = [];
@@ -72,26 +80,29 @@ const db = {
     return query;
   },
   async rpc(name, args) {
-    assert.equal(name, "import_blog_keywords"); assert.ok(args.p_rows.length <= 500); calls++;
+    assert.equal(name, "import_blog_keywords_counted"); assert.ok(args.p_rows.length <= 500); calls++;
     if (failBatch) return { error: { message: "fixture" } };
+    let inserted_count = 0, updated_count = 0;
     for (const row of args.p_rows) {
       assert.equal(row.status, undefined);
       const key = args.p_product_id + ":" + row.normalized_keyword, existing = pool.get(key);
-      if (existing) { for (const [field, value] of Object.entries(row)) if (value != null && !["keyword", "normalized_keyword"].includes(field)) existing[field] = value; }
-      else pool.set(key, { ...row, id: `${String(pool.size + 1).padStart(8, "0")}-0000-4000-8000-000000000001`, product_id: args.p_product_id, status: "unused" });
+      if (existing) { updated_count++; for (const [field, value] of Object.entries(row)) if (value != null && !["keyword", "normalized_keyword"].includes(field)) existing[field] = value; }
+      else { inserted_count++; pool.set(key, { ...row, id: `${String(pool.size + 1).padStart(8, "0")}-0000-4000-8000-000000000001`, product_id: args.p_product_id, status: "unused" }); }
     }
-    return { data: args.p_rows.length };
+    return { data: { inserted_count, updated_count } };
   },
 };
 const store = load("lib/blog-keywords/store.ts", { "@/lib/supabase": { supabase: db }, "./import": parser });
 let preview = await store.previewKeywordImport(1, sheet, mapping);
 assert.equal(preview.summary.inserts, 2); assert.equal(preview.summary.updates, 0);
-await store.importKeywordRows(1, prepared.rows, "외부 수집", "test.xlsx");
+assert.deepEqual(await store.importKeywordRows(1, prepared.rows, "외부 수집", "test.xlsx"), { imported: 2, inserted: 2, updated: 0 });
 pool.get("1:팔자주름시술").status = "used"; pool.get("1:눈가주름").status = "excluded";
-await store.importKeywordRows(1, prepared.rows.map(row => ({ ...row, search_volume: 5000 })), null, "test2.xlsx");
+pool.get("1:팔자주름시술").product_relevance_score = 92;
+assert.deepEqual(await store.importKeywordRows(1, prepared.rows.map(row => ({ ...row, search_volume: 5000 })), null, "test2.xlsx"), { imported: 2, inserted: 0, updated: 2 });
 assert.equal(pool.size, 2); assert.equal(pool.get("1:팔자주름시술").status, "used"); assert.equal(pool.get("1:눈가주름").status, "excluded"); assert.equal(pool.get("1:눈가주름").search_volume, 5000);
 await store.importKeywordRows(1, prepared.rows.map(row => ({ ...row, search_volume: null })), null, "test3.xlsx");
 assert.equal(pool.get("1:눈가주름").search_volume, 5000, "Empty metrics retain previously stored data");
+assert.equal(pool.get("1:팔자주름시술").product_relevance_score, 92, "Reimport preserves relevance");
 await store.importKeywordRows(2, prepared.rows, null, "test.xlsx"); assert.equal(pool.size, 4);
 preview = await store.previewKeywordImport(1, sheet, mapping); assert.equal(preview.summary.inserts, 0); assert.equal(preview.summary.updates, 2);
 const big = parser.prepareKeywordRows(parser.keywordSheet([["키워드"], ...Array.from({ length: 4753 }, (_, i) => ["키워드 " + i])]), { keyword: 0 });
@@ -102,7 +113,7 @@ assert.equal(lookupSizes.reduce((sum, size) => sum + size, 0), 4753);
 lookupSizes.length = 0;
 await store.previewKeywordImport(1, parser.keywordSheet([["키워드"], ...Array.from({ length: 101 }, (_, i) => ["긴한글키워드".repeat(20) + i])]), { keyword: 0 });
 assert.ok(lookupSizes.length > 2, "Long Korean keywords split by encoded length, not count alone");
-calls = 0; await store.importKeywordRows(1, big.rows, null, "large.xlsx"); assert.equal(calls, 10);
+calls = 0; assert.deepEqual(await store.importKeywordRows(1, big.rows, null, "large.xlsx"), { imported: 4753, inserted: 4753, updated: 0 }); assert.equal(calls, 10);
 failBatch = true; await assert.rejects(() => store.importKeywordRows(1, prepared.rows, null, "test.xlsx"), /0\/2/); failBatch = false;
 const stateRoute = load("app/api/blog/keywords/[id]/route.ts", { "@/lib/supabase": { supabase: db }, "@/lib/blog-keywords/shared": shared });
 const target = pool.get("1:팔자주름시술");
@@ -111,7 +122,7 @@ assert.equal((await patch("unused")).status, 409); target.status = "unused";
 assert.equal((await patch("excluded")).status, 200); assert.equal(target.status, "excluded");
 assert.equal((await patch("unused")).status, 200); assert.equal(target.status, "unused");
 assert.equal((await patch("used")).status, 400);
-const importRoute = load("app/api/blog/keywords/import/route.ts", { "@/lib/blog-keywords/import": parser, "@/lib/blog-keywords/store": store });
+const importRoute = load("app/api/blog/keywords/import/route.ts", { "@/lib/blog-keywords/import": parser, "@/lib/blog-keywords/store": store, "@/lib/blog-keywords/import-settings": { inspectKeywordMapping: async sheet => ({ mapping: parser.suggestKeywordMapping(sheet), presetApplied: false }), recordKeywordImport: async () => undefined, recentKeywordImports: async () => [] } });
 async function requestImport(action, map = { keyword: 2, search_volume: 3 }, product = "1") {
   const form = new FormData(); form.set("file", csv); form.set("action", action); form.set("productId", product); form.set("mapping", JSON.stringify(map));
   return importRoute.POST(new Request("http://fixture/import", { method: "POST", body: form }));
@@ -148,9 +159,16 @@ try {
   await ready(`http://fixture/content/blog/new?keywordId=${target.id}&productId=1`);
   let tree = render(); assert.equal(walk(tree).find(node => node.props?.["aria-label"] === "키워드").props.value, target.keyword);
   assert.equal(walk(tree).find(node => node.props?.["aria-label"] === "상품 선택").props.value, "1");
-  walk(tree).find(node => node.props?.["aria-label"] === "주제").props.onChange({ target: { value: "기존 주제" } });
+  const suggestedTopic = "옆잠과 얼굴 압박을 줄이는 수면 습관";
+  const recommendationUrl = shared.recommendationTaskUrl(1, { keywordId: target.id, keyword: target.keyword, suggestedTopic });
+  await ready(`http://fixture${recommendationUrl}`); tree = render();
+  assert.equal(walk(tree).find(node => node.props?.["aria-label"] === "주제").props.value, suggestedTopic);
+  assert.equal(walk(tree).find(node => node.props?.["aria-label"] === "키워드").props.value, target.keyword);
+  assert.equal(walk(tree).find(node => node.props?.["aria-label"] === "상품 선택").props.value, "1");
+  assert.equal(new URL(recommendationUrl, "http://fixture").searchParams.has("instructions"), false);
   taskFailure = true; await walk(render()).find(node => node.type === "form").props.onSubmit({ preventDefault() {} }); assert.equal(target.status, "unused"); assert.equal(tasks.length, 0);
   taskFailure = false; await walk(render()).find(node => node.type === "form").props.onSubmit({ preventDefault() {} }); assert.equal(target.status, "used"); assert.equal(tasks[0].blog_keyword_id, target.id); assert.equal(tasks[0].keyword, target.keyword);
+  assert.equal(tasks[0].topic, suggestedTopic); assert.equal(tasks[0].instructions, "");
   await ready(`http://fixture/content/blog/new?keywordId=${target.id}`);
   assert.ok(walk(render()).some(node => node.props?.role === "alert"));
   await ready("http://fixture/content/blog/new"); tree = render();
@@ -174,7 +192,7 @@ assert.ok(renderToStaticMarkup(React.createElement(importUi, { products: [{ id: 
 let importState = [], importCursor = 0, refreshes = 0;
 const interactiveImport = load("app/content/blog/keywords/KeywordImport.tsx", {
   "@/lib/blog-keywords/shared": shared,
-  react: { useRef: () => ({ current: false }), useState(initial) { const i = importCursor++; if (!(i in importState)) importState[i] = initial; return [importState[i], value => { importState[i] = value; }]; } },
+  react: { useEffect() {}, useRef: () => ({ current: false }), useState(initial) { const i = importCursor++; if (!(i in importState)) importState[i] = initial; return [importState[i], value => { importState[i] = value; }]; } },
   "next/navigation": { useRouter: () => ({ refresh() { refreshes++; } }) },
 }).default;
 const originalFetch = globalThis.fetch;
@@ -201,18 +219,36 @@ const queries = [];
 let fixtureCount = 4753;
 const pageDb = { from(table) {
   let start = 0, end = 49, head = false;
-  const query = { select(_fields, options) { if (table === "blog_keywords") { assert.equal(options.count, "exact"); head = options.head; } return this; },
-    eq(key, value) { queries.push([key, value]); return this; }, ilike(key, value) { queries.push([key, value]); return this; }, order(key, options) { queries.push(["order", key, options]); return this; },
+  const query = { select(_fields, options) { assert.ok(!_fields.includes("ad_count")); if (table === "blog_keywords") { assert.equal(options.count, "exact"); head = options.head; } return this; },
+    or(expression) { queries.push(["or", expression]); return this; },
+    is(key, value) { queries.push(["is", key, value]); return this; }, not(key, operator, value) { queries.push(["not", key, operator, value]); return this; }, gte(key, value) { queries.push(["gte", key, value]); return this; }, lt(key, value) { queries.push(["lt", key, value]); return this; }, eq(key, value) { queries.push([key, value]); return this; }, ilike(key, value) { queries.push([key, value]); return this; }, order(key, options) { queries.push(["order", key, options]); return this; },
     range(first, last) { start = first; end = last; queries.push(["range", start, end]); assert.ok([15, 30, 50].includes(end - start + 1)); return this; },
     then(resolve) { return Promise.resolve(table === "products" ? { data: [{ id: 1, name: "Product" }] } : { count: fixtureCount, data: head ? null : Array.from({ length: Math.max(0, Math.min(end + 1, fixtureCount) - start) }, (_, i) => ({ id: String(start + i), keyword: "keyword" + (start + i), product_id: 1, status: "unused", created_at: "2026-10-17T00:00:00Z" })) }).then(resolve); } };
   return query;
 } };
-const poolPage = load("app/content/blog/keywords/page.tsx", { "next/navigation": { redirect(url) { throw new Error(`REDIRECT:${url}`); } }, "@/lib/supabase": { supabase: pageDb }, "next/link": { default: "a", __esModule: true }, "./PageSizeSelect": { default: () => null, __esModule: true }, "./KeywordImport": { default: () => null, __esModule: true }, "./KeywordActions": { default: () => null, __esModule: true } }).default;
+const importPlaceholder = () => null, evaluationPlaceholder = () => null;
+const relevanceFilters = load("lib/blog-keywords/relevance-filter.ts");
+const poolPage = load("app/content/blog/keywords/page.tsx", { "@/lib/blog-keywords/ai-settings": { async readKeywordAISettings() { return { relevance_version: 2 }; } }, "@/lib/blog-keywords/relevance-filter": relevanceFilters, "next/navigation": { redirect(url) { throw new Error(`REDIRECT:${url}`); } }, "@/lib/supabase": { supabase: pageDb }, "next/link": { default: "a", __esModule: true }, "./RelevanceEvaluation": { default: evaluationPlaceholder, __esModule: true }, "./PageSizeSelect": { default: () => null, __esModule: true }, "./KeywordImport": { default: importPlaceholder, __esModule: true }, "./KeywordActions": { default: () => null, __esModule: true } }).default;
 const poolHtml = renderToStaticMarkup(await poolPage({ searchParams: Promise.resolve({ product: "1", status: "unused", q: "눈가", sort: "volume", page: "2", pageSize: "50" }) }));
 assert.ok(poolHtml.includes("4,753")); assert.ok(poolHtml.includes("keyword99")); assert.ok(!poolHtml.includes("keyword100"));
 assert.ok(queries.some(([key, value]) => key === "order" && value === "search_volume")); assert.ok(queries.some(([key, value]) => key === "status" && value === "unused"));
-const filters = { product: "1", status: "unused", q: "눈가", sort: "search_volume_desc", pageSize: "50" };
+const filters = { product: "1", status: "unused", q: "눈가", sort: "search_volume_desc", pageSize: "50", relevance: "80" };
 const list = params => poolPage({ searchParams: Promise.resolve(params) });
+for (const product of ["", "1", "2"]) {
+  const tree = await list({ product });
+  const children = tree.props.children;
+  assert.ok(!walk(tree).some(node => node.type === "th" && node.props.children === "광고수"));
+  assert.ok(!walk(tree).some(node => node.type === "option" && node.props.value === "ad_count_desc"));
+  const evaluation = children.find(node => node.type === evaluationPlaceholder);
+  assert.equal("productId" in evaluation.props, false, "Pool Product is not passed to evaluation");
+  assert.equal(evaluation.key, null, "Changing Pool Product does not remount evaluation");
+  const importIndex = children.findIndex(node => node.type === importPlaceholder);
+  const evaluationIndex = children.indexOf(evaluation);
+  const recommendationIndex = children.findIndex(node => node.props?.["aria-label"] === "AI 추천");
+  const poolIndex = children.findIndex(node => node.props?.["aria-label"] === "Keyword Pool 직접 탐색");
+  assert.ok(importIndex < evaluationIndex && evaluationIndex < recommendationIndex && recommendationIndex < poolIndex);
+  assert.ok(walk(tree).some(node => node.props?.children === "AI 추천 5개 보기" && node.props.href.startsWith("/content/blog/keywords/recommend")));
+}
 for (const page of [1, 2, 47, 96]) {
   const tree = await list({ ...filters, page: String(page) }), html = renderToStaticMarkup(tree);
   assert.ok(html.includes(`총 4,753개 · ${page} / 96페이지`));
@@ -248,7 +284,7 @@ for (const raw of [undefined, "15", "30", "50", "500", "all", "", "15.0", "030",
     assert.equal(React.Children.count(walk(tree).find(node => node.type === "tbody").props.children), Math.min(size, 4753 - (page - 1) * size));
     const form = walk(tree).find(node => node.type === "form");
     assert.equal(walk(form).find(node => node.props?.name === "page").props.value, "1");
-    for (const key of ["product", "status", "q", "sort"]) assert.equal(walk(form).find(node => node.props?.name === key).props.defaultValue, filters[key]);
+    for (const key of ["product", "status", "q", "sort", "relevance"]) assert.equal(walk(form).find(node => node.props?.name === key).props.defaultValue, filters[key]);
     const sizeControl = walk(form).find(node => node.props?.pageSize === size);
     assert.ok(sizeControl);
     for (const link of walk(tree).filter(node => node.props?.href?.startsWith("/content/blog/keywords?"))) {
@@ -283,10 +319,26 @@ for (const [before, selected, expected] of [[30, "15", 15], [15, "50", 50], [50,
   assert.ok(walk(tree).some(node => node.props?.pageSize === expected), "Reload reads size from URL");
   currentQuery = url.searchParams;
 }
-for (const [sort, column, ascending] of [[undefined, "search_volume", false], ["search_volume_desc", "search_volume", false], ["search_volume_asc", "search_volume", true], ["created_at_desc", "created_at", false], ["created_at_asc", "created_at", true], ["keyword_asc", "keyword", true], ["ad_count_desc", "ad_count", false], ["volume", "search_volume", false], ["recent", "created_at", false], ["invalid", "search_volume", false], ["toString", "search_volume", false]]) {
+for (const [sort, column, ascending] of [[undefined, "search_volume", false], ["search_volume_desc", "search_volume", false], ["search_volume_asc", "search_volume", true], ["created_at_desc", "created_at", false], ["created_at_asc", "created_at", true], ["keyword_asc", "keyword", true], ["ad_count_desc", "search_volume", false], ["relevance_desc", "product_relevance_score", false], ["relevance_asc", "product_relevance_score", true], ["volume", "search_volume", false], ["recent", "created_at", false], ["invalid", "search_volume", false], ["toString", "search_volume", false]]) {
   queries.length = 0; await list({ sort });
   assert.ok(queries.some(([kind, key, options]) => kind === "order" && key === column && options?.ascending === ascending && options.nullsFirst === false));
   assert.ok(queries.some(([kind, key]) => kind === "order" && key === "id"));
+}
+for (const [relevance, operator, value] of [["evaluated", "not", "is"], ["unevaluated", "or", relevanceFilters.pendingRelevanceFilter(2)], ["80", "gte", 80], ["60", "gte", 60], ["under40", "lt", 40]]) {
+  queries.length = 0;
+  const tree = await list({ relevance, sort: "search_volume_desc", status: "unused", q: "눈가", pageSize: "15", page: "2" });
+  if (relevance === "unevaluated") assert.equal(queries.filter(([op, expression]) => op === "or" && expression === value).length, 2);
+  else {
+    assert.equal(queries.filter(([op, key, target]) => op === operator && key === "product_relevance_score" && target === value).length, 2, "Count and row queries use identical relevance filter");
+    assert.equal(queries.filter(([key, value]) => key === "product_relevance_criteria_version" && value === 2).length, 2, "Stale scores excluded from evaluated and threshold filters");
+  }
+  if (relevance === "evaluated") assert.equal(queries.filter(([op, key, operator, target]) => op === "not" && key === "product_relevance_score" && operator === "is" && target === null).length, 2);
+  assert.ok(queries.some(([key, value]) => key === "status" && value === "unused"));
+  assert.ok(queries.some(([key, value]) => key === "keyword" && value === "%눈가%"));
+  assert.ok(walk(tree).some(node => node.type === "th" && node.props.children === "연관도"));
+  const form = walk(tree).find(node => node.type === "form");
+  assert.equal(walk(form).find(node => node.props?.name === "relevance").props.defaultValue, relevance);
+  for (const link of walk(tree).filter(node => node.props?.href?.startsWith("/content/blog/keywords?"))) assert.equal(new URL(link.props.href, "http://fixture").searchParams.get("relevance"), relevance);
 }
 for (const [page, expected] of [["999", 96], ["0", 1], ["-3", 1], ["oops", 1], ["1.5", 1], ["999999999999999999999", 1]]) {
   await assert.rejects(() => list({ ...filters, page }), error => {
@@ -300,5 +352,5 @@ fixtureCount = 0;
 assert.ok(renderToStaticMarkup(await list({})).includes("현재 0–0개"));
 fixtureCount = 51;
 await assert.rejects(() => list({ page: "96", q: "filtered" }), /page=2/);
-console.log("PASS: pagination 4753 at 15/30/50 (default 30), navigation, page window, final 3 rows, six sorts, NULLS LAST query contracts, URL preservation/reset, bounds and empty results (mock DB).");
+console.log("PASS: pagination 4753 at 15/30/50 (default 30), navigation, page window, final 3 rows, seven sorts and relevance filters, NULLS LAST query contracts, URL preservation/reset, bounds and empty results (mock DB).");
 console.log("PASS: real CSV/XLSX parser, reordered/unnamed C mapping, preview/metrics/raw data, 4753 rows in 10 batches, reimport/status preservation, Product isolation, status API, existing Task prefill/save failure/success, SQL lifecycle contracts. SQL triggers are not executed against a remote DB.");

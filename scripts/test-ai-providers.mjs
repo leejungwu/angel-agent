@@ -135,6 +135,7 @@ const GenerateBlogDraft = load("app/content/blog/[id]/GenerateBlogDraft.tsx", {
   "@/lib/blog-generation/snapshot": snapshots,
   "./BlogPresetControl": { __esModule: true, default: PresetControl },
   "./BlogGenerationDetails": { __esModule: true, default: Details },
+  "./AddPublicationJob": { __esModule: true, default: "AddPublicationJob" },
 }).default;
 function renderBlog(initialDraft = null, initialPresetId = blogPreset.id, initialDrafts = []) {
   hookIndex = 0;

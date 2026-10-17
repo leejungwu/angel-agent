@@ -34,11 +34,14 @@ export async function previewKeywordImport(productId: number, sheet: KeywordShee
     inserts: prepared.rows.length - existing.size, updates: existing.size, invalidMetricCells: prepared.invalidMetricCells, samples: prepared.rows.slice(0, 20) } };
 }
 export async function importKeywordRows(productId: number, rows: Record<string, unknown>[], source: string | null, filename: string) {
-  let imported = 0;
+  let imported = 0, inserted = 0, updated = 0;
   for (let start = 0; start < rows.length; start += 500) {
-    const { error } = await supabase.rpc("import_blog_keywords", { p_product_id: productId, p_rows: rows.slice(start, start + 500).map(row => ({ ...row, source, source_filename: filename })) });
-    if (error) throw new KeywordError(`${imported}/${rows.length}개 저장 후 중단했습니다. 상태는 유지됩니다. 같은 파일을 재import할 수 있습니다.`, 500);
-    imported += Math.min(500, rows.length - start);
+    const batch = rows.slice(start, start + 500);
+    const { data, error } = await supabase.rpc("import_blog_keywords_counted", { p_product_id: productId, p_rows: batch.map(row => ({ ...row, source, source_filename: filename })) });
+    if (error || !data || !Number.isInteger(data.inserted_count) || !Number.isInteger(data.updated_count) || data.inserted_count < 0 || data.updated_count < 0 || data.inserted_count + data.updated_count !== batch.length) {
+      throw new KeywordError(`${imported}/${rows.length}개 저장 확인 후 중단했습니다. 마지막 batch는 DB 확인이 필요할 수 있습니다. 상태는 유지됩니다. 같은 파일을 재import할 수 있습니다.`, 500);
+    }
+    imported += batch.length; inserted += data.inserted_count; updated += data.updated_count;
   }
-  return imported;
+  return { imported, inserted, updated };
 }
