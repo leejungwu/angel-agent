@@ -125,7 +125,7 @@ Draft 저장과 Task 상태 변경은 별도 DB 요청이다. Draft 편집 저�
 
 ## Blog Keyword Pool v1
 
-`/content/blog/keywords`는 Product별 SEO 키워드 목록·검색·상태·정렬·50개 단위 서버 pagination을 제공한다.
+`/content/blog/keywords`는 Product별 SEO 키워드 목록·검색·상태·정렬·15/30/50개 단위 서버 pagination(기본 30개)을 제공한다. 페이지 크기는 URL의 `pageSize`에 보존하며, 변경 시 필터·검색·정렬을 유지하고 첫 페이지로 이동한다.
 Blog 작업 목록의 Keyword Pool 링크로 접근하며, 모든 키워드를 client에 내려보내지 않는다.
 
 `KeywordImport.tsx → POST /api/blog/keywords/import`는 파일 읽기, 열 매핑 확인, Preview, Import로 진행한다.

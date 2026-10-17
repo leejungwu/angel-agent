@@ -239,7 +239,7 @@ MCP는 비즈니스 로직을 다시 만드는 곳이 아닌 기존 Angel Agent 
 ### 키워드 / 운영 분석
 
 - [x] Task별 keyword 입력
-- [x] Keyword Pool v1 — Product별 목록·검색·상태 필터·검색량/등록일 양방향·가나다/광고수 정렬·50개 서버 pagination과 페이지 이동 UI
+- [x] Keyword Pool v1 — Product별 목록·검색·상태 필터·검색량/등록일 양방향·가나다/광고수 정렬·15/30/50개 서버 pagination(기본 30개)과 페이지 이동 UI
 - [x] XLSX/CSV 열 매핑·빈 헤더 보존·Preview·500개 batch import / metrics·raw 보존
 - [x] Product별 정규화 중복 방지·재import metric 갱신·used/excluded 상태 보존
 - [x] Keyword → 기존 새 Task prefill·출처 FK / Task 저장·삭제 transaction 내 상태 연동

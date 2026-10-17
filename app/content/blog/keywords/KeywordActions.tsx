@@ -13,9 +13,9 @@ export default function KeywordActions({ id, productId, status }: { id: string; 
       const result = await response.json(); if (!response.ok) throw new Error(result.error ?? "상태 변경 실패"); router.refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "상태 변경 실패"); } finally { setBusy(false); }
   }
-  return <div className="space-y-2">
-    {status === "unused" && <Link href={`/content/blog/new?keywordId=${id}&productId=${productId}`} className="block underline">블로그 작업 만들기</Link>}
-    <button type="button" disabled={busy} onClick={() => void changeStatus()} className="rounded border px-2 py-1">{busy ? "저장 중…" : status === "unused" ? "제외" : "미사용으로"}</button>
-    {error && <p role="alert" className="text-red-600">{error}</p>}
+  return <div className="flex flex-wrap items-center gap-2">
+    {status === "unused" && <Link href={`/content/blog/new?keywordId=${id}&productId=${productId}`} className="whitespace-nowrap underline">작업 생성</Link>}
+    <button type="button" disabled={busy} onClick={() => void changeStatus()} className="whitespace-nowrap rounded border px-2 py-1">{busy ? "저장 중…" : status === "unused" ? "제외" : "미사용으로"}</button>
+    {error && <p role="alert" className="w-full text-red-600">{error}</p>}
   </div>;
 }

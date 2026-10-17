@@ -203,15 +203,15 @@ const pageDb = { from(table) {
   let start = 0, end = 49, head = false;
   const query = { select(_fields, options) { if (table === "blog_keywords") { assert.equal(options.count, "exact"); head = options.head; } return this; },
     eq(key, value) { queries.push([key, value]); return this; }, ilike(key, value) { queries.push([key, value]); return this; }, order(key, options) { queries.push(["order", key, options]); return this; },
-    range(first, last) { start = first; end = last; assert.equal(end - start, 49); return this; },
+    range(first, last) { start = first; end = last; queries.push(["range", start, end]); assert.ok([15, 30, 50].includes(end - start + 1)); return this; },
     then(resolve) { return Promise.resolve(table === "products" ? { data: [{ id: 1, name: "Product" }] } : { count: fixtureCount, data: head ? null : Array.from({ length: Math.max(0, Math.min(end + 1, fixtureCount) - start) }, (_, i) => ({ id: String(start + i), keyword: "keyword" + (start + i), product_id: 1, status: "unused", created_at: "2026-10-17T00:00:00Z" })) }).then(resolve); } };
   return query;
 } };
-const poolPage = load("app/content/blog/keywords/page.tsx", { "next/navigation": { redirect(url) { throw new Error(`REDIRECT:${url}`); } }, "@/lib/supabase": { supabase: pageDb }, "next/link": { default: "a", __esModule: true }, "./KeywordImport": { default: () => null, __esModule: true }, "./KeywordActions": { default: () => null, __esModule: true } }).default;
-const poolHtml = renderToStaticMarkup(await poolPage({ searchParams: Promise.resolve({ product: "1", status: "unused", q: "눈가", sort: "volume", page: "2" }) }));
+const poolPage = load("app/content/blog/keywords/page.tsx", { "next/navigation": { redirect(url) { throw new Error(`REDIRECT:${url}`); } }, "@/lib/supabase": { supabase: pageDb }, "next/link": { default: "a", __esModule: true }, "./PageSizeSelect": { default: () => null, __esModule: true }, "./KeywordImport": { default: () => null, __esModule: true }, "./KeywordActions": { default: () => null, __esModule: true } }).default;
+const poolHtml = renderToStaticMarkup(await poolPage({ searchParams: Promise.resolve({ product: "1", status: "unused", q: "눈가", sort: "volume", page: "2", pageSize: "50" }) }));
 assert.ok(poolHtml.includes("4,753")); assert.ok(poolHtml.includes("keyword99")); assert.ok(!poolHtml.includes("keyword100"));
 assert.ok(queries.some(([key, value]) => key === "order" && value === "search_volume")); assert.ok(queries.some(([key, value]) => key === "status" && value === "unused"));
-const filters = { product: "1", status: "unused", q: "눈가", sort: "search_volume_desc" };
+const filters = { product: "1", status: "unused", q: "눈가", sort: "search_volume_desc", pageSize: "50" };
 const list = params => poolPage({ searchParams: Promise.resolve(params) });
 for (const page of [1, 2, 47, 96]) {
   const tree = await list({ ...filters, page: String(page) }), html = renderToStaticMarkup(tree);
@@ -235,6 +235,54 @@ for (const page of [1, 2, 47, 96]) {
   const form = walk(tree).find(node => node.type === "form");
   assert.equal(walk(form).find(node => node.props?.name === "page").props.value, "1");
 }
+for (const raw of [undefined, "15", "30", "50", "500", "all", "", "15.0", "030", ["15", "50"]]) {
+  const size = ["15", "30", "50"].includes(raw) ? Number(raw) : 30;
+  const last = Math.ceil(4753 / size);
+  for (const page of [1, 2, last]) {
+    queries.length = 0;
+    const tree = await list({ ...filters, pageSize: raw, page: String(page) });
+    const html = renderToStaticMarkup(tree);
+    assert.ok(html.includes(page + " / " + last + "페이지"));
+    assert.ok(html.includes("현재 " + ((page - 1) * size + 1) + "–" + Math.min(page * size, 4753) + "개"));
+    assert.ok(queries.some(([kind, start, end]) => kind === "range" && start === (page - 1) * size && end === page * size - 1));
+    assert.equal(React.Children.count(walk(tree).find(node => node.type === "tbody").props.children), Math.min(size, 4753 - (page - 1) * size));
+    const form = walk(tree).find(node => node.type === "form");
+    assert.equal(walk(form).find(node => node.props?.name === "page").props.value, "1");
+    for (const key of ["product", "status", "q", "sort"]) assert.equal(walk(form).find(node => node.props?.name === key).props.defaultValue, filters[key]);
+    const sizeControl = walk(form).find(node => node.props?.pageSize === size);
+    assert.ok(sizeControl);
+    for (const link of walk(tree).filter(node => node.props?.href?.startsWith("/content/blog/keywords?"))) {
+      const url = new URL(link.props.href, "http://fixture");
+      assert.equal(url.searchParams.get("pageSize"), String(size));
+      for (const key of ["product", "status", "q", "sort"]) assert.equal(url.searchParams.get(key), filters[key]);
+    }
+  }
+}
+let currentQuery = new URLSearchParams({ ...filters, productId: "1", pageSize: "30", page: "5" }), pushedUrl;
+const pageSizeSelect = load("app/content/blog/keywords/PageSizeSelect.tsx", {
+  "next/navigation": {
+    useRouter: () => ({ push(url) { pushedUrl = url; } }),
+    usePathname: () => "/content/blog/keywords",
+    useSearchParams: () => currentQuery,
+  },
+}).default;
+for (const [before, selected, expected] of [[30, "15", 15], [15, "50", 50], [50, "500", 30]]) {
+  const select = pageSizeSelect({ pageSize: before });
+  assert.equal(select.props.defaultValue, before);
+  assert.deepEqual(React.Children.toArray(select.props.children).map(node => node.props.value), [15, 30, 50]);
+  pushedUrl = undefined;
+  select.props.onChange({ currentTarget: { value: selected, form: { requestSubmit() { assert.fail("Page size must not submit filter form"); } } } });
+  assert.ok(pushedUrl, "Selection immediately navigates");
+  const url = new URL(pushedUrl, "http://fixture");
+  assert.equal(url.pathname, "/content/blog/keywords");
+  assert.equal(url.searchParams.get("page"), "1");
+  assert.equal(url.searchParams.get("pageSize"), String(expected));
+  for (const key of ["product", "productId", "q", "status", "sort"]) assert.equal(url.searchParams.get(key), currentQuery.get(key));
+  const tree = await list(Object.fromEntries(url.searchParams));
+  assert.equal(React.Children.count(walk(tree).find(node => node.type === "tbody").props.children), expected);
+  assert.ok(walk(tree).some(node => node.props?.pageSize === expected), "Reload reads size from URL");
+  currentQuery = url.searchParams;
+}
 for (const [sort, column, ascending] of [[undefined, "search_volume", false], ["search_volume_desc", "search_volume", false], ["search_volume_asc", "search_volume", true], ["created_at_desc", "created_at", false], ["created_at_asc", "created_at", true], ["keyword_asc", "keyword", true], ["ad_count_desc", "ad_count", false], ["volume", "search_volume", false], ["recent", "created_at", false], ["invalid", "search_volume", false], ["toString", "search_volume", false]]) {
   queries.length = 0; await list({ sort });
   assert.ok(queries.some(([kind, key, options]) => kind === "order" && key === column && options?.ascending === ascending && options.nullsFirst === false));
@@ -252,5 +300,5 @@ fixtureCount = 0;
 assert.ok(renderToStaticMarkup(await list({})).includes("현재 0–0개"));
 fixtureCount = 51;
 await assert.rejects(() => list({ page: "96", q: "filtered" }), /page=2/);
-console.log("PASS: pagination 4753/50, navigation, page window, final 3 rows, six sorts, NULLS LAST query contracts, URL preservation/reset, bounds and empty results (mock DB).");
+console.log("PASS: pagination 4753 at 15/30/50 (default 30), navigation, page window, final 3 rows, six sorts, NULLS LAST query contracts, URL preservation/reset, bounds and empty results (mock DB).");
 console.log("PASS: real CSV/XLSX parser, reordered/unnamed C mapping, preview/metrics/raw data, 4753 rows in 10 batches, reimport/status preservation, Product isolation, status API, existing Task prefill/save failure/success, SQL lifecycle contracts. SQL triggers are not executed against a remote DB.");
